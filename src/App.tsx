@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { clsx } from "clsx";
 import { useStore, useActiveTab } from "./lib/store";
@@ -6,12 +6,14 @@ import { TooltipProvider } from "./components/ui";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { Welcome } from "./components/Welcome";
-import { QueryTab } from "./components/QueryTab";
 import { TableTab } from "./components/TableTab";
-import { RedisTab } from "./components/RedisTab";
-import { MongoTab } from "./components/MongoTab";
-import { DashboardTab } from "./components/DashboardTab";
-import { ChatPanel } from "./components/ChatPanel";
+import { Spinner } from "./components/ui";
+// Heavy screens load on first use so the window appears quickly.
+const QueryTab = lazy(() => import("./components/QueryTab").then((m) => ({ default: m.QueryTab })));
+const RedisTab = lazy(() => import("./components/RedisTab").then((m) => ({ default: m.RedisTab })));
+const MongoTab = lazy(() => import("./components/MongoTab").then((m) => ({ default: m.MongoTab })));
+const DashboardTab = lazy(() => import("./components/DashboardTab").then((m) => ({ default: m.DashboardTab })));
+const ChatPanel = lazy(() => import("./components/ChatPanel").then((m) => ({ default: m.ChatPanel })));
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { StatusBar } from "./components/StatusBar";
@@ -87,12 +89,14 @@ export default function App() {
                 {tabs.map((t) => (
                   <div key={t.id} className={clsx("absolute inset-0 flex flex-col", t.id !== activeTab?.id && "hidden")} aria-hidden={t.id !== activeTab?.id}>
                     <ErrorBoundary label="tab">
-                      {t.kind === "welcome" && <Welcome onNewConnection={() => setConnDialog({ open: true, edit: null })} />}
-                      {t.kind === "query" && <QueryTab tab={t} />}
-                      {t.kind === "table" && <TableTab tab={t} />}
-                      {t.kind === "redis" && <RedisTab tab={t} />}
-                      {t.kind === "mongo" && <MongoTab tab={t} />}
-                      {t.kind === "dashboard" && <DashboardTab tab={t} />}
+                      <Suspense fallback={<Loading />}>
+                        {t.kind === "welcome" && <Welcome onNewConnection={() => setConnDialog({ open: true, edit: null })} />}
+                        {t.kind === "query" && <QueryTab tab={t} />}
+                        {t.kind === "table" && <TableTab tab={t} />}
+                        {t.kind === "redis" && <RedisTab tab={t} />}
+                        {t.kind === "mongo" && <MongoTab tab={t} />}
+                        {t.kind === "dashboard" && <DashboardTab tab={t} />}
+                      </Suspense>
                     </ErrorBoundary>
                   </div>
                 ))}
@@ -104,7 +108,9 @@ export default function App() {
               <ResizeHandle />
               <Panel defaultSize={30} minSize={22} maxSize={55} className="min-w-[320px]">
                 <ErrorBoundary label="assistant panel">
-                  <ChatPanel onClose={() => setChatOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
+                  <Suspense fallback={<Loading />}>
+                    <ChatPanel onClose={() => setChatOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
+                  </Suspense>
                 </ErrorBoundary>
               </Panel>
             </>
@@ -116,6 +122,14 @@ export default function App() {
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       </div>
     </TooltipProvider>
+  );
+}
+
+function Loading() {
+  return (
+    <div className="flex h-full items-center justify-center gap-2 text-xs text-muted">
+      <Spinner /> Loading…
+    </div>
   );
 }
 
