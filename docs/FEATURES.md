@@ -19,3 +19,6 @@ Append-only record of shipped behaviour. Newest at the bottom.
   CSV/JSON/SQL export, query history and saved queries, Redis key browser + console, Mongo find/aggregate/edit, chat panel with
   streaming, tool cards, write approvals, chart cards, dashboard proposals, saved dashboards with auto-refresh.
 - Live smoke tests (`cargo test --test live -- --ignored`) pass for all six drivers against Docker containers.
+- Visual QA mode: `pnpm dev` then open `http://localhost:1420/?mock=1` to run the whole UI in a browser against in-page sample
+  data (src/lib/mock.ts, dev builds only). Used to screenshot every screen and fix alignment issues.
+- Per-tab error boundaries: a crash inside one tab or the assistant panel shows an inline error with "Try again" instead of a blank window.

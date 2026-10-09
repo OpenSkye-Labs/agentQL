@@ -206,7 +206,7 @@ function ConnectionNode({
           </span>
           <span className="truncate flex-1">{conn.name}</span>
           {loading && <Spinner />}
-          <span className="text-[10px] text-faint">{driverLabel(conn.driver)}</span>
+          {conn.read_only && <span className="rounded bg-warning/15 px-1 text-[10px] text-warning" title="Read-only connection">ro</span>}
           <Menu
             trigger={
               <button className="rounded p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-active" aria-label={`Actions for ${conn.name}`} onClick={(e) => e.stopPropagation()}>
@@ -219,16 +219,12 @@ function ConnectionNode({
       </ContextMenu>
       {connected && open && live && (
         <div role="group">
-          {dashboards.length > 0 && (
-            <div className="pl-5">
-              {dashboards.map((d) => (
-                <Row key={d.id} depth={1} icon={<LayoutDashboard size={13} className="text-accent" />} label={d.title} onOpen={() => openTab({ kind: "dashboard", connectionId: conn.id, title: d.title, dashboardId: d.id })} />
-              ))}
-            </div>
-          )}
+          {dashboards.map((d) => (
+            <Row key={d.id} depth={1} icon={<LayoutDashboard size={13} className="text-accent" />} label={d.title} meta="dashboard" onOpen={() => openTab({ kind: "dashboard", connectionId: conn.id, title: d.title, dashboardId: d.id })} />
+          ))}
           {isSql(conn.driver) && <SqlTree conn={conn} live={live} filter={filter} />}
           {conn.driver === "redis" && (
-            <Row depth={1} icon={<KeySquare size={13} className="text-warning" />} label={`Keys (db ${live.database || "0"})`} onOpen={() => openTab({ kind: "redis", connectionId: conn.id, title: `${conn.name} keys` })} />
+            <Row depth={1} icon={<KeySquare size={13} className="text-warning" />} label={`Keys (db ${live.database || "0"})`} onOpen={() => openTab({ kind: "redis", connectionId: conn.id, title: `Keys · ${conn.name}` })} />
           )}
           {conn.driver === "mongodb" && <MongoTree conn={conn} live={live} filter={filter} />}
         </div>

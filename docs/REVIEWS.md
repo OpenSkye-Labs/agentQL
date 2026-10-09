@@ -45,3 +45,10 @@ anchors opened through the OS.
 ## 2026-10-10 — Security scan (automated) — Redis command injection
 Keys/values were interpolated into command-line strings in `RedisTab`. Added `redis_exec(args[])` which passes
 arguments straight to `redis::cmd().arg()`; DEL/EXPIRE/PERSIST/SET now use it.
+
+## 2026-10-10 — Visual QA pass (screenshots of every screen in mock mode)
+Fixed: query tab infinite re-render (zustand selectors returning fresh arrays) that blanked the window; connection dialog
+row baselines (hint under Group) and all form grids aligned to `items-start`; sidebar names no longer truncated by the
+driver label (read-only badge instead); dashboard rows no longer double-indented; grid headers sized for name + type;
+chat input no longer shows scroll arrows; SQL blocks in chat wrap; provider dropdown no longer cramps the session title;
+pie charts cap at 7 slices + Other. Added per-tab error boundaries.

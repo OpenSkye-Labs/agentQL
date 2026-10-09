@@ -169,15 +169,15 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
           ))}
         </fieldset>
 
-        <div className="grid grid-cols-[1fr_auto_auto] gap-3 items-end">
+        <div className="grid grid-cols-[1fr_160px_auto] gap-3 items-start">
           <Field label="Name">
             <Input value={cfg.name} onChange={(e) => set("name", e.target.value)} placeholder={defaultName(cfg)} autoFocus />
           </Field>
-          <Field label="Group" hint="optional">
-            <Input value={cfg.group ?? ""} onChange={(e) => set("group", e.target.value)} placeholder="e.g. Production" className="w-36" />
+          <Field label="Group">
+            <Input value={cfg.group ?? ""} onChange={(e) => set("group", e.target.value)} placeholder="optional, e.g. Production" />
           </Field>
           <Field label="Color">
-            <fieldset className="flex h-8 items-center gap-0.5">
+            <fieldset className="flex h-8 items-center gap-0.5 -ml-1">
               <legend className="sr-only">Color</legend>
               {COLORS.map((c, i) => (
                 <label key={c} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full focus-within:outline-2 focus-within:outline-accent" title={COLOR_NAMES[i]}>
@@ -212,7 +212,7 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
             </div>
           </Field>
         ) : mode === "url" ? (
-          <Field label="URL" hint="e.g. postgres://user:pass@host:5432/db · mysql://… · redis://… · mongodb+srv://…  — the password can be left out and set below.">
+          <Field label="URL" hint="postgres://user@host:5432/db · mysql://… · redis://… · mongodb+srv://… Leave the password out and set it below.">
             <Input value={cfg.url ?? ""} onChange={(e) => set("url", e.target.value)} placeholder={`${cfg.driver === "postgres" ? "postgres" : cfg.driver === "mongodb" ? "mongodb" : cfg.driver}://user@host:${cfg.port}/${cfg.driver === "redis" ? "0" : "db"}`} className="font-mono" />
           </Field>
         ) : (
@@ -227,7 +227,7 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
         )}
 
         {!sqlite && (
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3 items-start">
             <Field label={cfg.driver === "redis" ? "Username (ACL, optional)" : "User"}>
               <Input value={cfg.user} onChange={(e) => set("user", e.target.value)} autoComplete="off" />
             </Field>
@@ -243,7 +243,7 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
         {!sqlite && (
           <details className="rounded-md border border-border">
             <summary className="cursor-default px-3 py-2 text-xs font-medium">SSL / TLS</summary>
-            <div className="grid grid-cols-2 gap-3 p-3 pt-0">
+            <div className="grid grid-cols-2 gap-3 p-3 pt-1 items-start">
               <Field label="Mode">
                 <Select value={cfg.ssl_mode ?? ""} onChange={(e) => set("ssl_mode", e.target.value || null)}>
                   <option value="">Default (prefer)</option>
@@ -280,7 +280,7 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
             <Switch checked={useSsh} onChange={setUseSsh} label="Connect over SSH tunnel" description="The database host/port above is resolved from the SSH server." />
             {useSsh && (
               <>
-                <div className="grid grid-cols-[1fr_90px_1fr] gap-3">
+                <div className="grid grid-cols-[1fr_90px_1fr] gap-3 items-start">
                   <Field label="SSH host">
                     <Input value={cfg.ssh?.host ?? ""} onChange={(e) => set("ssh", { host: e.target.value, port: cfg.ssh?.port ?? 22, user: cfg.ssh?.user ?? "", auth: "agent" })} />
                   </Field>
@@ -291,7 +291,7 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
                     <Input value={cfg.ssh?.user ?? ""} onChange={(e) => set("ssh", { host: cfg.ssh?.host ?? "", port: cfg.ssh?.port ?? 22, user: e.target.value, auth: "agent" })} />
                   </Field>
                 </div>
-                <div className="grid grid-cols-[150px_1fr_1fr] gap-3">
+                <div className="grid grid-cols-[150px_1fr_1fr] gap-3 items-start">
                   <Field label="Authentication">
                     <Select value={sshAuth} onChange={(e) => setSshAuth(e.target.value as typeof sshAuth)}>
                       <option value="agent">SSH agent</option>

@@ -154,8 +154,8 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
         <Menu
           align="start"
           trigger={
-            <button className="flex min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium hover:bg-hover" aria-label="Chat sessions">
-              <span className="truncate max-w-[160px]">{session?.title ?? "New chat"}</span>
+            <button className="flex min-w-0 flex-1 items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium hover:bg-hover" aria-label="Chat sessions">
+              <span className="truncate">{session?.title ?? "New chat"}</span>
               <ChevronDown size={12} className="text-faint" />
             </button>
           }
@@ -166,9 +166,8 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
             ...(session ? [{ separator: true, label: "" }, { label: "Delete this chat", icon: <Trash2 size={13} />, danger: true, onSelect: async () => { await api.aiDeleteSession(session.id); setSession(null); setChatOpen(true, null); await refreshSessions(); } }] : []),
           ]}
         />
-        <span className="flex-1" />
         {providers.length > 0 ? (
-          <Select value={providerId} onChange={(e) => (session ? void changeProvider(e.target.value) : void useStore.getState().saveSettings({ ...settings, default_provider: e.target.value }))} className="h-6 max-w-[150px] text-[11px] py-0" aria-label="Provider">
+          <Select value={providerId} onChange={(e) => (session ? void changeProvider(e.target.value) : void useStore.getState().saveSettings({ ...settings, default_provider: e.target.value }))} className="h-6 w-[132px] shrink-0 truncate text-[11px] py-0" aria-label="Provider">
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </Select>
         ) : (
@@ -224,11 +223,11 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
-            rows={Math.min(8, Math.max(1, draft.split("\n").length))}
-            placeholder={conn ? `Ask about ${conn.name}… (Enter to send, Shift+Enter for newline)` : "Connect to a database first"}
+            rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+            placeholder={conn ? `Ask about ${conn.name}…` : "Connect to a database first"}
             disabled={!conn}
             aria-label="Message"
-            className="flex-1 resize-none bg-transparent px-1 py-1 text-[13px] outline-none placeholder:text-faint selectable"
+            className="flex-1 resize-none overflow-y-auto bg-transparent px-1 py-1 text-[13px] outline-none placeholder:text-faint selectable"
           />
           {busy ? (
             <Button size="icon" variant="ghost" onClick={cancel} aria-label="Stop"><Square size={13} /></Button>
@@ -239,7 +238,7 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
         <div className="mt-1 flex items-center gap-2 px-1 text-[10px] text-faint">
           <span>{settings.agent_allow_writes ? "Writes allowed with approval" : "Read-only agent"}</span>
           <span className="flex-1" />
-          <span>{mod}+K toggles</span>
+          <span>Enter sends · Shift+Enter newline · {mod}+K toggles</span>
         </div>
       </form>
     </section>

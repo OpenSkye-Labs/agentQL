@@ -22,6 +22,13 @@ interface Props {
 
 export function ChartCard({ spec, data, error, loading, onAddToDashboard, onRemove, onRefresh, onShowQuery, height = 220 }: Props) {
   const { rows, xKey, yKeys } = useMemo(() => prepare(spec, data), [spec, data]);
+  const pieRows = useMemo(() => {
+    if (spec.chart_type !== "pie" || !yKeys[0]) return rows;
+    const sorted = [...rows].sort((a, b) => Number(b[yKeys[0]] ?? 0) - Number(a[yKeys[0]] ?? 0));
+    if (sorted.length <= 8) return sorted;
+    const rest = sorted.slice(7).reduce((s, r) => s + Number(r[yKeys[0]] ?? 0), 0);
+    return [...sorted.slice(0, 7), { [xKey]: "Other", [yKeys[0]]: rest }];
+  }, [rows, xKey, yKeys, spec.chart_type]);
   const num = (v: number) => (Math.abs(v) >= 1000 ? Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(v) : Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(v));
   const axis = { stroke: "var(--fg-faint)", fontSize: 11, fontFamily: "var(--font-ui)" };
   const tooltipStyle = { contentStyle: { background: "var(--bg-elev)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, color: "var(--fg)" }, labelStyle: { color: "var(--fg-muted)" }, cursor: { fill: "var(--selection)" } };
@@ -66,8 +73,8 @@ export function ChartCard({ spec, data, error, loading, onAddToDashboard, onRemo
           <ResponsiveContainer width="100%" height="100%">
             {spec.chart_type === "pie" ? (
               <PieChart>
-                <Pie data={rows} dataKey={yKeys[0]} nameKey={xKey} innerRadius="45%" outerRadius="80%" paddingAngle={1} stroke="var(--bg-elev)" strokeWidth={2}>
-                  {rows.map((_, i) => <RCell key={i} fill={SERIES[i % 8]} />)}
+                <Pie data={pieRows} dataKey={yKeys[0]} nameKey={xKey} innerRadius="45%" outerRadius="80%" paddingAngle={1} stroke="var(--bg-elev)" strokeWidth={2}>
+                  {pieRows.map((_, i) => <RCell key={i} fill={SERIES[i % 8]} />)}
                 </Pie>
                 <RTooltip {...tooltipStyle} formatter={(v) => num(Number(v))} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />

@@ -16,6 +16,7 @@ import { ConnectionDialog } from "./components/ConnectionDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { StatusBar } from "./components/StatusBar";
 import { Toasts } from "./components/Toasts";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import type { ConnectionConfig } from "./lib/types";
 import { isMac } from "./lib/format";
 
@@ -85,12 +86,14 @@ export default function App() {
               <main className="flex-1 min-h-0 relative" role="main">
                 {tabs.map((t) => (
                   <div key={t.id} className={clsx("absolute inset-0 flex flex-col", t.id !== activeTab?.id && "hidden")} aria-hidden={t.id !== activeTab?.id}>
-                    {t.kind === "welcome" && <Welcome onNewConnection={() => setConnDialog({ open: true, edit: null })} />}
-                    {t.kind === "query" && <QueryTab tab={t} />}
-                    {t.kind === "table" && <TableTab tab={t} />}
-                    {t.kind === "redis" && <RedisTab tab={t} />}
-                    {t.kind === "mongo" && <MongoTab tab={t} />}
-                    {t.kind === "dashboard" && <DashboardTab tab={t} />}
+                    <ErrorBoundary label="tab">
+                      {t.kind === "welcome" && <Welcome onNewConnection={() => setConnDialog({ open: true, edit: null })} />}
+                      {t.kind === "query" && <QueryTab tab={t} />}
+                      {t.kind === "table" && <TableTab tab={t} />}
+                      {t.kind === "redis" && <RedisTab tab={t} />}
+                      {t.kind === "mongo" && <MongoTab tab={t} />}
+                      {t.kind === "dashboard" && <DashboardTab tab={t} />}
+                    </ErrorBoundary>
                   </div>
                 ))}
               </main>
@@ -100,7 +103,9 @@ export default function App() {
             <>
               <ResizeHandle />
               <Panel defaultSize={30} minSize={22} maxSize={55} className="min-w-[320px]">
-                <ChatPanel onClose={() => setChatOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
+                <ErrorBoundary label="assistant panel">
+                  <ChatPanel onClose={() => setChatOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
+                </ErrorBoundary>
               </Panel>
             </>
           )}

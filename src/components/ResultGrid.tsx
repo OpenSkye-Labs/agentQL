@@ -63,7 +63,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
     const measure = (s: string) => (ctx ? ctx.measureText(s).width : s.length * 7);
     setWidths(
       cols.map((c, ci) => {
-        let w = measure(c.name) + 36;
+        let w = measure(c.name) + measure(c.type_name.toLowerCase()) * 0.85 + 44;
         for (const row of result.rows.slice(0, 50)) w = Math.max(w, measure(cellText(row[ci]).slice(0, 80)) + 18);
         return Math.min(420, Math.max(MIN_W, Math.ceil(w)));
       }),
@@ -236,9 +236,9 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                   className="relative flex shrink-0 items-center gap-1 border-r border-border select-none hover:bg-hover"
                   title={`${c.name} · ${c.type_name}`}
                 >
-                  <button type="button" onClick={() => headerSort(ci)} aria-label={`Sort by ${c.name}`} className="flex h-full min-w-0 flex-1 items-center gap-1 px-2 text-left">
+                  <button type="button" onClick={() => headerSort(ci)} aria-label={`Sort by ${c.name}`} className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left">
                     <span className={clsx("truncate font-semibold", primaryKeys.includes(c.name) && "text-accent")}>{c.name}</span>
-                    <span className="truncate text-[10px] text-faint">{c.type_name.toLowerCase()}</span>
+                    <span className="shrink-0 truncate text-[10px] font-normal text-faint">{c.type_name.toLowerCase()}</span>
                     {s && <span className="ml-auto text-accent">{s === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />}</span>}
                   </button>
                   <div onMouseDown={(e) => onResizeStart(ci, e)} onClick={(e) => e.stopPropagation()} className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-accent/50" aria-hidden />

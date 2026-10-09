@@ -21,8 +21,10 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const toast = useStore((s) => s.toast);
   const addHistory = useStore((s) => s.addHistory);
   const saveQuery = useStore((s) => s.saveQuery);
-  const history = useStore((s) => s.history.filter((h) => h.connection_id === tab.connectionId));
-  const savedQueries = useStore((s) => s.savedQueries.filter((q) => !q.connection_id || q.connection_id === tab.connectionId));
+  const allHistory = useStore((s) => s.history);
+  const allSaved = useStore((s) => s.savedQueries);
+  const history = useMemo(() => allHistory.filter((h) => h.connection_id === tab.connectionId), [allHistory, tab.connectionId]);
+  const savedQueries = useMemo(() => allSaved.filter((q) => !q.connection_id || q.connection_id === tab.connectionId), [allSaved, tab.connectionId]);
   const setChatOpen = useStore((s) => s.setChatOpen);
   const activeTab = useStore((s) => s.activeTab);
   const editor = useRef<SqlEditorHandle>(null);
