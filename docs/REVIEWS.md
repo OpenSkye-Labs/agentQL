@@ -72,3 +72,8 @@ pie charts cap at 7 slices + Other. Added per-tab error boundaries.
 | 11 | med | Prefill event lost when the panel was closed | Prefill lives in the store (`askAssistant`) |
 | 12 | med | Mongo collections fetched during render | Fetch in an effect with per-db loading state |
 | 13 | med | Deleting an open dashboard left no active tab | Uses `closeTab` |
+
+## 2026-10-10 — Field bug: connect stuck on “connecting”
+`keyring` (async-secret-service via zbus) blocks on its own runtime; calling it inside an async Tauri command panicked the
+tokio worker (“Cannot start a runtime from within a runtime”), so `connect` never returned. All keychain calls now run on a
+plain thread (`off_runtime` in config.rs). Added an ignored latency test (`cargo test --lib keyring_latency -- --ignored`).

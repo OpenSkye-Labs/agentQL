@@ -170,6 +170,26 @@ pub struct Store {
 
 const KEYRING_SERVICE: &str = "com.aindong.agentql";
 
+/// The keyring backend blocks on its own async runtime, which panics when called from a tokio
+/// worker (every async Tauri command). Run keychain calls on a plain thread instead.
+fn off_runtime<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|s| s.spawn(f).join().unwrap_or_else(|_| std::panic::resume_unwind(Box::new("keyring thread panicked"))))
+}
+
+fn keyring_get(key: &str) -> Option<String> {
+    off_runtime(|| keyring::Entry::new(KEYRING_SERVICE, key).ok().and_then(|e| e.get_password().ok()))
+}
+
+fn keyring_set(key: &str, value: Option<&str>) -> bool {
+    off_runtime(|| match keyring::Entry::new(KEYRING_SERVICE, key) {
+        Ok(entry) => match value {
+            Some(v) => entry.set_password(v).is_ok(),
+            None => matches!(entry.delete_credential(), Ok(()) | Err(keyring::Error::NoEntry)),
+        },
+        Err(_) => false,
+    })
+}
+
 impl Store {
     pub fn new(dir: PathBuf) -> Self {
         std::fs::create_dir_all(&dir).ok();
@@ -217,17 +237,11 @@ impl Store {
         if let Some(v) = self.secrets_fallback.lock().unwrap().get(key).cloned() {
             return Some(v);
         }
-        keyring::Entry::new(KEYRING_SERVICE, key).ok().and_then(|e| e.get_password().ok())
+        keyring_get(key)
     }
 
     pub fn set_secret(&self, key: &str, value: Option<&str>) -> Result<()> {
-        let keyring_ok = match keyring::Entry::new(KEYRING_SERVICE, key) {
-            Ok(entry) => match value {
-                Some(v) => entry.set_password(v).is_ok(),
-                None => matches!(entry.delete_credential(), Ok(()) | Err(keyring::Error::NoEntry)),
-            },
-            Err(_) => false,
-        };
+        let keyring_ok = keyring_set(key, value);
         // ponytail: plaintext local fallback when no OS keychain is reachable (e.g. WSL / headless);
         // the UI surfaces `secret_storage` so the user knows.
         let mut fb = self.secrets_fallback.lock().unwrap();
@@ -242,13 +256,13 @@ impl Store {
     }
 
     pub fn secret_storage(&self) -> &'static str {
-        match keyring::Entry::new(KEYRING_SERVICE, "__probe__") {
+        off_runtime(|| match keyring::Entry::new(KEYRING_SERVICE, "__probe__") {
             Ok(e) if e.set_password("1").is_ok() => {
                 let _ = e.delete_credential();
                 "keychain"
             }
             _ => "file",
-        }
+        })
     }
 
     pub fn connection_secrets(&self, id: &str) -> ConnectionSecrets {
@@ -385,5 +399,18 @@ mod tests {
         assert_eq!(strip_url_password("redis://localhost:6379/0").1, None);
         assert_eq!(url_with_password("mongodb+srv://cluster.x.net/db", "u", "p w"), "mongodb+srv://u:p%20w@cluster.x.net/db");
         assert_eq!(pct_decode("a%2Fb%"), "a/b%");
+    }
+}
+
+#[cfg(test)]
+mod keyring_tests {
+    #[test]
+    #[ignore]
+    fn keyring_latency() {
+        let t = std::time::Instant::now();
+        let v = super::keyring_get("__does_not_exist__");
+        println!("keyring_get(none) -> {v:?} in {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        println!("secret_storage probe -> {} in {:?}", super::Store::new(std::env::temp_dir().join("agentql-kr-test")).secret_storage(), t.elapsed());
     }
 }
