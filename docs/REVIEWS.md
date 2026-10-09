@@ -52,3 +52,23 @@ row baselines (hint under Group) and all form grids aligned to `items-start`; si
 driver label (read-only badge instead); dashboard rows no longer double-indented; grid headers sized for name + type;
 chat input no longer shows scroll arrows; SQL blocks in chat wrap; provider dropdown no longer cramps the session title;
 pie charts cap at 7 slices + Other. Added per-tab error boundaries.
+
+## 2026-10-10 — Frontend review #1 (Codex, `codex exec`, read-only sandbox)
+
+13 findings (4 high, 9 medium), all addressed:
+
+| # | Sev | Finding | Resolution |
+|---|-----|---------|------------|
+| 1 | high | Table page requests could complete out of order | Request generation counter; stale responses ignored |
+| 2 | high | Newly created chat session could be replaced by the loader | Created sessions are added to the list immediately |
+| 3 | high | Late session fetch could restore the wrong conversation | Load sequence guard |
+| 4 | high | Switching sessions mid-turn kept busy/stream state | Turn state keyed by session id; events apply to their own session |
+| 5 | med | Keyboard run bypassed the running guard | Synchronous in-flight ref + request id |
+| 6 | med | Inspector/anchor kept across result changes | Reset on result change; bounds-checked |
+| 7 | med | Inspector showed original value after “Set NULL” | `edits.has()` instead of `??` |
+| 8 | med | Copy ignored pending edits | Edits overlaid before serialising (selection and row menu) |
+| 9 | med | Shift+Tab could select column −1 | Clamped |
+| 10 | med | Untouched appended rows produced no INSERT | Tracked; backend emits `DEFAULT VALUES` / `() VALUES ()` |
+| 11 | med | Prefill event lost when the panel was closed | Prefill lives in the store (`askAssistant`) |
+| 12 | med | Mongo collections fetched during render | Fetch in an effect with per-db loading state |
+| 13 | med | Deleting an open dashboard left no active tab | Uses `closeTab` |

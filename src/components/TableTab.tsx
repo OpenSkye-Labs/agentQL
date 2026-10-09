@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { ChevronLeft, ChevronRight, Filter, Plus, RefreshCw, Save, Trash2, Undo2, Copy, Bot } from "lucide-react";
 import { api, errMsg } from "../lib/api";
@@ -15,7 +15,7 @@ export function TableTab({ tab }: { tab: TTab }) {
   const conn = useConnection(tab.connectionId);
   const toast = useStore((s) => s.toast);
   const openTab = useStore((s) => s.openTab);
-  const setChatOpen = useStore((s) => s.setChatOpen);
+  const askAssistant = useStore((s) => s.askAssistant);
   const [view, setView] = useState<"data" | "structure">("data");
   const [details, setDetails] = useState<TableDetails | null>(null);
   const [page, setPage] = useState<{ result: QueryResult; total: number | null; sql: string } | null>(null);
@@ -32,6 +32,7 @@ export function TableTab({ tab }: { tab: TTab }) {
   const [inserts, setInserts] = useState<number>(0); // number of appended blank rows
   const [preview, setPreview] = useState<string[] | null>(null);
   const [applying, setApplying] = useState(false);
+  const generation = useRef(0);
 
   const pks = useMemo(() => details?.columns.filter((c) => c.is_primary).map((c) => c.name) ?? [], [details]);
   const types = useMemo(() => Object.fromEntries(details?.columns.map((c) => [c.name, c.data_type]) ?? []), [details]);
@@ -39,18 +40,21 @@ export function TableTab({ tab }: { tab: TTab }) {
 
   const load = useCallback(async () => {
     if (!conn) return;
+    const gen = ++generation.current;
     setLoading(true);
     setError(null);
     try {
       const p = await api.fetchTable(conn.id, { schema: tab.schema, table: tab.table, filter: filter || null, order_by: sort?.column ?? null, order_desc: sort?.desc ?? false, limit, offset });
+      if (gen !== generation.current) return; // a newer request superseded this one
       setPage({ result: p.result, total: p.total, sql: p.sql_text });
       setEdits(new Map());
       setDeleted(new Set());
       setInserts(0);
     } catch (e) {
+      if (gen !== generation.current) return;
       setError(errMsg(e));
     } finally {
-      setLoading(false);
+      if (gen === generation.current) setLoading(false);
     }
   }, [conn, tab.schema, tab.table, filter, sort, limit, offset]);
 
@@ -88,9 +92,11 @@ export function TableTab({ tab }: { tab: TTab }) {
       if (r >= base) out.push({ op: "insert", values });
       else out.push({ op: "update", key: keyOf(r), values });
     }
+    // Appended rows with no edits still insert (all defaults).
+    for (let r = base; r < base + inserts; r++) if (!byRow.has(r) && !deleted.has(r)) out.push({ op: "insert", values: {} });
     for (const r of deleted) if (r < base) out.push({ op: "delete", key: keyOf(r) });
     return out;
-  }, [edits, deleted, page, pks]);
+  }, [edits, deleted, page, pks, inserts]);
 
   const onEdit = (e: GridEdit) => {
     setEdits((m) => {
@@ -168,7 +174,7 @@ export function TableTab({ tab }: { tab: TTab }) {
               )}
             </form>
             <Tooltip label="Ask the assistant about this table">
-              <Button size="sm" variant="ghost" aria-label="Ask assistant" onClick={() => { setChatOpen(true); window.dispatchEvent(new CustomEvent("agentql:chat-prefill", { detail: `Tell me about the table ${tab.schema}.${tab.table}: what it stores, interesting columns, and a quick summary of the data.` })); }}>
+              <Button size="sm" variant="ghost" aria-label="Ask assistant" onClick={() => { askAssistant(`Tell me about the table ${tab.schema}.${tab.table}: what it stores, interesting columns, and a quick summary of the data.`); }}>
                 <Bot size={13} />
               </Button>
             </Tooltip>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import {
   Bot, ChevronDown, ChevronRight, Database, Eye, FolderOpen, KeySquare, Braces, MoreHorizontal, Pencil, Plug, PlugZap, Plus, RefreshCw, Search,
@@ -125,7 +125,7 @@ function ConnectionNode({
   const toast = useStore((s) => s.toast);
   const refreshConnections = useStore((s) => s.refreshConnections);
   const refreshSchema = useStore((s) => s.refreshSchema);
-  const setChatOpen = useStore((s) => s.setChatOpen);
+  const askAssistant = useStore((s) => s.askAssistant);
   const [open, setOpen] = useState(true);
   const connected = !!live && !live.loading;
   const loading = !!live?.loading;
@@ -146,7 +146,7 @@ function ConnectionNode({
       ? { label: "Disconnect", icon: <PlugZap size={13} />, onSelect: () => void disconnect(conn.id) }
       : { label: "Connect", icon: <Plug size={13} />, onSelect: () => void connect(conn.id) },
     { label: "New query", icon: <FileCode2 size={13} />, disabled: !connected, onSelect: () => openTab({ kind: "query", connectionId: conn.id, title: "Query", sql: "" }) },
-    { label: "Ask the assistant", icon: <Bot size={13} />, disabled: !connected, onSelect: () => setChatOpen(true) },
+    { label: "Ask the assistant", icon: <Bot size={13} />, disabled: !connected, onSelect: () => askAssistant(`Give me an overview of the ${conn.name} database.`) },
     { label: "Refresh", icon: <RefreshCw size={13} />, disabled: !connected, onSelect: () => void refreshSchema(conn.id) },
     ...(connected && live && live.databases.length > 1 && conn.driver !== "mongodb"
       ? [
@@ -279,7 +279,7 @@ function tableIcon(kind: string) {
 function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveConn; filter: string }) {
   const toggleSchema = useStore((s) => s.toggleSchema);
   const openTab = useStore((s) => s.openTab);
-  const setChatOpen = useStore((s) => s.setChatOpen);
+  const askAssistant = useStore((s) => s.askAssistant);
   const f = filter.trim().toLowerCase();
   const q = (name: string) => (conn.driver === "mysql" || conn.driver === "mariadb" ? `\`${name}\`` : `"${name}"`);
   const qualified = (t: TableInfo) => (conn.driver === "sqlite" && t.schema === "main" ? q(t.name) : `${q(t.schema)}.${q(t.name)}`);
@@ -316,7 +316,7 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
                         icon: <FileCode2 size={13} />,
                         onSelect: () => openTab({ kind: "query", connectionId: conn.id, title: `${t.name} query`, sql: `SELECT *\nFROM ${qualified(t)}\nLIMIT 100;` }),
                       },
-                      { label: "Ask the assistant about this table", icon: <Bot size={13} />, onSelect: () => { setChatOpen(true); window.dispatchEvent(new CustomEvent("agentql:chat-prefill", { detail: `Describe the table ${t.schema}.${t.name} and show me a few example rows.` })); } },
+                      { label: "Ask the assistant about this table", icon: <Bot size={13} />, onSelect: () => { askAssistant(`Describe the table ${t.schema}.${t.name} and show me a few example rows.`); } },
                       { separator: true, label: "" },
                       { label: "Copy name", onSelect: () => void navigator.clipboard.writeText(t.name) },
                       { label: "Copy qualified name", onSelect: () => void navigator.clipboard.writeText(qualified(t)) },
@@ -336,31 +336,34 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
 function MongoTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveConn; filter: string }) {
   const openTab = useStore((s) => s.openTab);
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => (live.database ? { [live.database]: true } : {}));
-  const [cols, setCols] = useState<Record<string, { name: string; count: number | null }[] | undefined>>({});
+  const [cols, setCols] = useState<Record<string, { name: string; count: number | null }[] | null | undefined>>({});
   const toast = useStore((s) => s.toast);
   const f = filter.trim().toLowerCase();
 
-  const load = async (db: string) => {
-    try {
-      const list = await api.mongoCollections(conn.id, db);
-      setCols((c) => ({ ...c, [db]: list }));
-    } catch (e) {
-      toast(errMsg(e), "error");
+  // Load collections for newly expanded databases (once each; null marks a failed load).
+  useEffect(() => {
+    const pending = Object.keys(expanded).filter((db) => expanded[db] && cols[db] === undefined);
+    if (pending.length === 0) return;
+    setCols((c) => ({ ...c, ...Object.fromEntries(pending.map((db) => [db, null])) }));
+    for (const db of pending) {
+      api
+        .mongoCollections(conn.id, db)
+        .then((list) => setCols((c) => ({ ...c, [db]: list })))
+        .catch((e) => toast(errMsg(e), "error"));
     }
-  };
+  }, [expanded, cols, conn.id, toast]);
   const dbs = live.databases.filter((d) => !["admin", "local", "config"].includes(d) || d === live.database);
   return (
     <>
       {dbs.map((db) => {
         const isOpen = !!expanded[db];
-        if (isOpen && cols[db] === undefined) void load(db);
         const list = (cols[db] ?? []).filter((c) => !f || c.name.toLowerCase().includes(f));
         return (
           <div key={db}>
             <Row depth={1} icon={<Database size={13} className="text-muted" />} label={db} expanded={isOpen} onToggle={() => setExpanded((e) => ({ ...e, [db]: !e[db] }))} meta={cols[db] ? String(cols[db]!.length) : undefined} />
             {isOpen && (
               <div role="group">
-                {cols[db] === undefined && (
+                {!cols[db] && (
                   <div className="flex items-center gap-2 px-10 py-1 text-xs text-faint">
                     <Spinner /> loading…
                   </div>

@@ -69,6 +69,8 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
       }),
     );
     setSel(null);
+    setAnchor(null);
+    setInspect(null);
     setEditing(null);
   }, [cols, result.rows]);
 
@@ -113,7 +115,8 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
       const r2 = Math.max(sel.r, anchor?.r ?? sel.r);
       const c1 = Math.min(sel.c, anchor?.c ?? sel.c);
       const c2 = Math.max(sel.c, anchor?.c ?? sel.c);
-      const rows = order.slice(r1, r2 + 1).map((ri) => result.rows[ri]);
+      const withEdits = (ri: number) => result.rows[ri].map((v, ci) => (edits?.has(`${ri}:${cols[ci].name}`) ? edits.get(`${ri}:${cols[ci].name}`)! : v));
+      const rows = order.slice(r1, r2 + 1).map(withEdits);
       let text: string;
       if (asJson) {
         text = JSON.stringify(rows.map((row) => Object.fromEntries(cols.slice(c1, c2 + 1).map((c, i) => [c.name, row[c1 + i]]))), null, 2);
@@ -124,7 +127,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
       }
       void navigator.clipboard.writeText(text);
     },
-    [sel, anchor, order, result.rows, cols],
+    [sel, anchor, order, result.rows, cols, edits],
   );
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -201,7 +204,11 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
     return clientSort?.column === ci ? (clientSort.desc ? "desc" : "asc") : null;
   };
 
-  const inspectValue = inspect ? (edits?.get(`${order[inspect.r]}:${cols[inspect.c].name}`) ?? result.rows[order[inspect.r]]?.[inspect.c]) : undefined;
+  const inspectValue = (() => {
+    if (!inspect || inspect.r >= order.length || inspect.c >= cols.length) return undefined;
+    const key = `${order[inspect.r]}:${cols[inspect.c].name}`;
+    return edits?.has(key) ? edits.get(key)! : result.rows[order[inspect.r]]?.[inspect.c];
+  })();
 
   return (
     <div className={clsx("flex h-full min-h-0", className)}>
@@ -275,8 +282,8 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                         key={ci}
                         items={[
                           { label: "Copy value", onSelect: () => void navigator.clipboard.writeText(cellFull(v)) },
-                          { label: "Copy row as JSON", onSelect: () => void navigator.clipboard.writeText(JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, row[i]])), null, 2)) },
-                          { label: "Copy row as TSV", onSelect: () => void navigator.clipboard.writeText(row.map(cellText).join("\t")) },
+                          { label: "Copy row as JSON", onSelect: () => void navigator.clipboard.writeText(JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`) : row[i]])), null, 2)) },
+                          { label: "Copy row as TSV", onSelect: () => void navigator.clipboard.writeText(cols.map((cc, i) => cellText(edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`)! : row[i])).join("\t")) },
                           { label: "View value", onSelect: () => setInspect({ r: vi.index, c: ci }) },
                           ...(editable
                             ? [
@@ -321,7 +328,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                                 else if (e.key === "Tab") {
                                   e.preventDefault();
                                   commitEdit();
-                                  const c2 = Math.min(cols.length - 1, ci + (e.shiftKey ? -1 : 1));
+                                  const c2 = Math.max(0, Math.min(cols.length - 1, ci + (e.shiftKey ? -1 : 1)));
                                   setSel({ r: vi.index, c: c2 });
                                   setAnchor({ r: vi.index, c: c2 });
                                 }

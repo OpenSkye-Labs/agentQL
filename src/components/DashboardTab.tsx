@@ -14,7 +14,7 @@ export function DashboardTab({ tab }: { tab: DTab }) {
   const saveDashboard = useStore((s) => s.saveDashboard);
   const deleteDashboard = useStore((s) => s.deleteDashboard);
   const updateTab = useStore((s) => s.updateTab);
-  const setChatOpen = useStore((s) => s.setChatOpen);
+  const askAssistant = useStore((s) => s.askAssistant);
   const openTab = useStore((s) => s.openTab);
   const [data, setData] = useState<Record<string, { result?: QueryResult; error?: string; loading: boolean }>>({});
   const [interval, setIntervalSec] = useState(0);
@@ -63,7 +63,7 @@ export function DashboardTab({ tab }: { tab: DTab }) {
         {dashboard.description && <span className="truncate text-xs text-muted">{dashboard.description}</span>}
         <Tooltip label="Rename"><Button size="icon" variant="ghost" onClick={rename} aria-label="Rename dashboard"><Pencil size={13} /></Button></Tooltip>
         <span className="flex-1" />
-        <Button size="sm" onClick={() => { setChatOpen(true); window.dispatchEvent(new CustomEvent("agentql:chat-prefill", { detail: `Add a chart to my dashboard "${dashboard.title}" showing ` })); }}>
+        <Button size="sm" onClick={() => { askAssistant(`Add a chart to my dashboard "${dashboard.title}" showing `); }}>
           <Bot size={13} /> Add chart with assistant
         </Button>
         <Select value={interval} onChange={(e) => setIntervalSec(Number(e.target.value))} className="h-7 text-xs" aria-label="Auto refresh">

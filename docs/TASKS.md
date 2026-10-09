@@ -45,6 +45,6 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 
 ## Phase 5 — Polish
 - [x] Live driver smoke tests against throwaway containers (docs/TESTING.md), all 7 passing
-- [ ] Accessibility pass (focus order, ARIA, keyboard shortcuts, reduced motion, contrast)
-- [~] Codex review of backend (done) and frontend (running); fixes logged in REVIEWS.md
-- [ ] README with screenshots-free quick start
+- [x] Accessibility pass (focus order, ARIA, keyboard shortcuts, reduced motion, contrast)
+- [x] Codex review of backend (22 fixes) and frontend (13 fixes); accessibility review (15 fixes); visual QA pass — all logged in REVIEWS.md
+- [x] README with quick start

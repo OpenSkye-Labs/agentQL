@@ -44,6 +44,8 @@ interface State {
   sidebarFilter: string;
   chatOpen: boolean;
   chatSessionId: string | null;
+  /** Text queued for the assistant input (consumed by ChatPanel on mount or change). */
+  chatPrefill: string | null;
   secretStorage: "keychain" | "file" | null;
 
   init: () => Promise<void>;
@@ -71,6 +73,8 @@ interface State {
   clearHistory: () => Promise<void>;
   setSidebarFilter: (f: string) => void;
   setChatOpen: (open: boolean, sessionId?: string | null) => void;
+  askAssistant: (prefill: string) => void;
+  takeChatPrefill: () => string | null;
 }
 
 let tabSeq = 1;
@@ -92,6 +96,7 @@ export const useStore = create<State>((set, get) => ({
   sidebarFilter: "",
   chatOpen: false,
   chatSessionId: null,
+  chatPrefill: null,
   secretStorage: null,
 
   init: async () => {
@@ -252,7 +257,8 @@ export const useStore = create<State>((set, get) => ({
   deleteDashboard: async (id) => {
     const list = get().dashboards.filter((x) => x.id !== id);
     await api.kvSet("dashboards", list);
-    set({ dashboards: list, tabs: get().tabs.filter((t) => !(t.kind === "dashboard" && t.dashboardId === id)) });
+    set({ dashboards: list });
+    for (const t of get().tabs) if (t.kind === "dashboard" && t.dashboardId === id) get().closeTab(t.id);
   },
   saveQuery: async (q) => {
     const list = get().savedQueries.filter((x) => x.id !== q.id).concat(q);
@@ -275,6 +281,12 @@ export const useStore = create<State>((set, get) => ({
   },
   setSidebarFilter: (sidebarFilter) => set({ sidebarFilter }),
   setChatOpen: (chatOpen, sessionId) => set((s) => ({ chatOpen, chatSessionId: sessionId === undefined ? s.chatSessionId : sessionId })),
+  askAssistant: (prefill) => set({ chatOpen: true, chatPrefill: prefill }),
+  takeChatPrefill: () => {
+    const p = get().chatPrefill;
+    if (p !== null) set({ chatPrefill: null });
+    return p;
+  },
 }));
 
 export function emptyLive(id: string): LiveConn {

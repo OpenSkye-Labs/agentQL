@@ -440,6 +440,10 @@ impl SqlConn {
                     sets.sort();
                     format!("UPDATE {t} SET {} WHERE {}", sets.join(", "), where_of(key))
                 }
+                RowChange::Insert { values } if values.is_empty() => match self.driver {
+                    Driver::Mysql | Driver::Mariadb => format!("INSERT INTO {t} () VALUES ()"),
+                    _ => format!("INSERT INTO {t} DEFAULT VALUES"),
+                },
                 RowChange::Insert { values } => {
                     let mut cols: Vec<&String> = values.keys().collect();
                     cols.sort();

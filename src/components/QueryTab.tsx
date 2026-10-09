@@ -25,13 +25,14 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const allSaved = useStore((s) => s.savedQueries);
   const history = useMemo(() => allHistory.filter((h) => h.connection_id === tab.connectionId), [allHistory, tab.connectionId]);
   const savedQueries = useMemo(() => allSaved.filter((q) => !q.connection_id || q.connection_id === tab.connectionId), [allSaved, tab.connectionId]);
-  const setChatOpen = useStore((s) => s.setChatOpen);
+  const askAssistant = useStore((s) => s.askAssistant);
   const activeTab = useStore((s) => s.activeTab);
   const editor = useRef<SqlEditorHandle>(null);
   const [results, setResults] = useState<QueryResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [active, setActive] = useState(0);
+  const inFlight = useRef(0);
 
   const schema: SQLNamespace | undefined = useMemo(() => {
     if (!live) return undefined;
@@ -47,12 +48,14 @@ export function QueryTab({ tab }: { tab: QTab }) {
 
   const run = useCallback(
     async (sqlText: string, explain?: "plain" | "analyze") => {
-      if (!sqlText.trim() || !conn) return;
+      if (!sqlText.trim() || !conn || inFlight.current) return;
+      const id = ++inFlight.current;
       setRunning(true);
       setError(null);
       const started = performance.now();
       try {
         const res = explain ? [await api.explainQuery(conn.id, sqlText, explain === "analyze")] : await api.runQuery(conn.id, sqlText);
+        if (inFlight.current !== id) return;
         setResults(res);
         setActive(res.length - 1);
         if (!explain) {
@@ -62,10 +65,14 @@ export function QueryTab({ tab }: { tab: QTab }) {
         const first = sqlText.trim().split("\n")[0].slice(0, 32);
         if (tab.title === "Query" || tab.title.endsWith("…")) updateTab(tab.id, { title: first.length < sqlText.trim().length ? `${first}…` : first });
       } catch (e) {
+        if (inFlight.current !== id) return;
         setError(errMsg(e));
         void addHistory({ id: crypto.randomUUID(), connection_id: conn.id, sql: sqlText, ts: new Date().toISOString(), duration_ms: Math.round(performance.now() - started), ok: false });
       } finally {
-        setRunning(false);
+        if (inFlight.current === id) {
+          inFlight.current = 0;
+          setRunning(false);
+        }
       }
     },
     [conn, tab.id, tab.title, updateTab, addHistory],
@@ -98,10 +105,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
     }
   };
 
-  const askAgent = (prompt: string) => {
-    setChatOpen(true);
-    window.dispatchEvent(new CustomEvent("agentql:chat-prefill", { detail: prompt }));
-  };
+  const askAgent = (prompt: string) => askAssistant(prompt);
 
   if (!conn) return <Empty title="Connection removed" />;
   const current = results?.[active];
@@ -226,7 +230,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
                 </div>
               ) : running ? (
                 <div className="flex h-full items-center justify-center gap-2 text-xs text-muted">
-                  <Spinner /> Running… <Button size="sm" variant="ghost" onClick={() => setRunning(false)}><StopCircle size={12} /> Hide</Button>
+                  <Spinner /> Running… <Button size="sm" variant="ghost" onClick={() => { inFlight.current = 0; setRunning(false); }}><StopCircle size={12} /> Hide</Button>
                 </div>
               ) : current ? (
                 current.columns.length > 0 ? (

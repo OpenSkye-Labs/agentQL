@@ -12,6 +12,9 @@ import { ResultGrid } from "./ResultGrid";
 import { mod } from "../lib/format";
 
 interface Approval { id: string; description: string; statement: string }
+interface ToolRun { id: string; name: string; input: unknown; result?: { content: string; is_error: boolean; display?: unknown } }
+/** Live state of one in-progress turn, keyed by session id so switching sessions never loses it. */
+interface Turn { text: string; tools: ToolRun[]; status?: string; approval?: Approval | null }
 
 export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; onOpenSettings: () => void }) {
   const activeTab = useActiveTab();
@@ -27,16 +30,21 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
 
   const connId = activeTab?.connectionId && live[activeTab.connectionId] ? activeTab.connectionId : Object.keys(live)[0] ?? null;
   const conn = connections.find((c) => c.id === connId) ?? null;
+  const prefill = useStore((s) => s.chatPrefill);
+  const takeChatPrefill = useStore((s) => s.takeChatPrefill);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [session, setSession] = useState<ChatSession | null>(null);
   const [draft, setDraft] = useState("");
-  const [streaming, setStreaming] = useState<{ text: string; tools: { id: string; name: string; input: unknown; result?: { content: string; is_error: boolean; display?: unknown } }[]; status?: string } | null>(null);
-  const [approval, setApproval] = useState<Approval | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [turns, setTurns] = useState<Record<string, Turn>>({});
+  const loadSeq = useRef(0);
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const providers = settings.providers;
   const providerId = session?.provider_id ?? settings.default_provider ?? providers[0]?.id ?? "";
+  const streaming: Turn | null = session ? (turns[session.id] ?? null) : null;
+  const approval = streaming?.approval ?? null;
+  const busy = !!streaming;
+  const patchTurn = useCallback((id: string, f: (t: Turn) => Turn) => setTurns((all) => ({ ...all, [id]: f(all[id] ?? { text: "", tools: [] }) })), []);
 
   const refreshSessions = useCallback(async () => {
     if (!connId) return;
@@ -47,40 +55,46 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
     void refreshSessions();
   }, [refreshSessions]);
 
-  // Load the requested/most recent session for this connection.
+  // Load the requested/most recent session for this connection; late responses are ignored.
   useEffect(() => {
     if (!connId) { setSession(null); return; }
     const id = chatSessionId && sessions.some((s) => s.id === chatSessionId && s.connection_id === connId) ? chatSessionId : sessions.find((s) => s.connection_id === connId)?.id;
     if (!id) { setSession(null); return; }
     if (session?.id === id) return;
-    api.aiGetSession(id).then(setSession).catch(() => setSession(null));
+    const seq = ++loadSeq.current;
+    api
+      .aiGetSession(id)
+      .then((s) => { if (seq === loadSeq.current) setSession(s); })
+      .catch(() => { if (seq === loadSeq.current) setSession(null); });
   }, [connId, chatSessionId, sessions, session?.id]);
 
-  // Agent events
+  // Agent events: applied to the turn of whichever session they belong to.
   useEffect(() => {
     const un = listen<{ session_id: string; event: AgentEvent }>("ai:event", ({ payload }) => {
-      if (!session || payload.session_id !== session.id) return;
+      const sid = payload.session_id;
       const ev = payload.event;
-      if (ev.kind === "text_delta") setStreaming((s) => ({ text: (s?.text ?? "") + ev.text, tools: s?.tools ?? [] }));
-      else if (ev.kind === "tool_call") setStreaming((s) => ({ text: s?.text ?? "", tools: [...(s?.tools ?? []), { id: ev.id, name: ev.name, input: ev.input }] }));
-      else if (ev.kind === "tool_result") setStreaming((s) => ({ text: s?.text ?? "", tools: (s?.tools ?? []).map((t) => (t.id === ev.id ? { ...t, result: { content: ev.content, is_error: ev.is_error, display: ev.display } } : t)) }));
-      else if (ev.kind === "status") setStreaming((s) => ({ text: s?.text ?? "", tools: s?.tools ?? [], status: ev.text }));
-      else if (ev.kind === "approval_request") setApproval({ id: ev.id, description: ev.description, statement: ev.statement });
-      else if (ev.kind === "error") { toast(ev.message, "error"); }
-      else if (ev.kind === "done") { setSession(ev.session); setStreaming(null); setBusy(false); setApproval(null); void refreshSessions(); }
+      if (ev.kind === "text_delta") patchTurn(sid, (t) => ({ ...t, text: t.text + ev.text }));
+      else if (ev.kind === "tool_call") patchTurn(sid, (t) => ({ ...t, tools: [...t.tools, { id: ev.id, name: ev.name, input: ev.input }] }));
+      else if (ev.kind === "tool_result") patchTurn(sid, (t) => ({ ...t, tools: t.tools.map((x) => (x.id === ev.id ? { ...x, result: { content: ev.content, is_error: ev.is_error, display: ev.display } } : x)) }));
+      else if (ev.kind === "status") patchTurn(sid, (t) => ({ ...t, status: ev.text }));
+      else if (ev.kind === "approval_request") patchTurn(sid, (t) => ({ ...t, approval: { id: ev.id, description: ev.description, statement: ev.statement } }));
+      else if (ev.kind === "error") toast(ev.message, "error");
+      else if (ev.kind === "done") {
+        setTurns((all) => { const n = { ...all }; delete n[sid]; return n; });
+        setSession((cur) => (cur?.id === sid ? ev.session : cur));
+        void refreshSessions();
+      }
     });
     return () => { void un.then((f) => f()); };
-  }, [session, toast, refreshSessions]);
+  }, [patchTurn, toast, refreshSessions]);
 
-  // Prefill from elsewhere in the app
+  // Prefill queued from elsewhere in the app (store-backed, so it survives the panel mounting late).
   useEffect(() => {
-    const onPrefill = (e: Event) => {
-      setDraft((e as CustomEvent<string>).detail);
-      setTimeout(() => input.current?.focus(), 50);
-    };
-    window.addEventListener("agentql:chat-prefill", onPrefill);
-    return () => window.removeEventListener("agentql:chat-prefill", onPrefill);
-  }, []);
+    if (prefill === null) return;
+    setDraft(prefill);
+    takeChatPrefill();
+    setTimeout(() => input.current?.focus(), 50);
+  }, [prefill, takeChatPrefill]);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
@@ -90,9 +104,10 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
     if (!connId) return;
     if (!providerId) { toast("Add an AI provider in Settings first", "error"); onOpenSettings(); return; }
     const s = await api.aiCreateSession(connId, providerId);
+    loadSeq.current++;
+    setSessions((list) => [s, ...list]);
     setSession(s);
     setChatOpen(true, s.id);
-    await refreshSessions();
   };
 
   const send = async () => {
@@ -102,19 +117,19 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
     let s = session;
     if (!s) {
       s = await api.aiCreateSession(connId, providerId);
-      setSession(s);
+      loadSeq.current++;
+      setSessions((list) => [s!, ...list]);
       setChatOpen(true, s.id);
     }
-    setBusy(true);
+    const sid = s.id;
     setDraft("");
-    setStreaming({ text: "", tools: [] });
+    patchTurn(sid, (t) => t);
     setSession({ ...s, messages: [...s.messages, { role: "user", blocks: [{ type: "text", text }], ts: new Date().toISOString() }] });
     try {
-      await api.aiSend(s.id, text);
+      await api.aiSend(sid, text);
     } catch (e) {
       toast(errMsg(e), "error");
-      setBusy(false);
-      setStreaming(null);
+      setTurns((all) => { const n = { ...all }; delete n[sid]; return n; });
     }
   };
 
@@ -203,8 +218,8 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
                 <div className="mb-1 text-xs font-semibold">{approval.description}</div>
                 <pre className="mb-2 max-h-40 overflow-auto scroll rounded bg-sunken p-2 font-mono text-xs whitespace-pre-wrap selectable">{approval.statement}</pre>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="primary" autoFocus onClick={() => { void api.aiResolveApproval(approval.id, true); setApproval(null); }}><Check size={12} /> Run it</Button>
-                  <Button size="sm" onClick={() => { void api.aiResolveApproval(approval.id, false); setApproval(null); }}>Deny</Button>
+                  <Button size="sm" variant="primary" autoFocus onClick={() => { void api.aiResolveApproval(approval.id, true); patchTurn(session!.id, (t) => ({ ...t, approval: null })); }}><Check size={12} /> Run it</Button>
+                  <Button size="sm" onClick={() => { void api.aiResolveApproval(approval.id, false); patchTurn(session!.id, (t) => ({ ...t, approval: null })); }}>Deny</Button>
                 </div>
               </div>
             )}

@@ -14,7 +14,7 @@ endpoint such as Ollama/OpenRouter/Groq) to chat with data, write/optimise SQL a
 | 2 | AI backend | Provider abstraction (Anthropic, OpenAI-compatible, Claude CLI, Codex CLI), tool loop, write approval, in-process MCP endpoint, chat persistence | done |
 | 3 | Frontend shell | Connection manager, sidebar schema tree, tabs, SQL editor (CodeMirror), virtualised result grid, table browser with inline edit + pending changes, Redis/Mongo browsers | done |
 | 4 | AI frontend | Chat panel with streaming, tool-call cards, approvals, inline charts, "optimise query", dashboard builder + saved dashboards | done |
-| 5 | Polish | Accessibility pass (keyboard, ARIA, focus, reduced motion, contrast), themes, export CSV/JSON, saved queries, history, Codex review loop, docs | in progress |
+| 5 | Polish | Accessibility pass (keyboard, ARIA, focus, reduced motion, contrast), themes, export CSV/JSON, saved queries, history, Codex review loop, docs | done |
 
 ## Non-goals (for now)
 - Schema designer / ER diagrams, data migration between servers, team sync. Add when asked.

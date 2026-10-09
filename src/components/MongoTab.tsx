@@ -13,7 +13,7 @@ type MTab = Extract<Tab, { kind: "mongo" }>;
 export function MongoTab({ tab }: { tab: MTab }) {
   const conn = useConnection(tab.connectionId);
   const toast = useStore((s) => s.toast);
-  const setChatOpen = useStore((s) => s.setChatOpen);
+  const askAssistant = useStore((s) => s.askAssistant);
   const [mode, setMode] = useState<"find" | "aggregate">("find");
   const [view, setView] = useState<"json" | "table">("json");
   const [filter, setFilter] = useState("{}");
@@ -121,7 +121,7 @@ export function MongoTab({ tab }: { tab: MTab }) {
           <span className="flex-1 text-xs text-muted">Edit the pipeline below and run.</span>
         )}
         <Tooltip label="Ask the assistant about this collection">
-          <Button size="sm" variant="ghost" aria-label="Ask assistant" onClick={() => { setChatOpen(true); window.dispatchEvent(new CustomEvent("agentql:chat-prefill", { detail: `Describe the collection ${tab.db}.${tab.collection}: fields, indexes, and a few sample documents.` })); }}><Bot size={13} /></Button>
+          <Button size="sm" variant="ghost" aria-label="Ask assistant" onClick={() => { askAssistant(`Describe the collection ${tab.db}.${tab.collection}: fields, indexes, and a few sample documents.`); }}><Bot size={13} /></Button>
         </Tooltip>
         <Tooltip label="Collection info"><Button size="sm" variant="ghost" aria-label="Collection info" onClick={() => setShowInfo(true)}><Info size={13} /></Button></Tooltip>
         {!conn.read_only && (
