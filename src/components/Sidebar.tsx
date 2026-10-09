@@ -148,6 +148,16 @@ function ConnectionNode({
     { label: "New query", icon: <FileCode2 size={13} />, disabled: !connected, onSelect: () => openTab({ kind: "query", connectionId: conn.id, title: "Query", sql: "" }) },
     { label: "Ask the assistant", icon: <Bot size={13} />, disabled: !connected, onSelect: () => setChatOpen(true) },
     { label: "Refresh", icon: <RefreshCw size={13} />, disabled: !connected, onSelect: () => void refreshSchema(conn.id) },
+    ...(connected && live && live.databases.length > 1 && conn.driver !== "mongodb"
+      ? [
+          { separator: true, label: "" },
+          { label: `Database: ${live.database || "default"}`, disabled: true },
+          ...live.databases
+            .filter((d) => d !== live.database)
+            .slice(0, 25)
+            .map((d) => ({ label: `Switch to ${d}`, icon: <Database size={13} />, onSelect: () => void connect(conn.id, d) })),
+        ]
+      : []),
     { separator: true, label: "" },
     { label: "Edit connection…", icon: <Pencil size={13} />, onSelect: onEdit },
     {
