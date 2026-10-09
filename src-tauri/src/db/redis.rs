@@ -107,7 +107,20 @@ impl RedisConn {
             "stream" => redis::cmd("XLEN").arg(key).query_async(&mut con).await.unwrap_or(0),
             _ => 0,
         };
-        Ok(json!({ "key": key, "type": kind, "ttl": ttl, "size": size, "value": to_json(value) }))
+        let mut value = to_json(value);
+        // RESP2 returns hashes as a flat [field, value, ...] array; normalise to an object.
+        if kind == "hash" {
+            if let Value::Array(items) = &value {
+                let mut map = serde_json::Map::new();
+                for pair in items.chunks(2) {
+                    if let [k, v] = pair {
+                        map.insert(k.as_str().map(str::to_string).unwrap_or_else(|| k.to_string()), v.clone());
+                    }
+                }
+                value = Value::Object(map);
+            }
+        }
+        Ok(json!({ "key": key, "type": kind, "ttl": ttl, "size": size, "value": value }))
     }
 
     /// Run a raw command given as whitespace separated text (quotes honoured).

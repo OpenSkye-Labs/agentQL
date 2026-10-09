@@ -186,27 +186,29 @@ impl SqlConn {
     async fn run_one_opts(&self, sql: &str, limit: u32, read_only: bool) -> Result<QueryResult> {
         let start = Instant::now();
         let mut res = match (&self.pool, read_only) {
-            (Pool::Pg(p), false) => exec_stream!(p, sql, limit, pg_value),
-            (Pool::My(p), false) => exec_stream!(p, sql, limit, mysql_value),
-            (Pool::Lite(p), false) => exec_stream!(p, sql, limit, sqlite_value),
+            (Pool::Pg(p), false) => exec_stream!(p, sql, limit, pg_value)?,
+            (Pool::My(p), false) => exec_stream!(p, sql, limit, mysql_value)?,
+            (Pool::Lite(p), false) => exec_stream!(p, sql, limit, sqlite_value)?,
             (Pool::Pg(p), true) => {
                 let mut tx = p.begin().await?;
                 sqlx::query("SET TRANSACTION READ ONLY").execute(&mut *tx).await?;
-                let r: Result<QueryResult> = (async { Ok(exec_stream!(&mut *tx, sql, limit, pg_value)) }).await;
+                let r = exec_stream!(&mut *tx, sql, limit, pg_value);
                 let _ = tx.rollback().await;
                 r?
             }
             (Pool::My(p), true) => {
+                // START TRANSACTION is not preparable on MySQL; SET TRANSACTION (next txn only) + begin() is.
                 let mut conn = p.acquire().await?;
-                sqlx::query("START TRANSACTION READ ONLY").execute(&mut *conn).await?;
-                let r: Result<QueryResult> = (async { Ok(exec_stream!(&mut *conn, sql, limit, mysql_value)) }).await;
-                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                sqlx::query("SET TRANSACTION READ ONLY").execute(&mut *conn).await?;
+                let mut tx = sqlx::Connection::begin(&mut *conn).await?;
+                let r = exec_stream!(&mut *tx, sql, limit, mysql_value);
+                let _ = tx.rollback().await;
                 r?
             }
             (Pool::Lite(p), true) => {
                 let mut conn = p.acquire().await?;
                 sqlx::query("PRAGMA query_only = 1").execute(&mut *conn).await?;
-                let r: Result<QueryResult> = (async { Ok(exec_stream!(&mut *conn, sql, limit, sqlite_value)) }).await;
+                let r = exec_stream!(&mut *conn, sql, limit, sqlite_value);
                 let _ = sqlx::query("PRAGMA query_only = 0").execute(&mut *conn).await;
                 r?
             }
@@ -827,10 +829,10 @@ macro_rules! exec_stream {
             }
         }
         drop(stream);
-        if let Some(e) = failure {
-            return Err(e.into());
+        match failure {
+            Some(e) => Err::<QueryResult, AppError>(e.into()),
+            None => Ok(res),
         }
-        res
     }};
 }
 use exec_stream;

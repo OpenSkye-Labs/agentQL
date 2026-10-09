@@ -31,19 +31,20 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] Connection manager dialog (all drivers, SSH, SSL, URL mode, test connection)
 - [x] Sidebar schema tree with search
 - [x] Tab system (query, table, chat, dashboard, redis, mongo)
-- [ ] SQL editor (CodeMirror 6, schema-aware autocomplete, run selection, Cmd/Ctrl+Enter)
-- [ ] Virtualised result grid, cell inspector, copy, export
-- [ ] Table browser: paging, filter, sort, inline edit, pending changes preview, structure tab
-- [ ] Redis browser · Mongo browser
-- [ ] Query history + saved queries
+- [x] SQL editor (CodeMirror 6, schema-aware autocomplete, run selection, Cmd/Ctrl+Enter)
+- [x] Virtualised result grid, cell inspector, copy, export
+- [x] Table browser: paging, filter, sort, inline edit, pending changes preview, structure tab
+- [x] Redis browser · Mongo browser
+- [x] Query history + saved queries
 
 ## Phase 4 — AI frontend
 - [x] Provider settings (API keys, CLI detection, model list)
-- [ ] Chat panel: streaming, tool cards, approval dialog, insert SQL into editor
-- [ ] Charts in chat, dashboards page (grid of charts, refresh, save)
-- [ ] "Optimise this query" / "Explain" actions from editor
+- [x] Chat panel: streaming, tool cards, approval dialog, insert SQL into editor
+- [x] Charts in chat, dashboards page (grid of charts, refresh, save)
+- [x] "Optimise this query" / "Explain" actions from editor
 
 ## Phase 5 — Polish
+- [x] Live driver smoke tests against throwaway containers (docs/TESTING.md), all 7 passing
 - [ ] Accessibility pass (focus order, ARIA, keyboard shortcuts, reduced motion, contrast)
-- [ ] Codex review of backend and frontend; fixes logged in REVIEWS.md
+- [~] Codex review of backend (done) and frontend (running); fixes logged in REVIEWS.md
 - [ ] README with screenshots-free quick start

@@ -13,3 +13,9 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - SSH host keys are pinned on first use (`ssh_known_hosts.json`); a changed key blocks the connection until forgotten.
 - Agent providers: Anthropic API, OpenAI API, OpenAI-compatible endpoints, Claude Code CLI and Codex CLI (both via an in-process MCP endpoint with bearer auth).
 - Agent tools: list_schemas, list_tables, describe_table, run_sql (approval for writes), explain_sql, create_chart, propose_dashboard, redis_scan/redis_command, list_databases/list_collections/describe_collection/mongo_find/mongo_aggregate.
+- Frontend shipped: connection manager (fields/URL, SSL, SSH agent/key/password, colour, groups, test), sidebar schema tree with filter,
+  tabs (query/table/redis/mongo/dashboard), CodeMirror SQL editor with schema completion and run-at-cursor, virtualised grid with
+  keyboard navigation, cell inspector, copy TSV/JSON, inline editing → reviewable SQL, filter/sort/paging, structure + DDL view,
+  CSV/JSON/SQL export, query history and saved queries, Redis key browser + console, Mongo find/aggregate/edit, chat panel with
+  streaming, tool cards, write approvals, chart cards, dashboard proposals, saved dashboards with auto-refresh.
+- Live smoke tests (`cargo test --test live -- --ignored`) pass for all six drivers against Docker containers.
