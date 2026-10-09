@@ -1,0 +1,359 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { clsx } from "clsx";
+import { ArrowDown, ArrowUp, X } from "lucide-react";
+import type { Cell, QueryResult } from "../lib/types";
+import { cellFull, cellText, parseCell } from "../lib/format";
+import { ContextMenu, Button } from "./ui";
+
+export interface GridEdit {
+  rowIndex: number;
+  column: string;
+  value: Cell;
+}
+
+interface Props {
+  result: QueryResult;
+  /** Enables cell editing; edited cells are reported via onEdit. */
+  editable?: boolean;
+  edits?: Map<string, Cell>; // key `${row}:${col}`
+  deletedRows?: Set<number>;
+  onEdit?: (e: GridEdit) => void;
+  onDeleteRows?: (rows: number[]) => void;
+  sort?: { column: string; desc: boolean } | null;
+  onSort?: (column: string) => void;
+  className?: string;
+  primaryKeys?: string[];
+}
+
+const ROW_H = 26;
+const MIN_W = 60;
+
+export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDeleteRows, sort, onSort, className, primaryKeys = [] }: Props) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
+  const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null);
+  const [editing, setEditing] = useState<{ r: number; c: number; text: string } | null>(null);
+  const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
+  const [widths, setWidths] = useState<number[]>([]);
+  const [clientSort, setClientSort] = useState<{ column: number; desc: boolean } | null>(null);
+
+  const cols = result.columns;
+  // Client-side sort only when the parent does not handle sorting.
+  const order = useMemo(() => {
+    const idx = result.rows.map((_, i) => i);
+    if (!clientSort || onSort) return idx;
+    const { column, desc } = clientSort;
+    idx.sort((a, b) => {
+      const va = result.rows[a][column];
+      const vb = result.rows[b][column];
+      if (va === null) return 1;
+      if (vb === null) return -1;
+      const r = typeof va === "number" && typeof vb === "number" ? va - vb : String(cellText(va)).localeCompare(String(cellText(vb)), undefined, { numeric: true });
+      return desc ? -r : r;
+    });
+    return idx;
+  }, [result.rows, clientSort, onSort]);
+
+  useEffect(() => {
+    // Measure widths from header + first 50 rows.
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (ctx) ctx.font = "12px ui-monospace, monospace";
+    const measure = (s: string) => (ctx ? ctx.measureText(s).width : s.length * 7);
+    setWidths(
+      cols.map((c, ci) => {
+        let w = measure(c.name) + 36;
+        for (const row of result.rows.slice(0, 50)) w = Math.max(w, measure(cellText(row[ci]).slice(0, 80)) + 18);
+        return Math.min(420, Math.max(MIN_W, Math.ceil(w)));
+      }),
+    );
+    setSel(null);
+    setEditing(null);
+  }, [cols, result.rows]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: order.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_H,
+    overscan: 12,
+  });
+
+  const totalW = widths.reduce((a, b) => a + b, 0) + 48;
+
+  const startEdit = useCallback(
+    (r: number, c: number) => {
+      if (!editable) return;
+      const rowIdx = order[r];
+      const key = `${rowIdx}:${cols[c].name}`;
+      const cur = edits?.has(key) ? edits.get(key)! : result.rows[rowIdx][c];
+      setEditing({ r, c, text: cellFull(cur) });
+    },
+    [editable, order, cols, edits, result.rows],
+  );
+
+  const commitEdit = useCallback(
+    (setNull = false) => {
+      if (!editing) return;
+      const rowIdx = order[editing.r];
+      const col = cols[editing.c];
+      const original = result.rows[rowIdx][editing.c];
+      const value = setNull ? null : parseCell(editing.text, col.type_name, original);
+      onEdit?.({ rowIndex: rowIdx, column: col.name, value });
+      setEditing(null);
+    },
+    [editing, order, cols, result.rows, onEdit],
+  );
+
+  const copySelection = useCallback(
+    (asJson = false) => {
+      if (!sel) return;
+      const r1 = Math.min(sel.r, anchor?.r ?? sel.r);
+      const r2 = Math.max(sel.r, anchor?.r ?? sel.r);
+      const c1 = Math.min(sel.c, anchor?.c ?? sel.c);
+      const c2 = Math.max(sel.c, anchor?.c ?? sel.c);
+      const rows = order.slice(r1, r2 + 1).map((ri) => result.rows[ri]);
+      let text: string;
+      if (asJson) {
+        text = JSON.stringify(rows.map((row) => Object.fromEntries(cols.slice(c1, c2 + 1).map((c, i) => [c.name, row[c1 + i]]))), null, 2);
+      } else if (r1 === r2 && c1 === c2) {
+        text = cellFull(rows[0][c1]);
+      } else {
+        text = rows.map((row) => row.slice(c1, c2 + 1).map(cellText).join("\t")).join("\n");
+      }
+      void navigator.clipboard.writeText(text);
+    },
+    [sel, anchor, order, result.rows, cols],
+  );
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (editing) return;
+    if (!sel) return;
+    const move = (dr: number, dc: number) => {
+      e.preventDefault();
+      const r = Math.max(0, Math.min(order.length - 1, sel.r + dr));
+      const c = Math.max(0, Math.min(cols.length - 1, sel.c + dc));
+      setSel({ r, c });
+      if (!e.shiftKey) setAnchor({ r, c });
+      rowVirtualizer.scrollToIndex(r);
+    };
+    if (e.key === "ArrowDown") move(1, 0);
+    else if (e.key === "ArrowUp") move(-1, 0);
+    else if (e.key === "ArrowLeft") move(0, -1);
+    else if (e.key === "ArrowRight") move(0, 1);
+    else if (e.key === "PageDown") move(20, 0);
+    else if (e.key === "PageUp") move(-20, 0);
+    else if (e.key === "Home") move(0, -cols.length);
+    else if (e.key === "End") move(0, cols.length);
+    else if (e.key === "Enter" || e.key === "F2") {
+      e.preventDefault();
+      startEdit(sel.r, sel.c);
+    } else if ((e.key === "c" || e.key === "C") && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      copySelection(e.shiftKey);
+    } else if (e.key === " ") {
+      e.preventDefault();
+      setInspect(sel);
+    } else if ((e.key === "Delete" || e.key === "Backspace") && editable) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        const r1 = Math.min(sel.r, anchor?.r ?? sel.r);
+        const r2 = Math.max(sel.r, anchor?.r ?? sel.r);
+        onDeleteRows?.(order.slice(r1, r2 + 1));
+      } else onEdit?.({ rowIndex: order[sel.r], column: cols[sel.c].name, value: null });
+    } else if (editable && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      setEditing({ r: sel.r, c: sel.c, text: e.key });
+      e.preventDefault();
+    }
+  };
+
+  const inSelection = (r: number, c: number) => {
+    if (!sel) return false;
+    const a = anchor ?? sel;
+    return r >= Math.min(sel.r, a.r) && r <= Math.max(sel.r, a.r) && c >= Math.min(sel.c, a.c) && c <= Math.max(sel.c, a.c);
+  };
+
+  const resizing = useRef<{ c: number; x: number; w: number } | null>(null);
+  const onResizeStart = (c: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizing.current = { c, x: e.clientX, w: widths[c] };
+    const onMove = (ev: MouseEvent) => {
+      if (!resizing.current) return;
+      const w = Math.max(MIN_W, resizing.current.w + ev.clientX - resizing.current.x);
+      setWidths((ws) => ws.map((x, i) => (i === resizing.current!.c ? w : x)));
+    };
+    const onUp = () => {
+      resizing.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const headerSort = (ci: number) => {
+    if (onSort) onSort(cols[ci].name);
+    else setClientSort((s) => (s?.column === ci ? (s.desc ? null : { column: ci, desc: true }) : { column: ci, desc: false }));
+  };
+  const sortState = (ci: number): "asc" | "desc" | null => {
+    if (onSort) return sort?.column === cols[ci].name ? (sort.desc ? "desc" : "asc") : null;
+    return clientSort?.column === ci ? (clientSort.desc ? "desc" : "asc") : null;
+  };
+
+  const inspectValue = inspect ? (edits?.get(`${order[inspect.r]}:${cols[inspect.c].name}`) ?? result.rows[order[inspect.r]]?.[inspect.c]) : undefined;
+
+  return (
+    <div className={clsx("flex h-full min-h-0", className)}>
+      <div
+        ref={parentRef}
+        className="flex-1 overflow-auto scroll bg-elev font-mono text-xs outline-none"
+        tabIndex={0}
+        role="grid"
+        aria-rowcount={order.length}
+        aria-colcount={cols.length}
+        onKeyDown={onKeyDown}
+      >
+        <div style={{ width: totalW, position: "relative" }}>
+          {/* header */}
+          <div className="sticky top-0 z-10 flex h-7 border-b border-border bg-sunken" role="row">
+            <div className="sticky left-0 z-20 w-12 shrink-0 border-r border-border bg-sunken" role="columnheader" aria-label="Row number" />
+            {cols.map((c, ci) => {
+              const s = sortState(ci);
+              return (
+                <div
+                  key={ci}
+                  role="columnheader"
+                  aria-sort={s === "asc" ? "ascending" : s === "desc" ? "descending" : "none"}
+                  style={{ width: widths[ci] }}
+                  className="relative flex shrink-0 items-center gap-1 border-r border-border px-2 select-none hover:bg-hover"
+                  onClick={() => headerSort(ci)}
+                  title={`${c.name} · ${c.type_name}`}
+                >
+                  <span className={clsx("truncate font-semibold", primaryKeys.includes(c.name) && "text-accent")}>{c.name}</span>
+                  <span className="truncate text-[10px] text-faint">{c.type_name.toLowerCase()}</span>
+                  {s && <span className="ml-auto text-accent">{s === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />}</span>}
+                  <div onMouseDown={(e) => onResizeStart(ci, e)} onClick={(e) => e.stopPropagation()} className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-accent/50" aria-hidden />
+                </div>
+              );
+            })}
+          </div>
+          {/* rows */}
+          <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
+            {rowVirtualizer.getVirtualItems().map((vi) => {
+              const rowIdx = order[vi.index];
+              const row = result.rows[rowIdx];
+              const deleted = deletedRows?.has(rowIdx);
+              return (
+                <div
+                  key={vi.key}
+                  role="row"
+                  aria-rowindex={vi.index + 1}
+                  className={clsx("absolute left-0 flex", vi.index % 2 ? "bg-elev" : "bg-bg/40", deleted && "line-through opacity-50")}
+                  style={{ top: vi.start, height: ROW_H, width: totalW }}
+                >
+                  <div className="sticky left-0 z-[5] flex w-12 shrink-0 items-center justify-end border-b border-r border-border bg-sunken px-1.5 text-[10px] text-faint tabular-nums" role="rowheader">
+                    {rowIdx + 1}
+                  </div>
+                  {cols.map((c, ci) => {
+                    const key = `${rowIdx}:${c.name}`;
+                    const edited = edits?.has(key);
+                    const v = edited ? edits!.get(key)! : row[ci];
+                    const isEditing = editing && editing.r === vi.index && editing.c === ci;
+                    const selected = inSelection(vi.index, ci);
+                    const focused = sel?.r === vi.index && sel?.c === ci;
+                    return (
+                      <ContextMenu
+                        key={ci}
+                        items={[
+                          { label: "Copy value", onSelect: () => void navigator.clipboard.writeText(cellFull(v)) },
+                          { label: "Copy row as JSON", onSelect: () => void navigator.clipboard.writeText(JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, row[i]])), null, 2)) },
+                          { label: "Copy row as TSV", onSelect: () => void navigator.clipboard.writeText(row.map(cellText).join("\t")) },
+                          { label: "View value", onSelect: () => setInspect({ r: vi.index, c: ci }) },
+                          ...(editable
+                            ? [
+                                { separator: true, label: "" },
+                                { label: "Edit cell", onSelect: () => startEdit(vi.index, ci) },
+                                { label: "Set NULL", onSelect: () => onEdit?.({ rowIndex: rowIdx, column: c.name, value: null }) },
+                                { label: "Delete row", danger: true, onSelect: () => onDeleteRows?.([rowIdx]) },
+                              ]
+                            : []),
+                        ]}
+                      >
+                        <div
+                          role="gridcell"
+                          aria-selected={selected}
+                          style={{ width: widths[ci] }}
+                          className={clsx(
+                            "relative flex shrink-0 items-center overflow-hidden border-b border-r border-border px-2 whitespace-nowrap",
+                            selected && "bg-[var(--selection)]",
+                            focused && "outline outline-1 -outline-offset-1 outline-accent",
+                            edited && "bg-warning/15",
+                          )}
+                          onMouseDown={(e) => {
+                            setSel({ r: vi.index, c: ci });
+                            if (!e.shiftKey) setAnchor({ r: vi.index, c: ci });
+                            setInspect((i) => (i ? { r: vi.index, c: ci } : i));
+                          }}
+                          onDoubleClick={() => (editable ? startEdit(vi.index, ci) : setInspect({ r: vi.index, c: ci }))}
+                        >
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              value={editing.text}
+                              onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                              onBlur={() => commitEdit()}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") commitEdit();
+                                else if (e.key === "Escape") setEditing(null);
+                                else if (e.key === "Tab") {
+                                  e.preventDefault();
+                                  commitEdit();
+                                  const c2 = Math.min(cols.length - 1, ci + (e.shiftKey ? -1 : 1));
+                                  setSel({ r: vi.index, c: c2 });
+                                  setAnchor({ r: vi.index, c: c2 });
+                                }
+                                e.stopPropagation();
+                              }}
+                              aria-label={`Edit ${c.name}`}
+                              className="absolute inset-0 w-full bg-elev px-2 font-mono text-xs outline outline-2 -outline-offset-2 outline-accent selectable"
+                            />
+                          ) : v === null ? (
+                            <span className="italic text-[var(--null)]">NULL</span>
+                          ) : (
+                            <span className={clsx("truncate", typeof v === "number" && "ml-auto tabular-nums", typeof v === "boolean" && "text-accent")}>{cellText(v)}</span>
+                          )}
+                        </div>
+                      </ContextMenu>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+          {order.length === 0 && <div className="p-6 text-center text-xs text-muted font-sans">No rows</div>}
+        </div>
+      </div>
+      {inspect && inspectValue !== undefined && (
+        <aside className="flex w-80 shrink-0 flex-col border-l border-border bg-elev" aria-label="Cell inspector">
+          <div className="flex h-7 items-center gap-2 border-b border-border px-2 text-xs">
+            <span className="font-semibold truncate">{cols[inspect.c].name}</span>
+            <span className="text-faint">{cols[inspect.c].type_name}</span>
+            <span className="flex-1" />
+            <Button variant="ghost" size="icon" onClick={() => setInspect(null)} aria-label="Close inspector">
+              <X size={13} />
+            </Button>
+          </div>
+          <textarea
+            readOnly
+            value={inspectValue === null ? "NULL" : cellFull(inspectValue)}
+            className="flex-1 resize-none bg-elev p-2 font-mono text-xs outline-none selectable"
+            aria-label="Cell value"
+          />
+          <div className="flex gap-1 border-t border-border p-1.5">
+            <Button size="sm" onClick={() => void navigator.clipboard.writeText(cellFull(inspectValue))}>Copy</Button>
+            {editable && <Button size="sm" onClick={() => startEdit(inspect.r, inspect.c)}>Edit</Button>}
+          </div>
+        </aside>
+      )}
+    </div>
+  );
+}

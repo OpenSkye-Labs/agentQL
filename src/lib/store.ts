@@ -11,6 +11,9 @@ export type Tab =
   | { id: string; kind: "mongo"; connectionId: string; title: string; db: string; collection: string }
   | { id: string; kind: "welcome"; connectionId: null; title: string };
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type NewTab = DistributiveOmit<Tab, "id"> & { id?: string };
+
 export interface Toast {
   id: number;
   kind: "info" | "error" | "success";
@@ -51,7 +54,7 @@ interface State {
   refreshSchema: (connId: string) => Promise<void>;
   toggleSchema: (connId: string, schema: string) => void;
 
-  openTab: (tab: Omit<Tab, "id"> & { id?: string }) => string;
+  openTab: (tab: NewTab) => string;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   updateTab: (id: string, patch: Partial<Tab>) => void;
@@ -189,20 +192,23 @@ export const useStore = create<State>((set, get) => ({
   },
 
   openTab: (tab) => {
-    const existing =
-      tab.kind === "table"
-        ? get().tabs.find((t) => t.kind === "table" && t.connectionId === tab.connectionId && t.schema === tab.schema && t.table === tab.table)
-        : tab.kind === "mongo"
-          ? get().tabs.find((t) => t.kind === "mongo" && t.connectionId === tab.connectionId && t.db === tab.db && t.collection === tab.collection)
-          : tab.kind === "redis" || tab.kind === "dashboard" || tab.kind === "chat"
-            ? get().tabs.find(
-                (t) =>
-                  t.kind === tab.kind &&
-                  t.connectionId === tab.connectionId &&
-                  (tab.kind !== "dashboard" || (t as { dashboardId?: string }).dashboardId === tab.dashboardId) &&
-                  (tab.kind !== "chat" || (t as { sessionId?: string }).sessionId === tab.sessionId),
-              )
-            : undefined;
+    const existing = get().tabs.find((t) => {
+      if (t.kind !== tab.kind || t.connectionId !== tab.connectionId) return false;
+      switch (tab.kind) {
+        case "table":
+          return t.kind === "table" && t.schema === tab.schema && t.table === tab.table;
+        case "mongo":
+          return t.kind === "mongo" && t.db === tab.db && t.collection === tab.collection;
+        case "dashboard":
+          return t.kind === "dashboard" && t.dashboardId === tab.dashboardId;
+        case "chat":
+          return t.kind === "chat" && t.sessionId === tab.sessionId;
+        case "redis":
+          return true;
+        default:
+          return false;
+      }
+    });
     if (existing) {
       set({ activeTab: existing.id });
       return existing.id;

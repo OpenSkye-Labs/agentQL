@@ -33,10 +33,11 @@ export const api = {
   listTables: (id: string, schema: string) => invoke<TableInfo[]>("list_tables", { id, schema }),
   tableDetails: (id: string, schema: string, table: string) => invoke<TableDetails>("table_details", { id, schema, table }),
   fetchTable: (id: string, query: TableQuery) => invoke<TablePage>("fetch_table", { id, query }),
-  previewChanges: (id: string, schema: string | null, table: string, changes: RowChange[]) =>
-    invoke<string[]>("preview_changes", { id, schema, table, changes }),
-  applyChanges: (id: string, schema: string | null, table: string, changes: RowChange[]) =>
-    invoke<number>("apply_changes", { id, schema, table, changes }),
+  previewChanges: (id: string, schema: string | null, table: string, changes: RowChange[], types?: Record<string, string>) =>
+    invoke<string[]>("preview_changes", { id, schema, table, changes, types }),
+  applyChanges: (id: string, schema: string | null, table: string, changes: RowChange[], types?: Record<string, string>) =>
+    invoke<number>("apply_changes", { id, schema, table, changes, types }),
+  sshForgetHost: (host: string, port: number) => invoke<void>("ssh_forget_host", { host, port }),
   exportRows: (path: string, format: "csv" | "json" | "sql", columns: string[], rows: Cell[][]) =>
     invoke<number>("export_rows", { path, format, columns, rows }),
 
