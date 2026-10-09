@@ -237,7 +237,8 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
         (Live::Sql(c), "run_sql") => {
             let sql = str_arg(input, "sql").ok_or("sql is required")?;
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(200).min(2000) as u32;
-            if !is_read_only(conn.config.driver, sql) {
+            let read_only = is_read_only(conn.config.driver, sql);
+            if !read_only {
                 if !writes_allowed {
                     return Ok(err("This statement writes data. Writes by the agent are disabled (Settings → AI → allow writes), or the connection is read-only. Ask the user to run it themselves by giving them the SQL."));
                 }
@@ -245,7 +246,7 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
                     return Ok(err("The user declined to run this statement."));
                 }
             }
-            let results = c.run(sql, limit).await?;
+            let results = if read_only { c.run_read_only(sql, limit).await? } else { c.run(sql, limit).await? };
             let mut text = String::new();
             for r in &results {
                 text.push_str(&format_result(r, 50));
@@ -260,7 +261,7 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
                 return Ok(err("EXPLAIN ANALYZE would execute a write statement; run plain explain instead."));
             }
             let stmt = split_statements(sql).into_iter().next().unwrap_or_default();
-            let r = c.run_one(&c.explain_sql(&stmt, analyze), 5000).await?;
+            let r = c.run_one_read_only(&c.explain_sql(&stmt, analyze), 5000).await?;
             let plan: Vec<String> = r.rows.iter().map(|row| row.iter().map(cell_text).collect::<Vec<_>>().join(" | ")).collect();
             Ok(ok(plan.join("\n"), Some(json!({"type": "plan", "plan": plan.join("\n")}))))
         }
@@ -315,8 +316,13 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
             let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
             let coll = str_arg(input, "collection").ok_or("collection is required")?;
             let pipeline = input.get("pipeline").ok_or("pipeline is required")?;
-            if pipeline_writes(pipeline) && !writes_allowed {
-                return Ok(err("$out / $merge stages write data; agent writes are disabled."));
+            if pipeline_writes(pipeline) {
+                if !writes_allowed {
+                    return Ok(err("$out / $merge stages write data; agent writes are disabled."));
+                }
+                if !ctx.request_approval(&session.id, "The agent wants to run a writing aggregation ($out/$merge)", &pipeline.to_string()).await {
+                    return Ok(err("The user declined to run this pipeline."));
+                }
             }
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100).min(2000) as usize;
             let docs = m.aggregate(&db, coll, pipeline, limit).await?;
@@ -324,7 +330,7 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
         }
         (_, "create_chart") => {
             let spec = chart_spec(input, &conn.config.driver)?;
-            let data = run_chart_source(ctx, &session.connection_id, &spec["source"], writes_allowed).await?;
+            let data = run_chart_source(ctx, &session.connection_id, &spec["source"]).await?;
             let summary = format!("Chart '{}' ready: {} rows, columns {}", spec["title"].as_str().unwrap_or(""), data.rows.len(), data.columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>().join(", "));
             Ok(ok(summary, Some(json!({"type": "chart", "spec": spec, "data": data}))))
         }
@@ -335,7 +341,7 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
             let mut notes = vec![];
             for c in charts {
                 let spec = chart_spec(c, &conn.config.driver)?;
-                match run_chart_source(ctx, &session.connection_id, &spec["source"], writes_allowed).await {
+                match run_chart_source(ctx, &session.connection_id, &spec["source"]).await {
                     Ok(data) => {
                         notes.push(format!("✓ {} ({} rows)", spec["title"].as_str().unwrap_or(""), data.rows.len()));
                         out.push(json!({"spec": spec, "data": data}));
@@ -352,9 +358,7 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
     }
 }
 
-fn pipeline_writes(p: &Value) -> bool {
-    p.as_array().map(|a| a.iter().any(|s| s.get("$out").is_some() || s.get("$merge").is_some())).unwrap_or(false)
-}
+use crate::db::mongo::pipeline_writes;
 
 /// Normalised chart spec stored in dashboards: {title, description, chart_type, x, y[], source}.
 pub fn chart_spec(input: &Value, driver: &Driver) -> crate::error::Result<Value> {
@@ -379,22 +383,23 @@ pub fn chart_spec(input: &Value, driver: &Driver) -> crate::error::Result<Value>
 }
 
 /// Execute a chart source and return tabular data. Shared by the agent and the dashboards page.
-pub async fn run_chart_source(ctx: &Ctx, connection_id: &str, source: &Value, allow_writes: bool) -> crate::error::Result<QueryResult> {
+/// Chart sources are always read-only (classifier + database-enforced).
+pub async fn run_chart_source(ctx: &Ctx, connection_id: &str, source: &Value) -> crate::error::Result<QueryResult> {
     let conn = ctx.manager.get(connection_id).await?;
     match (&conn.live, source.get("kind").and_then(|k| k.as_str())) {
         (Live::Sql(c), Some("sql")) => {
             let sql = source.get("sql").and_then(|s| s.as_str()).ok_or("missing sql")?;
-            if !allow_writes && !is_read_only(conn.config.driver, sql) {
+            if !is_read_only(conn.config.driver, sql) {
                 return Err("chart queries must be read-only".into());
             }
-            let mut results = c.run(sql, 5000).await?;
+            let mut results = c.run_read_only(sql, 5000).await?;
             results.pop().ok_or_else(|| "query returned nothing".into())
         }
         (Live::Mongo(m), Some("mongo")) => {
             let db = source.get("db").and_then(|s| s.as_str()).map(str::to_string).or_else(|| m.default_db.clone()).ok_or("missing db")?;
             let coll = source.get("collection").and_then(|s| s.as_str()).ok_or("missing collection")?;
             let pipeline = source.get("pipeline").ok_or("missing pipeline")?;
-            if pipeline_writes(pipeline) && !allow_writes {
+            if pipeline_writes(pipeline) {
                 return Err("chart pipelines must be read-only".into());
             }
             let docs = m.aggregate(&db, coll, pipeline, 5000).await?;

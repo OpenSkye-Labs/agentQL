@@ -9,18 +9,51 @@ use russh::keys::{PrivateKeyWithHashAlg, load_secret_key};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-struct Handler;
+struct Handler {
+    host_id: String,
+    known_hosts_path: std::path::PathBuf,
+}
 
+/// Trust-on-first-use host key pinning stored as `{ "host:port": "fingerprint" }`.
+/// A changed key is rejected until the user removes the entry (Connection menu → Forget SSH host key).
 impl client::Handler for Handler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _key: &russh::keys::PublicKeyOrCertificate,
+        key: &russh::keys::PublicKeyOrCertificate,
     ) -> std::result::Result<bool, Self::Error> {
-        // ponytail: accept any host key; add known_hosts pinning when a user asks for it.
-        Ok(true)
+        let fp = match key {
+            russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } => key.fingerprint(Default::default()).to_string(),
+            russh::keys::PublicKeyOrCertificate::Certificate(c) => c.public_key().fingerprint(Default::default()).to_string(),
+        };
+        let mut known: std::collections::HashMap<String, String> = std::fs::read(&self.known_hosts_path)
+            .ok()
+            .and_then(|d| serde_json::from_slice(&d).ok())
+            .unwrap_or_default();
+        match known.get(&self.host_id) {
+            Some(stored) if stored == &fp => Ok(true),
+            Some(stored) => {
+                eprintln!("ssh host key changed for {}: stored {stored}, got {fp}", self.host_id);
+                Ok(false)
+            }
+            None => {
+                known.insert(self.host_id.clone(), fp);
+                if let Ok(data) = serde_json::to_vec_pretty(&known) {
+                    let _ = std::fs::write(&self.known_hosts_path, data);
+                }
+                Ok(true)
+            }
+        }
     }
+}
+
+pub fn forget_host(known_hosts_path: &std::path::Path, host: &str, port: u16) -> Result<()> {
+    let mut known: std::collections::HashMap<String, String> =
+        std::fs::read(known_hosts_path).ok().and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default();
+    known.remove(&format!("{host}:{port}"));
+    std::fs::write(known_hosts_path, serde_json::to_vec_pretty(&known)?)?;
+    Ok(())
 }
 
 pub struct Tunnel {
@@ -41,15 +74,22 @@ impl Tunnel {
         key_passphrase: Option<&str>,
         remote_host: &str,
         remote_port: u16,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<Tunnel> {
         let config = Arc::new(client::Config {
             inactivity_timeout: Some(std::time::Duration::from_secs(600)),
             keepalive_interval: Some(std::time::Duration::from_secs(30)),
             ..Default::default()
         });
-        let mut session = client::connect(config, (cfg.host.as_str(), cfg.port), Handler)
-            .await
-            .map_err(|e| AppError::Msg(format!("ssh connect to {}:{} failed: {e}", cfg.host, cfg.port)))?;
+        let handler = Handler { host_id: format!("{}:{}", cfg.host, cfg.port), known_hosts_path };
+        let mut session = client::connect(config, (cfg.host.as_str(), cfg.port), handler).await.map_err(|e| {
+            let hint = if matches!(e, russh::Error::UnknownKey) {
+                " (host key changed since it was first trusted; use 'Forget SSH host key' on the connection if this is expected)"
+            } else {
+                ""
+            };
+            AppError::Msg(format!("ssh connect to {}:{} failed: {e}{hint}", cfg.host, cfg.port))
+        })?;
 
         let auth = match &cfg.auth {
             SshAuth::Password => {

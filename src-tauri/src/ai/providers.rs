@@ -25,18 +25,23 @@ pub async fn stream_api(
     }
 }
 
-/// Iterate `data:` payloads of an SSE body.
-async fn for_each_sse<F: FnMut(Value)>(resp: reqwest::Response, mut f: F) -> Result<()> {
+/// Iterate `data:` payloads of an SSE body. Returns true when a `[DONE]` sentinel was seen.
+async fn for_each_sse<F: FnMut(Value)>(resp: reqwest::Response, mut f: F) -> Result<bool> {
     let mut stream = resp.bytes_stream();
-    let mut buf = String::new();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut done = false;
     while let Some(chunk) = stream.next().await {
-        buf.push_str(&String::from_utf8_lossy(&chunk?));
-        while let Some(pos) = buf.find('\n') {
-            let line = buf[..pos].trim_end_matches('\r').to_string();
-            buf.drain(..=pos);
+        buf.extend_from_slice(&chunk?);
+        while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
+            let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1]).trim_end_matches('\r').to_string();
             if let Some(data) = line.strip_prefix("data:") {
                 let data = data.trim();
-                if data.is_empty() || data == "[DONE]" {
+                if data.is_empty() {
+                    continue;
+                }
+                if data == "[DONE]" {
+                    done = true;
                     continue;
                 }
                 if let Ok(v) = serde_json::from_str::<Value>(data) {
@@ -45,7 +50,14 @@ async fn for_each_sse<F: FnMut(Value)>(resp: reqwest::Response, mut f: F) -> Res
             }
         }
     }
-    Ok(())
+    Ok(done)
+}
+
+fn parse_tool_args(raw: &str) -> Result<Value> {
+    if raw.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_str(raw).map_err(|e| AppError::Msg(format!("model returned invalid tool arguments ({e}); please retry")))
 }
 
 async fn check(resp: reqwest::Response) -> Result<reqwest::Response> {
@@ -112,7 +124,9 @@ async fn anthropic(
 
     let mut blocks: Vec<Block> = vec![];
     let mut json_bufs: std::collections::HashMap<usize, String> = Default::default();
+    let mut raw_args: std::collections::HashMap<usize, String> = Default::default();
     let mut error: Option<String> = None;
+    let mut completed = false;
     for_each_sse(resp, |ev| match ev["type"].as_str().unwrap_or("") {
         "content_block_start" => {
             let idx = ev["index"].as_u64().unwrap_or(0) as usize;
@@ -142,16 +156,25 @@ async fn anthropic(
         }
         "content_block_stop" => {
             let idx = ev["index"].as_u64().unwrap_or(0) as usize;
-            if let (Some(buf), Some(Block::ToolUse { input, .. })) = (json_bufs.remove(&idx), blocks.get_mut(idx)) {
-                *input = serde_json::from_str(&buf).unwrap_or(json!({}));
+            if let Some(buf) = json_bufs.remove(&idx) {
+                raw_args.insert(idx, buf);
             }
         }
+        "message_stop" => completed = true,
         "error" => error = Some(ev["error"]["message"].as_str().unwrap_or("stream error").to_string()),
         _ => {}
     })
     .await?;
     if let Some(e) = error {
         return Err(AppError::Msg(e));
+    }
+    if !completed {
+        return Err(AppError::Msg("the response stream ended before completion; please retry".into()));
+    }
+    for (idx, raw) in raw_args {
+        if let Some(Block::ToolUse { input, .. }) = blocks.get_mut(idx) {
+            *input = parse_tool_args(&raw)?;
+        }
     }
     blocks.retain(|b| !matches!(b, Block::Text { text } if text.is_empty()));
     Ok(blocks)
@@ -229,10 +252,14 @@ async fn openai(
     let mut text = String::new();
     let mut calls: Vec<(String, String, String)> = vec![]; // id, name, args
     let mut error: Option<String> = None;
-    for_each_sse(resp, |ev| {
+    let mut finished = false;
+    let done = for_each_sse(resp, |ev| {
         if let Some(e) = ev.get("error") {
             error = Some(e["message"].as_str().unwrap_or("stream error").to_string());
             return;
+        }
+        if ev.pointer("/choices/0/finish_reason").is_some_and(|f| !f.is_null()) {
+            finished = true;
         }
         let Some(delta) = ev.pointer("/choices/0/delta") else { return };
         if let Some(t) = delta["content"].as_str() {
@@ -263,13 +290,16 @@ async fn openai(
     if let Some(e) = error {
         return Err(AppError::Msg(e));
     }
+    if !finished && !done {
+        return Err(AppError::Msg("the response stream ended before completion; please retry".into()));
+    }
     let mut blocks = vec![];
     if !text.is_empty() {
         blocks.push(Block::Text { text });
     }
     for (id, name, args) in calls {
         let id = if id.is_empty() { format!("call_{}", uuid::Uuid::new_v4().simple()) } else { id };
-        blocks.push(Block::ToolUse { id, name, input: serde_json::from_str(&args).unwrap_or(json!({})) });
+        blocks.push(Block::ToolUse { id, name, input: parse_tool_args(&args)? });
     }
     Ok(blocks)
 }
@@ -357,6 +387,7 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
     let mut lines = BufReader::new(stdout).lines();
     let mut text = String::new();
     let mut got_delta = false;
+    let mut failure: Option<String> = None;
     let mut cli_id = session.cli_session_id.clone();
     let is_claude = p.kind == "claude_cli";
     while let Ok(Some(line)) = lines.next_line().await {
@@ -395,8 +426,7 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
                         cli_id = Some(id.into());
                     }
                     if ev["is_error"].as_bool().unwrap_or(false) {
-                        let msg = ev["result"].as_str().unwrap_or("claude failed").to_string();
-                        ctx.emit(&session.id, &AgentEvent::Error { message: msg });
+                        failure = Some(ev["result"].as_str().unwrap_or("claude failed").to_string());
                     }
                 }
                 _ => {}
@@ -426,8 +456,7 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
                     }
                 }
                 "error" | "turn.failed" => {
-                    let msg = ev["message"].as_str().or(ev.pointer("/error/message").and_then(|m| m.as_str())).unwrap_or("codex failed").to_string();
-                    ctx.emit(&session.id, &AgentEvent::Error { message: msg });
+                    failure = Some(ev["message"].as_str().or(ev.pointer("/error/message").and_then(|m| m.as_str())).unwrap_or("codex failed").to_string());
                 }
                 _ => {}
             }
@@ -436,7 +465,10 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
     let status = child.wait().await?;
     let stderr_text = stderr_task.await.unwrap_or_default();
     session.cli_session_id = cli_id;
-    if !status.success() && text.trim().is_empty() {
+    if let Some(f) = failure {
+        return Err(AppError::Msg(f));
+    }
+    if !status.success() {
         return Err(AppError::Msg(format!("{} exited with {}: {}", p.kind, status, super::tools::truncate(stderr_text.trim(), 800))));
     }
     // Tool calls made through MCP were already persisted by execute_for_mcp; reload them.

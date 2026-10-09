@@ -44,6 +44,7 @@ async fn handle(State(ctx): State<Ctx>, Path(session_id): Path<String>, headers:
     let Ok(req) = serde_json::from_str::<Value>(&body) else {
         return (StatusCode::BAD_REQUEST, rpc_error(Value::Null, -32700, "parse error").to_string()).into_response();
     };
+    let was_batch = req.is_array();
     let reqs: Vec<Value> = match req {
         Value::Array(a) => a,
         v => vec![v],
@@ -57,16 +58,19 @@ async fn handle(State(ctx): State<Ctx>, Path(session_id): Path<String>, headers:
     if responses.is_empty() {
         return StatusCode::ACCEPTED.into_response();
     }
-    let payload = if responses.len() == 1 { responses.remove(0) } else { Value::Array(responses) };
+    let payload = if was_batch { Value::Array(responses) } else { responses.remove(0) };
     ([("content-type", "application/json")], payload.to_string()).into_response()
 }
 
 async fn dispatch(ctx: &Ctx, session_id: &str, req: Value) -> Option<Value> {
-    let method = req["method"].as_str().unwrap_or("");
-    let id = req.get("id").cloned().unwrap_or(Value::Null);
-    if method.starts_with("notifications/") {
-        return None;
-    }
+    let Some(method) = req["method"].as_str() else {
+        return Some(rpc_error(req.get("id").cloned().unwrap_or(Value::Null), -32600, "invalid request"));
+    };
+    // Notifications (no id) never get a response.
+    let id = match req.get("id") {
+        Some(id) if !id.is_null() => id.clone(),
+        _ => return None,
+    };
     Some(match method {
         "initialize" => rpc_result(
             id,

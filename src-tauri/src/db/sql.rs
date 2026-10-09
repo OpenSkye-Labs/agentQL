@@ -165,11 +165,51 @@ impl SqlConn {
     }
 
     pub async fn run_one(&self, sql: &str, limit: u32) -> Result<QueryResult> {
+        self.run_one_opts(sql, limit, false).await
+    }
+
+    /// Execute a single statement inside a database-enforced read-only context
+    /// (READ ONLY transaction / `PRAGMA query_only`), so even `SELECT nextval()`
+    /// or stray semicolons cannot write.
+    pub async fn run_one_read_only(&self, sql: &str, limit: u32) -> Result<QueryResult> {
+        self.run_one_opts(sql, limit, true).await
+    }
+
+    pub async fn run_read_only(&self, sql: &str, limit: u32) -> Result<Vec<QueryResult>> {
+        let mut out = vec![];
+        for stmt in split_statements(sql) {
+            out.push(self.run_one_read_only(&stmt, limit).await?);
+        }
+        Ok(out)
+    }
+
+    async fn run_one_opts(&self, sql: &str, limit: u32, read_only: bool) -> Result<QueryResult> {
         let start = Instant::now();
-        let mut res = match &self.pool {
-            Pool::Pg(p) => exec_stream!(p, sql, limit, pg_value),
-            Pool::My(p) => exec_stream!(p, sql, limit, mysql_value),
-            Pool::Lite(p) => exec_stream!(p, sql, limit, sqlite_value),
+        let mut res = match (&self.pool, read_only) {
+            (Pool::Pg(p), false) => exec_stream!(p, sql, limit, pg_value),
+            (Pool::My(p), false) => exec_stream!(p, sql, limit, mysql_value),
+            (Pool::Lite(p), false) => exec_stream!(p, sql, limit, sqlite_value),
+            (Pool::Pg(p), true) => {
+                let mut tx = p.begin().await?;
+                sqlx::query("SET TRANSACTION READ ONLY").execute(&mut *tx).await?;
+                let r: Result<QueryResult> = (async { Ok(exec_stream!(&mut *tx, sql, limit, pg_value)) }).await;
+                let _ = tx.rollback().await;
+                r?
+            }
+            (Pool::My(p), true) => {
+                let mut conn = p.acquire().await?;
+                sqlx::query("START TRANSACTION READ ONLY").execute(&mut *conn).await?;
+                let r: Result<QueryResult> = (async { Ok(exec_stream!(&mut *conn, sql, limit, mysql_value)) }).await;
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                r?
+            }
+            (Pool::Lite(p), true) => {
+                let mut conn = p.acquire().await?;
+                sqlx::query("PRAGMA query_only = 1").execute(&mut *conn).await?;
+                let r: Result<QueryResult> = (async { Ok(exec_stream!(&mut *conn, sql, limit, sqlite_value)) }).await;
+                let _ = sqlx::query("PRAGMA query_only = 0").execute(&mut *conn).await;
+                r?
+            }
         };
         if res.columns.is_empty() && res.rows.is_empty() && is_query_like(sql) {
             // Zero-row SELECT: still show the headers.
@@ -279,6 +319,24 @@ impl SqlConn {
     }
 
     pub fn literal(&self, v: &Value) -> String {
+        self.literal_typed(v, None)
+    }
+
+    /// `type_hint` is the column's declared type when known (drives json vs array vs bytes encoding).
+    pub fn literal_typed(&self, v: &Value, type_hint: Option<&str>) -> String {
+        let hint = type_hint.map(|t| t.to_lowercase()).unwrap_or_default();
+        if let Some(b64) = v.get("$bytes").and_then(|b| b.as_str()) {
+            let safe: String = b64.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=').collect();
+            return match self.driver {
+                Driver::Postgres => format!("decode('{safe}', 'base64')"),
+                Driver::Mysql | Driver::Mariadb => format!("FROM_BASE64('{safe}')"),
+                _ => {
+                    use base64::Engine;
+                    let bytes = base64::engine::general_purpose::STANDARD.decode(&safe).unwrap_or_default();
+                    format!("X'{}'", bytes.iter().map(|b| format!("{b:02X}")).collect::<String>())
+                }
+            };
+        }
         match v {
             Value::Null => "NULL".into(),
             Value::Bool(b) => {
@@ -301,14 +359,38 @@ impl SqlConn {
                     format!("'{esc}'")
                 }
             }
+            Value::Array(items) if self.driver == Driver::Postgres && !hint.contains("json") && items.iter().all(|i| !i.is_array() && !i.is_object()) => {
+                // Postgres array literal: '{a,b}' with elements double-quoted.
+                let parts: Vec<String> = items
+                    .iter()
+                    .map(|i| match i {
+                        Value::Null => "NULL".to_string(),
+                        Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+                        other => other.to_string(),
+                    })
+                    .collect();
+                format!("'{{{}}}'", parts.join(",").replace('\'', "''"))
+            }
             Value::Array(_) | Value::Object(_) => {
-                let s = serde_json::to_string(v).unwrap_or_default().replace('\'', "''");
-                if self.driver == Driver::Postgres { format!("'{s}'::jsonb") } else { format!("'{s}'") }
+                let s = serde_json::to_string(v).unwrap_or_default();
+                // ponytail: assumes default sql_mode (backslash escapes on) for MySQL; NO_BACKSLASH_ESCAPES servers
+                // need typed parameter binding instead of literals.
+                self.literal_typed(&Value::String(s), None)
             }
         }
     }
 
     // ---------------------------------------------------------------- browsing
+
+    /// A browse filter must be exactly one expression: no extra statements or trailing comments.
+    pub fn validate_filter(filter: Option<&str>) -> Result<()> {
+        let Some(f) = filter.map(str::trim).filter(|f| !f.is_empty()) else { return Ok(()) };
+        let parts = split_statements(f);
+        if parts.len() != 1 || parts[0] != f.trim_end_matches(';').trim() || f.contains("--") || f.contains("/*") {
+            return Err(AppError::Msg("filter must be a single WHERE expression".into()));
+        }
+        Ok(())
+    }
 
     pub fn select_sql(&self, q: &TableQuery) -> String {
         let mut sql = format!("SELECT * FROM {}", self.qualified(q.schema.as_deref(), &q.table));
@@ -327,13 +409,14 @@ impl SqlConn {
         if let Some(f) = q.filter.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
             sql.push_str(&format!(" WHERE {f}"));
         }
-        let rows = self.rows(&sql).await?;
-        Ok(rows.first().and_then(|r| r.values().next()).and_then(json_i64).unwrap_or(0))
+        let r = self.run_one_read_only(&sql, 1).await?;
+        Ok(r.rows.first().and_then(|r| r.first()).and_then(json_i64).unwrap_or(0))
     }
 
     /// Turn grid edits into SQL statements (not executed).
-    pub fn change_sql(&self, schema: Option<&str>, table: &str, changes: &[RowChange]) -> Vec<String> {
+    pub fn change_sql(&self, schema: Option<&str>, table: &str, changes: &[RowChange], types: &HashMap<String, String>) -> Vec<String> {
         let t = self.qualified(schema, table);
+        let lit = |k: &str, v: &Value| self.literal_typed(v, types.get(k).map(String::as_str));
         let where_of = |key: &HashMap<String, Value>| -> String {
             let mut parts: Vec<String> = key
                 .iter()
@@ -341,7 +424,7 @@ impl SqlConn {
                     if v.is_null() {
                         format!("{} IS NULL", self.quote_ident(k))
                     } else {
-                        format!("{} = {}", self.quote_ident(k), self.literal(v))
+                        format!("{} = {}", self.quote_ident(k), lit(k, v))
                     }
                 })
                 .collect();
@@ -353,7 +436,7 @@ impl SqlConn {
             .map(|c| match c {
                 RowChange::Update { key, values } => {
                     let mut sets: Vec<String> =
-                        values.iter().map(|(k, v)| format!("{} = {}", self.quote_ident(k), self.literal(v))).collect();
+                        values.iter().map(|(k, v)| format!("{} = {}", self.quote_ident(k), lit(k, v))).collect();
                     sets.sort();
                     format!("UPDATE {t} SET {} WHERE {}", sets.join(", "), where_of(key))
                 }
@@ -361,7 +444,7 @@ impl SqlConn {
                     let mut cols: Vec<&String> = values.keys().collect();
                     cols.sort();
                     let names: Vec<String> = cols.iter().map(|c| self.quote_ident(c)).collect();
-                    let vals: Vec<String> = cols.iter().map(|c| self.literal(&values[*c])).collect();
+                    let vals: Vec<String> = cols.iter().map(|c| lit(c, &values[*c])).collect();
                     format!("INSERT INTO {t} ({}) VALUES ({})", names.join(", "), vals.join(", "))
                 }
                 RowChange::Delete { key } => format!("DELETE FROM {t} WHERE {}", where_of(key)),
@@ -435,7 +518,8 @@ impl SqlConn {
             Driver::Sqlite => {
                 let master = if schema == "main" { "sqlite_master".to_string() } else { format!("{}.sqlite_master", self.quote_ident(schema)) };
                 let sql = format!(
-                    "SELECT '{schema}' AS schema, name, type AS kind, NULL AS est FROM {master} WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                    "SELECT {} AS schema, name, type AS kind, NULL AS est FROM {master} WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                    self.literal(&Value::String(schema.into()))
                 );
                 self.rows(&sql).await?
             }
@@ -610,14 +694,15 @@ impl SqlConn {
                 })
             }
             Driver::Sqlite => {
-                let q = self.qualified(Some(schema), table);
-                let cols = self.rows(&format!("PRAGMA table_info({q})")).await?;
-                let idx_list = self.rows(&format!("PRAGMA index_list({q})")).await?;
-                let fk_rows = self.rows(&format!("PRAGMA foreign_key_list({q})")).await?;
+                let q = self.quote_ident(table);
+                let pfx = if schema == "main" || schema.is_empty() { String::new() } else { format!("{}.", self.quote_ident(schema)) };
+                let cols = self.rows(&format!("PRAGMA {pfx}table_info({q})")).await?;
+                let idx_list = self.rows(&format!("PRAGMA {pfx}index_list({q})")).await?;
+                let fk_rows = self.rows(&format!("PRAGMA {pfx}foreign_key_list({q})")).await?;
                 let mut indexes = vec![];
                 for mut r in idx_list {
                     let name = take_str(&mut r, "name");
-                    let info = self.rows(&format!("PRAGMA index_info({})", self.quote_ident(&name))).await?;
+                    let info = self.rows(&format!("PRAGMA {pfx}index_info({})", self.quote_ident(&name))).await?;
                     indexes.push(IndexInfo {
                         columns: info.into_iter().map(|mut c| take_str(&mut c, "name")).collect(),
                         unique: take_i64(&mut r, "unique") == 1,
@@ -712,8 +797,16 @@ macro_rules! exec_stream {
         #[allow(deprecated)]
         let mut stream = sqlx::query($sql).fetch_many($pool);
         let mut res = QueryResult::default();
+        let mut failure: Option<sqlx::Error> = None;
         while let Some(item) = stream.next().await {
-            match item? {
+            let item = match item {
+                Ok(i) => i,
+                Err(e) => {
+                    failure = Some(e);
+                    break;
+                }
+            };
+            match item {
                 Either::Left(done) => {
                     res.affected = Some(res.affected.unwrap_or(0) + done.rows_affected());
                 }
@@ -732,6 +825,10 @@ macro_rules! exec_stream {
                     res.rows.push((0..row.len()).map(|i| $conv(&row, i)).collect());
                 }
             }
+        }
+        drop(stream);
+        if let Some(e) = failure {
+            return Err(e.into());
         }
         res
     }};
@@ -881,12 +978,7 @@ fn has_code(s: &str) -> bool {
 }
 
 pub fn is_query_like(sql: &str) -> bool {
-    let first = sql
-        .trim_start()
-        .split(|c: char| c.is_whitespace() || c == '(')
-        .find(|w| !w.is_empty())
-        .unwrap_or("")
-        .to_uppercase();
+    let first = first_word(sql);
     matches!(first.as_str(), "SELECT" | "WITH" | "SHOW" | "EXPLAIN" | "DESCRIBE" | "DESC" | "VALUES" | "TABLE" | "PRAGMA")
 }
 
@@ -919,19 +1011,39 @@ pub fn is_read_only(driver: Driver, sql: &str) -> bool {
     match sqlparser::parser::Parser::parse_sql(&*dialect, sql) {
         Ok(stmts) => stmts.iter().all(|s| match s {
             Statement::Query(q) => query_is_read_only(q),
-            Statement::Explain { .. } | Statement::ExplainTable { .. } | Statement::ShowColumns { .. } | Statement::ShowTables { .. }
+            Statement::Explain { analyze, statement, .. } => !*analyze || statement_is_read_only(statement),
+            Statement::Pragma { value, .. } => value.is_none(),
+            Statement::ExplainTable { .. } | Statement::ShowColumns { .. } | Statement::ShowTables { .. }
             | Statement::ShowCreate { .. } | Statement::ShowFunctions { .. } | Statement::ShowVariable { .. } | Statement::ShowVariables { .. }
             | Statement::ShowStatus { .. } | Statement::ShowDatabases { .. } | Statement::ShowSchemas { .. } | Statement::ShowViews { .. }
-            | Statement::ShowCollation { .. } | Statement::Pragma { .. } => true,
+            | Statement::ShowCollation { .. } => true,
             _ => false,
         }),
         Err(_) => {
-            // Unparseable dialect-specific text: fall back to keyword check on every statement.
+            // Fail closed: only bare metadata commands the parser does not know are allowed through.
             split_statements(sql).iter().all(|s| {
-                is_query_like(s) && !s.to_uppercase().contains(" INTO ")
+                let first = first_word(s);
+                matches!(first.as_str(), "SHOW" | "DESCRIBE" | "DESC") && !s.contains(';')
             })
         }
     }
+}
+
+fn statement_is_read_only(s: &sqlparser::ast::Statement) -> bool {
+    use sqlparser::ast::Statement;
+    match s {
+        Statement::Query(q) => query_is_read_only(q),
+        Statement::Explain { analyze, statement, .. } => !*analyze || statement_is_read_only(statement),
+        _ => false,
+    }
+}
+
+fn first_word(sql: &str) -> String {
+    sql.trim_start()
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .find(|w| !w.is_empty())
+        .unwrap_or("")
+        .to_uppercase()
 }
 
 #[cfg(test)]
@@ -948,5 +1060,13 @@ mod tests {
         assert!(!is_read_only(Driver::Postgres, "delete from t"));
         assert!(!is_read_only(Driver::Postgres, "with x as (select 1) insert into t select * from x"));
         assert!(is_read_only(Driver::Mysql, "SHOW TABLES"));
+        assert!(!is_read_only(Driver::Postgres, "EXPLAIN ANALYZE DELETE FROM t"));
+        assert!(is_read_only(Driver::Postgres, "EXPLAIN DELETE FROM t"));
+        assert!(!is_read_only(Driver::Sqlite, "PRAGMA user_version = 3"));
+        assert!(is_read_only(Driver::Sqlite, "PRAGMA user_version"));
+        assert!(!is_read_only(Driver::Postgres, "WITH x AS (select 1) FROBNICATE"));
+        assert!(SqlConn::validate_filter(Some("id = 1")).is_ok());
+        assert!(SqlConn::validate_filter(Some("0; DELETE FROM t; --")).is_err());
+        assert!(SqlConn::validate_filter(Some("name = 'a;b'")).is_ok());
     }
 }

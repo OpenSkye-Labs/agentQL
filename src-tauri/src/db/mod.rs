@@ -117,9 +117,14 @@ pub struct Session {
 #[derive(Default)]
 pub struct Manager {
     sessions: RwLock<HashMap<String, Arc<Session>>>,
+    pub known_hosts_path: std::path::PathBuf,
 }
 
 impl Manager {
+    pub fn new(data_dir: &std::path::Path) -> Self {
+        Manager { sessions: Default::default(), known_hosts_path: data_dir.join("ssh_known_hosts.json") }
+    }
+
     pub async fn connect(&self, mut config: ConnectionConfig, secrets: &ConnectionSecrets) -> Result<Arc<Session>> {
         // Optional SSH tunnel: rewrite host/port to the local forward.
         let mut tunnel = None;
@@ -131,6 +136,7 @@ impl Manager {
                 secrets.ssh_key_passphrase.as_deref(),
                 &rhost,
                 rport,
+                self.known_hosts_path.clone(),
             )
             .await?;
             config.host = "127.0.0.1".into();

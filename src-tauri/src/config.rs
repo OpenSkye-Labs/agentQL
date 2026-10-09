@@ -213,22 +213,18 @@ impl Store {
     // -- secrets --
 
     pub fn get_secret(&self, key: &str) -> Option<String> {
-        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, key) {
-            if let Ok(v) = entry.get_password() {
-                return Some(v);
-            }
+        // The fallback file only ever holds values the keychain refused, so it is the freshest source.
+        if let Some(v) = self.secrets_fallback.lock().unwrap().get(key).cloned() {
+            return Some(v);
         }
-        self.secrets_fallback.lock().unwrap().get(key).cloned()
+        keyring::Entry::new(KEYRING_SERVICE, key).ok().and_then(|e| e.get_password().ok())
     }
 
     pub fn set_secret(&self, key: &str, value: Option<&str>) -> Result<()> {
         let keyring_ok = match keyring::Entry::new(KEYRING_SERVICE, key) {
             Ok(entry) => match value {
                 Some(v) => entry.set_password(v).is_ok(),
-                None => {
-                    let _ = entry.delete_credential();
-                    true
-                }
+                None => matches!(entry.delete_credential(), Ok(()) | Err(keyring::Error::NoEntry)),
             },
             Err(_) => false,
         };
@@ -242,7 +238,7 @@ impl Store {
         } else {
             fb.remove(key);
         }
-        write_json(&self.path("secrets.local.json"), &*fb)
+        write_secret_json(&self.path("secrets.local.json"), &*fb)
     }
 
     pub fn secret_storage(&self) -> &'static str {
@@ -292,4 +288,103 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
     std::fs::rename(&tmp, path).map_err(|e| AppError::Msg(format!("saving {}: {e}", path.display())))
+}
+
+/// Like `write_json` but owner-only permissions on Unix (0600 file, 0700 dir).
+fn write_secret_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    let data = serde_json::to_vec_pretty(value)?;
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        }
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+        f.write_all(&data)?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(&tmp, data)?;
+    std::fs::rename(&tmp, path).map_err(|e| AppError::Msg(format!("saving {}: {e}", path.display())))
+}
+
+/// Split `scheme://user:pass@host/...` into a URL without the password and the password itself.
+pub fn strip_url_password(url: &str) -> (String, Option<String>) {
+    let Some(scheme_end) = url.find("://") else { return (url.to_string(), None) };
+    let rest = &url[scheme_end + 3..];
+    let auth_end = rest.find('/').or_else(|| rest.find('?')).unwrap_or(rest.len());
+    let authority = &rest[..auth_end];
+    let Some(at) = authority.rfind('@') else { return (url.to_string(), None) };
+    let userinfo = &authority[..at];
+    let Some(colon) = userinfo.find(':') else { return (url.to_string(), None) };
+    let password = &userinfo[colon + 1..];
+    let decoded = pct_decode(password);
+    let sanitized = format!("{}{}{}", &url[..scheme_end + 3], &userinfo[..colon], &rest[at..]);
+    (sanitized, Some(decoded))
+}
+
+/// Inject a password into a URL whose userinfo lacks one.
+pub fn url_with_password(url: &str, user: &str, password: &str) -> String {
+    let Some(scheme_end) = url.find("://") else { return url.to_string() };
+    let rest = &url[scheme_end + 3..];
+    let auth_end = rest.find('/').or_else(|| rest.find('?')).unwrap_or(rest.len());
+    let authority = &rest[..auth_end];
+    let enc = pct_encode;
+    match authority.rfind('@') {
+        Some(at) => {
+            let userinfo = &authority[..at];
+            if userinfo.contains(':') {
+                return url.to_string();
+            }
+            format!("{}{}:{}{}", &url[..scheme_end + 3], userinfo, enc(password), &rest[at..])
+        }
+        None if !user.is_empty() => format!("{}{}:{}@{}", &url[..scheme_end + 3], enc(user), enc(password), rest),
+        None => url.to_string(),
+    }
+}
+
+pub fn pct_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+pub fn pct_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() + 0 && i + 2 <= bytes.len() - 1 {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn url_password_roundtrip() {
+        let (u, p) = strip_url_password("postgres://bob:s%3Acret@db.example.com:5432/app?sslmode=require");
+        assert_eq!(u, "postgres://bob@db.example.com:5432/app?sslmode=require");
+        assert_eq!(p.as_deref(), Some("s:cret"));
+        assert_eq!(url_with_password(&u, "bob", "s:cret"), "postgres://bob:s%3Acret@db.example.com:5432/app?sslmode=require");
+        assert_eq!(strip_url_password("redis://localhost:6379/0").1, None);
+        assert_eq!(url_with_password("mongodb+srv://cluster.x.net/db", "u", "p w"), "mongodb+srv://u:p%20w@cluster.x.net/db");
+        assert_eq!(pct_decode("a%2Fb%"), "a/b%");
+    }
 }

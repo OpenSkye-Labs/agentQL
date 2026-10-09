@@ -39,18 +39,10 @@ pub struct MongoPage {
 impl MongoConn {
     pub async fn connect(c: &ConnectionConfig, s: &ConnectionSecrets, tunneled: bool) -> Result<MongoConn> {
         let uri = match &c.url {
-            Some(u) => {
-                let mut u = u.clone();
-                if let Some(pw) = s.password.as_deref().filter(|p| !p.is_empty()) {
-                    if let Some(rest) = u.strip_prefix("mongodb://").or_else(|| u.strip_prefix("mongodb+srv://")) {
-                        if !rest.contains('@') && !c.user.is_empty() {
-                            let scheme = if u.starts_with("mongodb+srv") { "mongodb+srv" } else { "mongodb" };
-                            u = format!("{scheme}://{}:{}@{rest}", urlenc(&c.user), urlenc(pw));
-                        }
-                    }
-                }
-                u
-            }
+            Some(u) => match s.password.as_deref().filter(|p| !p.is_empty()) {
+                Some(pw) => crate::config::url_with_password(u, &c.user, pw),
+                None => u.clone(),
+            },
             None => {
                 let auth = if c.user.is_empty() {
                     String::new()
@@ -233,5 +225,22 @@ fn bson_type_name(b: &Bson) -> &'static str {
 }
 
 fn urlenc(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+    crate::config::pct_encode(s)
+}
+
+pub fn pipeline_writes(p: &Value) -> bool {
+    p.as_array().map(|a| a.iter().any(|s| s.get("$out").is_some() || s.get("$merge").is_some())).unwrap_or(false)
+}
+
+/// Commands that never modify data; everything else is treated as a write.
+pub fn is_read_only_command(command: &Value) -> bool {
+    let Some(name) = command.as_object().and_then(|o| o.keys().next()) else { return false };
+    let write_pipeline = command.get("pipeline").map(pipeline_writes).unwrap_or(false);
+    !write_pipeline
+        && matches!(
+            name.as_str(),
+            "collStats" | "dbStats" | "buildInfo" | "count" | "distinct" | "find" | "aggregate" | "listIndexes" | "listCollections"
+                | "listDatabases" | "serverStatus" | "ping" | "explain" | "hello" | "isMaster" | "getParameter" | "validate"
+                | "connectionStatus" | "hostInfo" | "currentOp" | "top" | "getLog" | "profile" | "whatsmyuri"
+        )
 }

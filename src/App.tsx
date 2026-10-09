@@ -1,51 +1,119 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useEffect, useState } from "react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { clsx } from "clsx";
+import { useStore, useActiveTab } from "./lib/store";
+import { TooltipProvider } from "./components/ui";
+import { Sidebar } from "./components/Sidebar";
+import { TabBar } from "./components/TabBar";
+import { Welcome } from "./components/Welcome";
+import { QueryTab } from "./components/QueryTab";
+import { TableTab } from "./components/TableTab";
+import { RedisTab } from "./components/RedisTab";
+import { MongoTab } from "./components/MongoTab";
+import { DashboardTab } from "./components/DashboardTab";
+import { ChatPanel } from "./components/ChatPanel";
+import { ConnectionDialog } from "./components/ConnectionDialog";
+import { SettingsDialog } from "./components/SettingsDialog";
+import { StatusBar } from "./components/StatusBar";
+import { Toasts } from "./components/Toasts";
+import type { ConnectionConfig } from "./lib/types";
+import { isMac } from "./lib/format";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+export default function App() {
+  const init = useStore((s) => s.init);
+  const tabs = useStore((s) => s.tabs);
+  const activeTab = useActiveTab();
+  const chatOpen = useStore((s) => s.chatOpen);
+  const setChatOpen = useStore((s) => s.setChatOpen);
+  const [connDialog, setConnDialog] = useState<{ open: boolean; edit?: ConnectionConfig | null }>({ open: false });
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  useEffect(() => {
+    void init();
+  }, [init]);
+
+  // Global shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (!mod) return;
+      const s = useStore.getState();
+      const active = s.tabs.find((t) => t.id === s.activeTab);
+      if (e.key === "t" && !e.shiftKey) {
+        const connId = active?.connectionId ?? Object.keys(s.live)[0];
+        if (connId) {
+          e.preventDefault();
+          s.openTab({ kind: "query", connectionId: connId, title: "Query", sql: "" });
+        }
+      } else if (e.key === "w") {
+        if (active && active.kind !== "welcome") {
+          e.preventDefault();
+          s.closeTab(active.id);
+        }
+      } else if (e.key === "k" || e.key === "j") {
+        e.preventDefault();
+        s.setChatOpen(!s.chatOpen);
+      } else if (e.key === "n" && !e.shiftKey) {
+        e.preventDefault();
+        setConnDialog({ open: true, edit: null });
+      } else if (e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
+      } else if (/^[1-9]$/.test(e.key)) {
+        const idx = Number(e.key) - 1;
+        if (s.tabs[idx]) {
+          e.preventDefault();
+          s.setActiveTab(s.tabs[idx].id);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <TooltipProvider>
+      <div className="flex h-full flex-col bg-bg text-fg">
+        <PanelGroup direction="horizontal" className="flex-1 min-h-0" autoSaveId="agentql-main">
+          <Panel defaultSize={20} minSize={14} maxSize={40} className="min-w-[200px]">
+            <Sidebar onNewConnection={() => setConnDialog({ open: true, edit: null })} onEditConnection={(c) => setConnDialog({ open: true, edit: c })} onOpenSettings={() => setSettingsOpen(true)} />
+          </Panel>
+          <ResizeHandle />
+          <Panel minSize={30}>
+            <div className="flex h-full flex-col min-w-0">
+              <TabBar />
+              <main className="flex-1 min-h-0 relative" role="main">
+                {tabs.map((t) => (
+                  <div key={t.id} className={clsx("absolute inset-0 flex flex-col", t.id !== activeTab?.id && "hidden")} aria-hidden={t.id !== activeTab?.id}>
+                    {t.kind === "welcome" && <Welcome onNewConnection={() => setConnDialog({ open: true, edit: null })} />}
+                    {t.kind === "query" && <QueryTab tab={t} />}
+                    {t.kind === "table" && <TableTab tab={t} />}
+                    {t.kind === "redis" && <RedisTab tab={t} />}
+                    {t.kind === "mongo" && <MongoTab tab={t} />}
+                    {t.kind === "dashboard" && <DashboardTab tab={t} />}
+                  </div>
+                ))}
+              </main>
+            </div>
+          </Panel>
+          {chatOpen && (
+            <>
+              <ResizeHandle />
+              <Panel defaultSize={30} minSize={22} maxSize={55} className="min-w-[320px]">
+                <ChatPanel onClose={() => setChatOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
+              </Panel>
+            </>
+          )}
+        </PanelGroup>
+        <StatusBar onToggleChat={() => setChatOpen(!chatOpen)} />
+        <Toasts />
+        <ConnectionDialog open={connDialog.open} edit={connDialog.edit ?? null} onOpenChange={(o) => setConnDialog((d) => ({ ...d, open: o }))} />
+        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    </TooltipProvider>
   );
 }
 
-export default App;
+function ResizeHandle() {
+  return <PanelResizeHandle className="w-px bg-border hover:bg-accent data-[resize-handle-active]:bg-accent transition-colors relative after:absolute after:inset-y-0 after:-left-1 after:-right-1" />;
+}

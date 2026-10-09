@@ -23,8 +23,8 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir().expect("app data dir");
             let state = AppState {
+                manager: Arc::new(db::Manager::new(&dir)),
                 store: Arc::new(config::Store::new(dir)),
-                manager: Arc::new(db::Manager::default()),
                 agent: Arc::new(ai::Agent::default()),
             };
             let ctx = ai::Ctx { app: app.handle().clone(), manager: state.manager.clone(), store: state.store.clone(), agent: state.agent.clone() };
@@ -58,6 +58,7 @@ pub fn run() {
             commands::fetch_table,
             commands::preview_changes,
             commands::apply_changes,
+            commands::ssh_forget_host,
             commands::export_rows,
             commands::redis_scan,
             commands::redis_get,

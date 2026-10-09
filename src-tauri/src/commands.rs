@@ -53,6 +53,19 @@ pub fn save_connection(st: State<'_, AppState>, mut config: ConnectionConfig, se
     if config.port == 0 {
         config.port = config.driver.default_port();
     }
+    // Never persist a password inside the URL; move it to the secret store.
+    let mut secrets = secrets;
+    if let Some(url) = config.url.clone() {
+        let (clean, pw) = crate::config::strip_url_password(&url);
+        if let Some(pw) = pw {
+            config.url = Some(clean);
+            let mut s = secrets.unwrap_or_default();
+            if s.password.as_deref().unwrap_or("").is_empty() {
+                s.password = Some(pw);
+            }
+            secrets = Some(s);
+        }
+    }
     match list.iter_mut().find(|c| c.id == config.id) {
         Some(existing) => *existing = config.clone(),
         None => list.push(config.clone()),
@@ -91,8 +104,8 @@ pub struct ConnectResult {
 }
 
 #[tauri::command]
-pub async fn test_connection(config: ConnectionConfig, secrets: Option<ConnectionSecrets>) -> Result<String> {
-    let m = crate::db::Manager::default();
+pub async fn test_connection(st: State<'_, AppState>, config: ConnectionConfig, secrets: Option<ConnectionSecrets>) -> Result<String> {
+    let m = crate::db::Manager::new(st.store.dir());
     let mut cfg = config;
     cfg.id = format!("test-{}", uuid::Uuid::new_v4());
     let s = m.connect(cfg.clone(), &secrets.unwrap_or_default()).await?;
@@ -164,6 +177,9 @@ pub async fn run_query(st: State<'_, AppState>, id: String, sql_text: String, li
         return Err(AppError::Msg("This connection is marked read-only. Disable it in the connection settings to run write statements.".into()));
     }
     let limit = limit.unwrap_or_else(|| st.store.settings().row_limit);
+    if s.config.read_only {
+        return c.run_read_only(&sql_text, limit).await;
+    }
     c.run(&sql_text, limit).await
 }
 
@@ -175,7 +191,7 @@ pub async fn explain_query(st: State<'_, AppState>, id: String, sql_text: String
         return Err(AppError::Msg("EXPLAIN ANALYZE executes the statement; refusing to analyze a write.".into()));
     }
     let stmt = crate::db::sql::split_statements(&sql_text).into_iter().next().unwrap_or_default();
-    c.run_one(&c.explain_sql(&stmt, analyze), 10_000).await
+    c.run_one_read_only(&c.explain_sql(&stmt, analyze), 10_000).await
 }
 
 #[tauri::command]
@@ -217,27 +233,33 @@ pub struct TablePage {
 pub async fn fetch_table(st: State<'_, AppState>, id: String, query: TableQuery) -> Result<TablePage> {
     let s = st.manager.get(&id).await?;
     let c = sql(&s).await?;
+    crate::db::sql::SqlConn::validate_filter(query.filter.as_deref())?;
     let sql_text = c.select_sql(&query);
-    let result = c.run_one(&sql_text, query.limit.max(1)).await?;
+    let result = c.run_one_read_only(&sql_text, query.limit.max(1)).await?;
     let total = c.count(&query).await.ok();
     Ok(TablePage { result, total, sql_text })
 }
 
 #[tauri::command]
-pub async fn preview_changes(st: State<'_, AppState>, id: String, schema: Option<String>, table: String, changes: Vec<RowChange>) -> Result<Vec<String>> {
+pub async fn preview_changes(st: State<'_, AppState>, id: String, schema: Option<String>, table: String, changes: Vec<RowChange>, types: Option<std::collections::HashMap<String, String>>) -> Result<Vec<String>> {
     let s = st.manager.get(&id).await?;
-    Ok(sql(&s).await?.change_sql(schema.as_deref(), &table, &changes))
+    Ok(sql(&s).await?.change_sql(schema.as_deref(), &table, &changes, &types.unwrap_or_default()))
 }
 
 #[tauri::command]
-pub async fn apply_changes(st: State<'_, AppState>, id: String, schema: Option<String>, table: String, changes: Vec<RowChange>) -> Result<u64> {
+pub async fn apply_changes(st: State<'_, AppState>, id: String, schema: Option<String>, table: String, changes: Vec<RowChange>, types: Option<std::collections::HashMap<String, String>>) -> Result<u64> {
     let s = st.manager.get(&id).await?;
     if s.config.read_only {
         return Err(AppError::Msg("connection is read-only".into()));
     }
     let c = sql(&s).await?;
-    let stmts = c.change_sql(schema.as_deref(), &table, &changes);
+    let stmts = c.change_sql(schema.as_deref(), &table, &changes, &types.unwrap_or_default());
     c.execute_batch(&stmts).await
+}
+
+#[tauri::command]
+pub fn ssh_forget_host(st: State<'_, AppState>, host: String, port: u16) -> Result<()> {
+    crate::ssh::forget_host(&st.manager.known_hosts_path, &host, port)
 }
 
 #[tauri::command]
@@ -257,6 +279,7 @@ pub async fn export_rows(path: String, format: String, columns: Vec<String>, row
         }
         "sql" => {
             let table = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or("export".into());
+            let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
             let mut out = String::new();
             for r in &rows {
                 let vals: Vec<String> = r
@@ -268,7 +291,7 @@ pub async fn export_rows(path: String, format: String, columns: Vec<String>, row
                         o => format!("'{}'", cell(o).replace('\'', "''")),
                     })
                     .collect();
-                out.push_str(&format!("INSERT INTO \"{table}\" ({}) VALUES ({});\n", columns.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", "), vals.join(", ")));
+                out.push_str(&format!("INSERT INTO {} ({}) VALUES ({});\n", q(&table), columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", "), vals.join(", ")));
             }
             std::fs::write(&path, out)?;
         }
@@ -330,6 +353,9 @@ pub async fn mongo_find(st: State<'_, AppState>, id: String, query: MongoFind) -
 #[tauri::command]
 pub async fn mongo_aggregate(st: State<'_, AppState>, id: String, db: String, collection: String, pipeline: Value, limit: Option<usize>) -> Result<Vec<Value>> {
     let s = st.manager.get(&id).await?;
+    if s.config.read_only && crate::db::mongo::pipeline_writes(&pipeline) {
+        return Err(AppError::Msg("connection is read-only ($out/$merge not allowed)".into()));
+    }
     mongo(&s)?.aggregate(&db, &collection, &pipeline, limit.unwrap_or(500)).await
 }
 
@@ -369,6 +395,9 @@ pub async fn mongo_collection_info(st: State<'_, AppState>, id: String, db: Stri
 #[tauri::command]
 pub async fn mongo_command(st: State<'_, AppState>, id: String, db: String, command: Value) -> Result<Value> {
     let s = st.manager.get(&id).await?;
+    if s.config.read_only && !crate::db::mongo::is_read_only_command(&command) {
+        return Err(AppError::Msg("connection is read-only; only read commands are allowed".into()));
+    }
     mongo(&s)?.run_command(&db, &command).await
 }
 
@@ -514,7 +543,7 @@ pub struct ChartRequest {
 #[tauri::command]
 pub async fn run_chart(app: AppHandle, st: State<'_, AppState>, req: ChartRequest) -> Result<QueryResult> {
     let c = ctx(&app, &st);
-    ai::tools::run_chart_source(&c, &req.connection_id, &req.source, false).await
+    ai::tools::run_chart_source(&c, &req.connection_id, &req.source).await
 }
 
 #[tauri::command]

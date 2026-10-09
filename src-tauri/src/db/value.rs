@@ -38,7 +38,9 @@ pub fn pg_value(row: &sqlx::postgres::PgRow, i: usize) -> Value {
     }
     macro_rules! vec {
         ($t:ty, $f:expr) => {
-            row.try_get::<Vec<$t>, usize>(i).ok().map(|v| Value::Array(v.into_iter().map($f).collect()))
+            row.try_get::<Vec<Option<$t>>, usize>(i)
+                .ok()
+                .map(|v| Value::Array(v.into_iter().map(|e| e.map($f).unwrap_or(Value::Null)).collect()))
         };
     }
 
@@ -51,7 +53,7 @@ pub fn pg_value(row: &sqlx::postgres::PgRow, i: usize) -> Value {
         "FLOAT4" => get!(f32, |v| num_f64(v as f64)),
         "FLOAT8" => get!(f64, num_f64),
         "NUMERIC" => get!(BigDecimal, |v| Value::String(v.normalized().to_string())),
-        "MONEY" => get!(PgMoney, |v| Value::String(format!("{}.{:02}", v.0 / 100, (v.0 % 100).abs()))),
+        "MONEY" => get!(PgMoney, |v| Value::String(format!("{}{}.{:02}", if v.0 < 0 { "-" } else { "" }, (v.0 / 100).abs(), (v.0 % 100).abs()))),
         "TEXT" | "VARCHAR" | "CHAR" | "BPCHAR" | "NAME" | "\"CHAR\"" | "CITEXT" | "XML" | "UNKNOWN" => {
             get!(String, Value::String)
         }
@@ -126,7 +128,7 @@ fn format_interval(months: i32, days: i32, micros: i64) -> String {
 
 pub fn mysql_value(row: &sqlx::mysql::MySqlRow, i: usize) -> Value {
     use sqlx::types::BigDecimal;
-    use sqlx::types::chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+    use sqlx::types::chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 
     let raw = match row.try_get_raw(i) {
         Ok(r) => r,
@@ -158,7 +160,7 @@ pub fn mysql_value(row: &sqlx::mysql::MySqlRow, i: usize) -> Value {
             get!(String, Value::String)
         }
         "DATE" => get!(NaiveDate, |v| Value::String(v.to_string())),
-        "TIME" => get!(NaiveTime, |v| Value::String(v.to_string())),
+        "TIME" => get!(sqlx::mysql::types::MySqlTime, |v| Value::String(v.to_string())),
         "DATETIME" => get!(NaiveDateTime, |v| Value::String(v.format("%Y-%m-%d %H:%M:%S%.f").to_string())),
         "TIMESTAMP" => get!(DateTime<Utc>, |v| Value::String(v.format("%Y-%m-%d %H:%M:%S%.f").to_string())),
         "JSON" => get!(Value, |v| v),
