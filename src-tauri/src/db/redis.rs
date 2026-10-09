@@ -123,7 +123,11 @@ impl RedisConn {
 
     /// Run a raw command given as whitespace separated text (quotes honoured).
     pub async fn command(&self, line: &str) -> Result<Value> {
-        let args = shell_split(line);
+        self.exec(&shell_split(line)).await
+    }
+
+    /// Run a command from pre-split arguments (no quoting rules apply; safe for arbitrary keys/values).
+    pub async fn exec(&self, args: &[String]) -> Result<Value> {
         let Some((name, rest)) = args.split_first() else { return Err(AppError::Msg("empty command".into())) };
         let mut cmd = redis::cmd(name);
         for a in rest {
@@ -149,7 +153,11 @@ impl RedisConn {
 }
 
 pub fn is_read_only_command(line: &str) -> bool {
-    let name = shell_split(line).first().map(|s| s.to_uppercase()).unwrap_or_default();
+    is_read_only_args(&shell_split(line))
+}
+
+pub fn is_read_only_args(args: &[String]) -> bool {
+    let name = args.first().map(|s| s.to_uppercase()).unwrap_or_default();
     matches!(
         name.as_str(),
         "GET" | "MGET" | "HGET" | "HGETALL" | "HMGET" | "HKEYS" | "HVALS" | "HLEN" | "HEXISTS" | "LRANGE" | "LLEN" | "LINDEX"

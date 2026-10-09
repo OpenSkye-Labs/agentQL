@@ -330,6 +330,15 @@ pub async fn redis_command(st: State<'_, AppState>, id: String, command: String)
 }
 
 #[tauri::command]
+pub async fn redis_exec(st: State<'_, AppState>, id: String, args: Vec<String>) -> Result<Value> {
+    let s = st.manager.get(&id).await?;
+    if s.config.read_only && !crate::db::redis::is_read_only_args(&args) {
+        return Err(AppError::Msg("connection is read-only".into()));
+    }
+    redis(&s)?.exec(&args).await
+}
+
+#[tauri::command]
 pub async fn redis_info(st: State<'_, AppState>, id: String) -> Result<Value> {
     let s = st.manager.get(&id).await?;
     redis(&s)?.info().await

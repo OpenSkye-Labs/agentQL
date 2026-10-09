@@ -200,11 +200,11 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
             ))}
             {streaming.text ? <Markdown text={streaming.text} connectionId={connId ?? undefined} /> : null}
             {approval && (
-              <div className="rounded-lg border border-warning/50 bg-warning/10 p-3" role="alertdialog" aria-label="Approval required">
+              <div className="rounded-lg border border-warning/50 bg-warning/10 p-3" role="region" aria-live="assertive" aria-label="Approval required">
                 <div className="mb-1 text-xs font-semibold">{approval.description}</div>
                 <pre className="mb-2 max-h-40 overflow-auto scroll rounded bg-sunken p-2 font-mono text-xs whitespace-pre-wrap selectable">{approval.statement}</pre>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="primary" onClick={() => { void api.aiResolveApproval(approval.id, true); setApproval(null); }}><Check size={12} /> Run it</Button>
+                  <Button size="sm" variant="primary" autoFocus onClick={() => { void api.aiResolveApproval(approval.id, true); setApproval(null); }}><Check size={12} /> Run it</Button>
                   <Button size="sm" onClick={() => { void api.aiResolveApproval(approval.id, false); setApproval(null); }}>Deny</Button>
                 </div>
               </div>
@@ -323,7 +323,8 @@ function ToolCard({ name, input, result, connectionId, onAddChart, dashboards, o
     <div className={clsx("rounded-md border text-xs", result?.is_error ? "border-danger/40" : "border-border", "bg-elev")}>
       <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-hover" aria-expanded={open}>
         {open ? <ChevronDown size={12} className="text-faint" /> : <ChevronRight size={12} className="text-faint" />}
-        <Wrench size={12} className={result ? (result.is_error ? "text-danger" : "text-success") : "text-muted"} />
+        <Wrench size={12} className={result ? (result.is_error ? "text-danger" : "text-success") : "text-muted"} aria-hidden />
+        <span className="sr-only">{result ? (result.is_error ? "failed" : "succeeded") : "running"}</span>
         <span className="font-medium">{TOOL_LABELS[name] ?? name}</span>
         <span className="truncate font-mono text-muted flex-1">{summary}</span>
         {!result && <Spinner />}

@@ -204,9 +204,9 @@ export function QueryTab({ tab }: { tab: QTab }) {
         <Panel minSize={20}>
           <div className="flex h-full flex-col">
             {results && results.length > 1 && (
-              <div className="flex h-7 items-center gap-1 border-b border-border bg-sunken px-1 text-xs" role="tablist">
+              <div className="flex h-7 items-center gap-1 border-b border-border bg-sunken px-1 text-xs" role="group" aria-label="Result sets">
                 {results.map((r, i) => (
-                  <button key={i} role="tab" aria-selected={active === i} onClick={() => setActive(i)} className={clsx("rounded px-2 py-0.5", active === i ? "bg-active" : "text-muted hover:text-fg")}>
+                  <button key={i} type="button" aria-pressed={active === i} onClick={() => setActive(i)} className={clsx("rounded px-2 py-0.5", active === i ? "bg-active" : "text-muted hover:text-fg")}>
                     Result {i + 1} <span className="text-faint">({r.columns.length ? `${r.rows.length} rows` : `${r.affected ?? 0} affected`})</span>
                   </button>
                 ))}

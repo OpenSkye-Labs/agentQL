@@ -17,7 +17,7 @@ export function Toasts() {
           )}
         >
           <span className="flex-1 break-words">{t.text}</span>
-          <button onClick={() => dismiss(t.id)} className="text-muted hover:text-fg" aria-label="Dismiss">
+          <button onClick={() => dismiss(t.id)} className="rounded p-1.5 -m-1 text-muted hover:text-fg" aria-label="Dismiss">
             <X size={13} />
           </button>
         </div>

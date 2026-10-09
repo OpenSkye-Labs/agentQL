@@ -106,9 +106,9 @@ export function MongoTab({ tab }: { tab: MTab }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border bg-elev px-2 py-1.5" role="toolbar">
-        <div className="inline-flex rounded-md border border-border p-0.5 text-xs" role="tablist">
+        <div className="inline-flex rounded-md border border-border p-0.5 text-xs" role="group" aria-label="Mode">
           {(["find", "aggregate"] as const).map((m) => (
-            <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)} className={clsx("rounded px-2.5 py-0.5 capitalize", mode === m ? "bg-active" : "text-muted hover:text-fg")}>{m}</button>
+            <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} className={clsx("rounded px-2.5 py-0.5 capitalize", mode === m ? "bg-active" : "text-muted hover:text-fg")}>{m}</button>
           ))}
         </div>
         {mode === "find" ? (
@@ -128,9 +128,9 @@ export function MongoTab({ tab }: { tab: MTab }) {
           <Tooltip label="Insert document"><Button size="sm" variant="ghost" aria-label="Insert document" onClick={() => setEditing({ doc: null, text: "{\n  \n}" })}><Plus size={13} /></Button></Tooltip>
         )}
         <Tooltip label="Reload"><Button size="sm" variant="ghost" aria-label="Reload" onClick={() => void load()}>{loading ? <Spinner /> : <RefreshCw size={13} />}</Button></Tooltip>
-        <div className="inline-flex rounded-md border border-border p-0.5 text-xs" role="tablist">
+        <div className="inline-flex rounded-md border border-border p-0.5 text-xs" role="group" aria-label="Layout">
           {(["json", "table"] as const).map((v) => (
-            <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)} className={clsx("rounded px-2 py-0.5 uppercase", view === v ? "bg-active" : "text-muted hover:text-fg")}>{v}</button>
+            <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={clsx("rounded px-2 py-0.5 uppercase", view === v ? "bg-active" : "text-muted hover:text-fg")}>{v}</button>
           ))}
         </div>
       </div>

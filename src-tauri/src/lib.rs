@@ -63,6 +63,7 @@ pub fn run() {
             commands::redis_scan,
             commands::redis_get,
             commands::redis_command,
+            commands::redis_exec,
             commands::redis_info,
             commands::mongo_collections,
             commands::mongo_find,

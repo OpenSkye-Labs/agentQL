@@ -30,3 +30,18 @@ Scope: all of `src-tauri/src` after the first backend commit (201189b). 22 findi
 | 20 | low | MCP batch shape / id-less requests | Batch stays an array; notifications (no id) get no response; missing method → invalid request. |
 | 21 | low | Negative money < 1 unit lost sign | Fixed formatting. |
 | 22 | low | SQL export identifiers unescaped | Quotes doubled. |
+
+## 2026-10-10 — Frontend accessibility review #1 (Claude subagent, web-design-guidelines)
+
+15 findings, all applied:
+grid gets a selected cell on focus and exposes `aria-activedescendant`; cell editor returns focus to the grid; tab bar
+supports Arrow/Home/End; sidebar tree items carry role/name/state on the focusable element with ArrowUp/Down navigation;
+segmented controls use `aria-pressed` buttons instead of fake tablists; driver and colour pickers are native radios with
+named colours; sortable headers are buttons; muted/NULL/warning tokens raised to ≥4.5:1; connection state and tool
+outcome have text equivalents; approval card is an assertive live region with focus on the primary action; hit targets
+≥24px with visible focus; Redis key list is a list of buttons; charts have an sr-only summary; markdown links are real
+anchors opened through the OS.
+
+## 2026-10-10 — Security scan (automated) — Redis command injection
+Keys/values were interpolated into command-line strings in `RedisTab`. Added `redis_exec(args[])` which passes
+arguments straight to `redis::cmd().arg()`; DEL/EXPIRE/PERSIST/SET now use it.

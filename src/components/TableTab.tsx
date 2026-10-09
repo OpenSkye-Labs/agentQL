@@ -141,9 +141,9 @@ export function TableTab({ tab }: { tab: TTab }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 items-center gap-1 border-b border-border bg-elev px-2" role="toolbar" aria-label="Table actions">
-        <div className="inline-flex rounded-md border border-border p-0.5 text-xs" role="tablist">
+        <div className="inline-flex rounded-md border border-border p-0.5 text-xs" role="group" aria-label="View">
           {(["data", "structure"] as const).map((v) => (
-            <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)} className={clsx("rounded px-2.5 py-0.5 capitalize", view === v ? "bg-active" : "text-muted hover:text-fg")}>
+            <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={clsx("rounded px-2.5 py-0.5 capitalize", view === v ? "bg-active" : "text-muted hover:text-fg")}>
               {v}
             </button>
           ))}

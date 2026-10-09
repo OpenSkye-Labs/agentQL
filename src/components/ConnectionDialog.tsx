@@ -8,6 +8,7 @@ import { DRIVERS, isSql, type ConnectionConfig, type ConnectionSecrets, type Dri
 import { Button, Dialog, Field, Input, Select, Spinner, Switch } from "./ui";
 
 const COLORS = ["#3b6cf6", "#1f8f5a", "#b7791f", "#d23f3f", "#8b5cf6", "#0e9aa7", "#e05d9c", "#6b7280"];
+const COLOR_NAMES = ["Blue", "Green", "Amber", "Red", "Violet", "Teal", "Pink", "Gray"];
 
 function blank(driver: Driver = "postgres"): ConnectionConfig {
   const d = DRIVERS.find((x) => x.id === driver)!;
@@ -143,25 +144,30 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
     >
       <div className="flex flex-col gap-4">
         {/* driver picker */}
-        <div className="grid grid-cols-6 gap-1.5" role="radiogroup" aria-label="Database type">
+        <fieldset className="grid grid-cols-6 gap-1.5">
+          <legend className="sr-only">Database type</legend>
           {DRIVERS.map((d) => (
-            <button
+            <label
               key={d.id}
-              role="radio"
-              aria-checked={cfg.driver === d.id}
-              onClick={() => {
-                if (edit) set("driver", d.id);
-                else setCfg({ ...blank(d.id), name: cfg.name, color: cfg.color, group: cfg.group });
-              }}
               className={clsx(
-                "rounded-md border px-2 py-2 text-xs font-medium",
+                "cursor-pointer rounded-md border px-2 py-2 text-center text-xs font-medium focus-within:outline-2 focus-within:outline-accent",
                 cfg.driver === d.id ? "border-accent bg-accent-soft text-fg" : "border-border bg-elev text-muted hover:bg-hover",
               )}
             >
+              <input
+                type="radio"
+                name="driver"
+                className="sr-only"
+                checked={cfg.driver === d.id}
+                onChange={() => {
+                  if (edit) set("driver", d.id);
+                  else setCfg({ ...blank(d.id), name: cfg.name, color: cfg.color, group: cfg.group });
+                }}
+              />
               {d.label}
-            </button>
+            </label>
           ))}
-        </div>
+        </fieldset>
 
         <div className="grid grid-cols-[1fr_auto_auto] gap-3 items-end">
           <Field label="Name">
@@ -171,28 +177,24 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
             <Input value={cfg.group ?? ""} onChange={(e) => set("group", e.target.value)} placeholder="e.g. Production" className="w-36" />
           </Field>
           <Field label="Color">
-            <div className="flex h-8 items-center gap-1" role="radiogroup" aria-label="Color">
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  role="radio"
-                  aria-checked={cfg.color === c}
-                  aria-label={c}
-                  onClick={() => set("color", c)}
-                  className={clsx("h-4 w-4 rounded-full ring-offset-2 ring-offset-elev", cfg.color === c && "ring-2 ring-accent")}
-                  style={{ background: c }}
-                />
+            <fieldset className="flex h-8 items-center gap-0.5">
+              <legend className="sr-only">Color</legend>
+              {COLORS.map((c, i) => (
+                <label key={c} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full focus-within:outline-2 focus-within:outline-accent" title={COLOR_NAMES[i]}>
+                  <input type="radio" name="color" className="sr-only" checked={cfg.color === c} onChange={() => set("color", c)} aria-label={COLOR_NAMES[i]} />
+                  <span className={clsx("h-4 w-4 rounded-full ring-offset-2 ring-offset-elev", cfg.color === c && "ring-2 ring-accent")} style={{ background: c }} />
+                </label>
               ))}
-            </div>
+            </fieldset>
           </Field>
         </div>
 
         {!sqlite && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted">Connect with</span>
-            <div className="inline-flex rounded-md border border-border p-0.5" role="tablist">
+            <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Connection method">
               {(["fields", "url"] as const).map((m) => (
-                <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)} className={clsx("rounded px-2.5 py-1", mode === m ? "bg-active text-fg" : "text-muted hover:text-fg")}>
+                <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} className={clsx("rounded px-2.5 py-1", mode === m ? "bg-active text-fg" : "text-muted hover:text-fg")}>
                   {m === "fields" ? "Host & credentials" : "Connection URL"}
                 </button>
               ))}

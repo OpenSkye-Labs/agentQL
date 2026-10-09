@@ -55,19 +55,36 @@ export function RedisTab({ tab }: { tab: RTab }) {
     }
   };
 
+  const afterWrite = (first: string) => {
+    if (/^(del|set|expire|persist|hset|lpush|rpush|sadd|zadd|rename|flushdb)$/i.test(first)) {
+      void scan(true);
+      if (selected) void open(selected.key);
+    }
+  };
+
   const runCmd = async (line: string) => {
     if (!conn || !line.trim()) return;
     try {
       const out = await api.redisCommand(conn.id, line);
       setLog((l) => [...l, { cmd: line, out: typeof out === "string" ? out : JSON.stringify(out, null, 2) }]);
-      if (/^(del|set|expire|hset|lpush|rpush|sadd|zadd|rename|flushdb)/i.test(line)) {
-        void scan(true);
-        if (selected) void open(selected.key);
-      }
+      afterWrite(line.trim().split(/\s+/)[0]);
     } catch (e) {
       setLog((l) => [...l, { cmd: line, out: errMsg(e), err: true }]);
     }
     setCmd("");
+  };
+
+  /** Structured commands: keys/values travel as separate arguments, so no quoting is involved. */
+  const exec = async (args: string[]) => {
+    if (!conn) return;
+    const shown = args.map((a) => (/\s|"/.test(a) ? JSON.stringify(a) : a)).join(" ");
+    try {
+      const out = await api.redisExec(conn.id, args);
+      setLog((l) => [...l, { cmd: shown, out: typeof out === "string" ? out : JSON.stringify(out, null, 2) }]);
+      afterWrite(args[0]);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
   };
 
   if (!conn) return <Empty title="Connection removed" />;
@@ -86,21 +103,20 @@ export function RedisTab({ tab }: { tab: RTab }) {
           <Input value={pattern} onChange={(e) => setPattern(e.target.value)} className="h-7 font-mono text-xs" aria-label="Key pattern" placeholder="pattern, e.g. user:*" />
           <Button size="sm" type="submit" aria-label="Scan">{loading ? <Spinner /> : <RefreshCw size={13} />}</Button>
         </form>
-        <div className="flex-1 overflow-auto scroll" role="listbox" aria-label="Keys">
+        <div className="flex-1 overflow-auto scroll" role="list" aria-label="Keys">
           {keys.map((k) => (
-            <div
+            <button
               key={k.key}
-              role="option"
-              aria-selected={selected?.key === k.key}
-              tabIndex={0}
+              type="button"
+              role="listitem"
+              aria-current={selected?.key === k.key}
               onClick={() => void open(k.key)}
-              onKeyDown={(e) => e.key === "Enter" && void open(k.key)}
-              className={clsx("flex items-center gap-2 px-2 py-1 text-xs cursor-default hover:bg-hover", selected?.key === k.key && "bg-active")}
+              className={clsx("flex w-full items-center gap-2 px-2 py-1 text-left text-xs hover:bg-hover", selected?.key === k.key && "bg-active")}
             >
               <span className={clsx("w-11 shrink-0 rounded px-1 text-center text-[10px] font-medium", TYPE_COLORS[k.kind] ?? "bg-hover")}>{k.kind}</span>
               <span className="truncate font-mono flex-1">{k.key}</span>
               {k.ttl >= 0 && <span className="text-[10px] text-faint tabular-nums">{k.ttl}s</span>}
-            </div>
+            </button>
           ))}
           {keys.length === 0 && !loading && <div className="p-4 text-center text-xs text-muted">No keys match</div>}
           {cursor !== "0" && (
@@ -125,13 +141,13 @@ export function RedisTab({ tab }: { tab: RTab }) {
                 <span className="flex items-center gap-1 text-xs text-muted"><Clock size={11} /> {selected.ttl < 0 ? "no expiry" : `${selected.ttl}s`}</span>
                 <span className="flex-1" />
                 <Tooltip label="Set TTL">
-                  <Button size="sm" variant="ghost" onClick={() => { const t = prompt("TTL in seconds (-1 to persist)", String(selected.ttl)); if (t !== null) void runCmd(Number(t) < 0 ? `PERSIST "${selected.key}"` : `EXPIRE "${selected.key}" ${t}`); }}>TTL</Button>
+                  <Button size="sm" variant="ghost" onClick={() => { const t = prompt("TTL in seconds (-1 to persist)", String(selected.ttl)); if (t !== null) void exec(Number(t) < 0 ? ["PERSIST", selected.key] : ["EXPIRE", selected.key, String(Math.max(0, Math.floor(Number(t)) || 0))]); }}>TTL</Button>
                 </Tooltip>
                 <Tooltip label="Delete key">
-                  <Button size="sm" variant="ghost" className="text-danger" onClick={() => { if (confirm(`Delete key "${selected.key}"?`)) { void runCmd(`DEL "${selected.key}"`); setSelected(null); } }} aria-label="Delete key"><Trash2 size={13} /></Button>
+                  <Button size="sm" variant="ghost" className="text-danger" onClick={() => { if (confirm(`Delete key "${selected.key}"?`)) { void exec(["DEL", selected.key]); setSelected(null); } }} aria-label="Delete key"><Trash2 size={13} /></Button>
                 </Tooltip>
               </div>
-              <RedisValueView v={selected} onSet={(val) => runCmd(`SET "${selected.key}" "${val.replace(/"/g, '\\"')}"${selected.ttl > 0 ? ` EX ${selected.ttl}` : ""}`)} readOnly={conn.read_only} />
+              <RedisValueView v={selected} onSet={(val) => exec(["SET", selected.key, val, ...(selected.ttl > 0 ? ["EX", String(selected.ttl)] : [])])} readOnly={conn.read_only} />
             </div>
           ) : (
             <Empty title="Select a key" hint="Keys are loaded with SCAN, so large databases stay responsive. Use the console below for any command." />

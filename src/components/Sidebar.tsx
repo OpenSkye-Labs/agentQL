@@ -64,7 +64,21 @@ export function Sidebar({
           />
         </div>
       </div>
-      <div className="flex-1 overflow-auto scroll pb-4" role="tree" aria-label="Database objects">
+      <div
+        className="flex-1 overflow-auto scroll pb-4"
+        role="tree"
+        aria-label="Database objects"
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+          const items = [...e.currentTarget.querySelectorAll<HTMLElement>("[role=treeitem]")];
+          const i = items.indexOf(document.activeElement as HTMLElement);
+          const next = items[e.key === "ArrowDown" ? i + 1 : i - 1];
+          if (next) {
+            e.preventDefault();
+            next.focus();
+          }
+        }}
+      >
         {connections.length === 0 && (
           <div className="px-3 py-6 text-center text-xs text-muted">
             No connections yet.
@@ -163,9 +177,12 @@ function ConnectionNode({
   ];
 
   return (
-    <div role="treeitem" aria-expanded={connected ? open : undefined}>
+    <div>
       <ContextMenu items={menu}>
         <div
+          role="treeitem"
+          aria-expanded={connected ? open : undefined}
+          aria-label={`${conn.name}, ${driverLabel(conn.driver)}, ${connected ? "connected" : loading ? "connecting" : "disconnected"}`}
           className={clsx("group flex h-7 items-center gap-1.5 pr-1 pl-2 text-[13px] cursor-default hover:bg-hover", connected && "font-medium")}
           onClick={toggle}
           onDoubleClick={() => connected && openTab({ kind: "query", connectionId: conn.id, title: "Query", sql: "" })}
@@ -182,7 +199,7 @@ function ConnectionNode({
           <span className="text-[10px] text-faint">{driverLabel(conn.driver)}</span>
           <Menu
             trigger={
-              <button className="rounded p-0.5 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-active" aria-label={`Actions for ${conn.name}`} onClick={(e) => e.stopPropagation()}>
+              <button className="rounded p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-active" aria-label={`Actions for ${conn.name}`} onClick={(e) => e.stopPropagation()}>
                 <MoreHorizontal size={14} />
               </button>
             }

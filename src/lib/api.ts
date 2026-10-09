@@ -46,6 +46,7 @@ export const api = {
     invoke<ScanResult>("redis_scan", { id, cursor, pattern, count }),
   redisGet: (id: string, key: string) => invoke<RedisValue>("redis_get", { id, key }),
   redisCommand: (id: string, command: string) => invoke<unknown>("redis_command", { id, command }),
+  redisExec: (id: string, args: string[]) => invoke<unknown>("redis_exec", { id, args }),
   redisInfo: (id: string) => invoke<Record<string, string>>("redis_info", { id }),
 
   // mongo

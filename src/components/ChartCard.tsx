@@ -27,7 +27,10 @@ export function ChartCard({ spec, data, error, loading, onAddToDashboard, onRemo
   const tooltipStyle = { contentStyle: { background: "var(--bg-elev)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, color: "var(--fg)" }, labelStyle: { color: "var(--fg-muted)" }, cursor: { fill: "var(--selection)" } };
 
   return (
-    <figure className="flex flex-col rounded-lg border border-border bg-elev" aria-label={spec.title}>
+    <figure className="flex flex-col rounded-lg border border-border bg-elev" aria-label={spec.title} aria-describedby={`${spec.id}-desc`}>
+      <span id={`${spec.id}-desc`} className="sr-only">
+        {data ? `${spec.chart_type} chart of ${yKeys.join(", ") || "values"} by ${xKey}, ${rows.length} points` : "no data"}
+      </span>
       <figcaption className="flex items-center gap-2 border-b border-border px-3 py-1.5">
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-semibold">{spec.title}</div>

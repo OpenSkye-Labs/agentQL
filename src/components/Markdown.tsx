@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { Copy, Play, ArrowDownToLine } from "lucide-react";
 import { useStore } from "../lib/store";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 /** Minimal, dependency-free Markdown → React. Never renders raw HTML (LLM output is untrusted). */
 export function Markdown({ text, connectionId }: { text: string; connectionId?: string }) {
@@ -116,7 +117,14 @@ function inline(text: string): ReactNode {
     if (m[1]) parts.push(<code key={k++}>{m[1].slice(1, -1)}</code>);
     else if (m[2]) parts.push(<strong key={k++}>{m[2].slice(2, -2)}</strong>);
     else if (m[3] || m[4]) parts.push(<em key={k++}>{(m[3] ?? m[4]).slice(1, -1)}</em>);
-    else if (m[5]) parts.push(<span key={k++} className="underline text-accent" title={m[7]}>{m[6]}</span>);
+    else if (m[5]) {
+      const href = m[7];
+      parts.push(
+        <a key={k++} href={href} className="underline text-accent" onClick={(e) => { e.preventDefault(); if (/^https?:\/\//.test(href)) void openUrl(href).catch(() => {}); }}>
+          {m[6]}
+        </a>,
+      );
+    }
     last = m.index + m[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));

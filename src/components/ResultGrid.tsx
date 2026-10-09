@@ -37,6 +37,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
   const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
   const [widths, setWidths] = useState<number[]>([]);
   const [clientSort, setClientSort] = useState<{ column: number; desc: boolean } | null>(null);
+  const gridId = useMemo(() => `grid-${Math.random().toString(36).slice(2, 8)}`, []);
 
   const cols = result.columns;
   // Client-side sort only when the parent does not handle sorting.
@@ -100,6 +101,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
       const value = setNull ? null : parseCell(editing.text, col.type_name, original);
       onEdit?.({ rowIndex: rowIdx, column: col.name, value });
       setEditing(null);
+      parentRef.current?.focus();
     },
     [editing, order, cols, result.rows, onEdit],
   );
@@ -205,11 +207,18 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
     <div className={clsx("flex h-full min-h-0", className)}>
       <div
         ref={parentRef}
-        className="flex-1 overflow-auto scroll bg-elev font-mono text-xs outline-none"
+        className="flex-1 overflow-auto scroll bg-elev font-mono text-xs"
         tabIndex={0}
         role="grid"
         aria-rowcount={order.length}
         aria-colcount={cols.length}
+        aria-activedescendant={sel ? `${gridId}-${sel.r}-${sel.c}` : undefined}
+        onFocus={() => {
+          if (!sel && order.length && cols.length) {
+            setSel({ r: 0, c: 0 });
+            setAnchor({ r: 0, c: 0 });
+          }
+        }}
         onKeyDown={onKeyDown}
       >
         <div style={{ width: totalW, position: "relative" }}>
@@ -224,13 +233,14 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                   role="columnheader"
                   aria-sort={s === "asc" ? "ascending" : s === "desc" ? "descending" : "none"}
                   style={{ width: widths[ci] }}
-                  className="relative flex shrink-0 items-center gap-1 border-r border-border px-2 select-none hover:bg-hover"
-                  onClick={() => headerSort(ci)}
+                  className="relative flex shrink-0 items-center gap-1 border-r border-border select-none hover:bg-hover"
                   title={`${c.name} · ${c.type_name}`}
                 >
-                  <span className={clsx("truncate font-semibold", primaryKeys.includes(c.name) && "text-accent")}>{c.name}</span>
-                  <span className="truncate text-[10px] text-faint">{c.type_name.toLowerCase()}</span>
-                  {s && <span className="ml-auto text-accent">{s === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />}</span>}
+                  <button type="button" onClick={() => headerSort(ci)} aria-label={`Sort by ${c.name}`} className="flex h-full min-w-0 flex-1 items-center gap-1 px-2 text-left">
+                    <span className={clsx("truncate font-semibold", primaryKeys.includes(c.name) && "text-accent")}>{c.name}</span>
+                    <span className="truncate text-[10px] text-faint">{c.type_name.toLowerCase()}</span>
+                    {s && <span className="ml-auto text-accent">{s === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />}</span>}
+                  </button>
                   <div onMouseDown={(e) => onResizeStart(ci, e)} onClick={(e) => e.stopPropagation()} className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-accent/50" aria-hidden />
                 </div>
               );
@@ -280,6 +290,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                       >
                         <div
                           role="gridcell"
+                          id={`${gridId}-${vi.index}-${ci}`}
                           aria-selected={selected}
                           style={{ width: widths[ci] }}
                           className={clsx(
@@ -303,7 +314,10 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                               onBlur={() => commitEdit()}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") commitEdit();
-                                else if (e.key === "Escape") setEditing(null);
+                                else if (e.key === "Escape") {
+                                  setEditing(null);
+                                  parentRef.current?.focus();
+                                }
                                 else if (e.key === "Tab") {
                                   e.preventDefault();
                                   commitEdit();
