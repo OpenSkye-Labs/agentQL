@@ -25,3 +25,6 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - Performance pass: WebKitGTK DMA-BUF renderer (and compositing under WSL) disabled by default on Linux (`AGENTQL_GPU=1` opts
   back in); one shared context menu for the grid and for the sidebar tree instead of a Radix menu per cell/row; no backdrop
   blur; table pages render before COUNT(*) (count streams in afterwards, estimate shown meanwhile).
+- Assistant UI redesigned around an agent activity timeline: each turn shows "Working… / Worked for 8 s · 3 steps" with
+  expandable steps (query text, row counts, result grids), charts and dashboard proposals surface as results, suggestion
+  chips on the empty state, and a composer with the provider picker and read-only/writes toggle built in.
