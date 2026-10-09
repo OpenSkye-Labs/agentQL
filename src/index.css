@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+/* ---- design tokens ---- */
+:root {
+  --bg: #f6f7f9;
+  --bg-elev: #ffffff;
+  --bg-sunken: #eceef2;
+  --bg-hover: #e8eaef;
+  --bg-active: #dfe3ea;
+  --fg: #1a1d23;
+  --fg-muted: #5b6270;
+  --fg-faint: #8a919e;
+  --border: #d9dde4;
+  --border-strong: #b9bfc9;
+  --accent: #3b6cf6;
+  --accent-fg: #ffffff;
+  --accent-soft: #e4ebfe;
+  --success: #1f8f5a;
+  --warning: #b7791f;
+  --danger: #d23f3f;
+  --danger-soft: #fde8e8;
+  --null: #a5abb7;
+  --selection: rgba(59, 108, 246, 0.18);
+  --shadow: 0 8px 30px rgba(20, 24, 40, 0.14);
+  --radius: 8px;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --editor-font-size: 13px;
+  color-scheme: light;
+}
+:root[data-theme="dark"],
+:root:not([data-theme="light"]) {
+  @media (prefers-color-scheme: dark) {
+    --bg: #15171c;
+    --bg-elev: #1d2026;
+    --bg-sunken: #101216;
+    --bg-hover: #262a32;
+    --bg-active: #2f343e;
+    --fg: #e6e8ec;
+    --fg-muted: #9aa3b2;
+    --fg-faint: #6c7483;
+    --border: #2b2f38;
+    --border-strong: #3d424d;
+    --accent: #6c93ff;
+    --accent-fg: #0c1020;
+    --accent-soft: #23304f;
+    --success: #4cc38a;
+    --warning: #e0a94a;
+    --danger: #f2605f;
+    --danger-soft: #3a2224;
+    --null: #5c6473;
+    --selection: rgba(108, 147, 255, 0.25);
+    --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171c;
+  --bg-elev: #1d2026;
+  --bg-sunken: #101216;
+  --bg-hover: #262a32;
+  --bg-active: #2f343e;
+  --fg: #e6e8ec;
+  --fg-muted: #9aa3b2;
+  --fg-faint: #6c7483;
+  --border: #2b2f38;
+  --border-strong: #3d424d;
+  --accent: #6c93ff;
+  --accent-fg: #0c1020;
+  --accent-soft: #23304f;
+  --success: #4cc38a;
+  --warning: #e0a94a;
+  --danger: #f2605f;
+  --danger-soft: #3a2224;
+  --null: #5c6473;
+  --selection: rgba(108, 147, 255, 0.25);
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-elev: var(--bg-elev);
+  --color-sunken: var(--bg-sunken);
+  --color-hover: var(--bg-hover);
+  --color-active: var(--bg-active);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-faint: var(--fg-faint);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+*:focus { outline: none; }
+*:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+::selection { background: var(--selection); }
+.selectable { user-select: text; }
+.scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* CodeMirror */
+.cm-editor { height: 100%; font-size: var(--editor-font-size); background: var(--bg-elev); }
+.cm-editor .cm-scroller { font-family: var(--font-mono); line-height: 1.55; }
+.cm-editor .cm-gutters { background: var(--bg-elev); border-right: 1px solid var(--border); color: var(--fg-faint); }
+.cm-editor .cm-activeLine { background: var(--bg-hover); }
+.cm-editor .cm-activeLineGutter { background: var(--bg-hover); }
+.cm-editor.cm-focused .cm-selectionBackground, .cm-editor .cm-selectionBackground { background: var(--selection) !important; }
+.cm-editor .cm-cursor { border-left-color: var(--fg); }
+.cm-editor .cm-content { caret-color: var(--fg); }
+.cm-tooltip { background: var(--bg-elev) !important; border: 1px solid var(--border) !important; color: var(--fg); box-shadow: var(--shadow); border-radius: 6px; }
+.cm-tooltip-autocomplete ul li[aria-selected] { background: var(--accent-soft) !important; color: var(--fg) !important; }
+.tok-keyword { color: #a626a4; font-weight: 600; }
+.tok-string { color: #50a14f; }
+.tok-number { color: #986801; }
+.tok-comment { color: var(--fg-faint); font-style: italic; }
+.tok-operator { color: var(--fg-muted); }
+.tok-typeName, .tok-propertyName { color: #4078f2; }
+:root[data-theme="dark"] .tok-keyword, :root:not([data-theme="light"]) .tok-keyword { @media (prefers-color-scheme: dark) { color: #c678dd; } }
+:root[data-theme="dark"] .tok-string { color: #98c379; }
+:root[data-theme="dark"] .tok-number { color: #d19a66; }
+:root[data-theme="dark"] .tok-typeName, :root[data-theme="dark"] .tok-propertyName { color: #61afef; }
+
+/* markdown in chat */
+.md p { margin: 0.35em 0; }
+.md pre { background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow: auto; font-family: var(--font-mono); font-size: 12px; user-select: text; }
+.md code { font-family: var(--font-mono); font-size: 12px; background: var(--bg-sunken); padding: 1px 4px; border-radius: 4px; }
+.md pre code { background: none; padding: 0; }
+.md ul, .md ol { padding-left: 1.4em; margin: 0.3em 0; }
+.md table { border-collapse: collapse; margin: 0.4em 0; font-size: 12px; }
+.md th, .md td { border: 1px solid var(--border); padding: 3px 8px; text-align: left; }
+.md h1, .md h2, .md h3 { font-size: 1.05em; margin: 0.6em 0 0.2em; font-weight: 600; }
+
+@keyframes pulse { 0%,100% { opacity: .35 } 50% { opacity: 1 } }
+.pulse { animation: pulse 1.2s ease-in-out infinite; }

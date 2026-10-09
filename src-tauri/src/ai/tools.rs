@@ -1,0 +1,472 @@
+//! Tools exposed to the model (and over MCP). Everything here goes through
+//! `db::Manager`, so API-key providers and CLI providers behave identically.
+
+use super::{AgentEvent, ChatSession, Ctx, ToolDef};
+use crate::config::Driver;
+use crate::db::sql::{is_read_only, split_statements};
+use crate::db::{Live, QueryResult};
+use crate::db::mongo::MongoFind;
+use serde_json::{Value, json};
+
+pub struct ToolOutput {
+    pub content: String,
+    pub is_error: bool,
+    pub display: Option<Value>,
+}
+
+fn ok(content: String, display: Option<Value>) -> ToolOutput {
+    ToolOutput { content, is_error: false, display }
+}
+fn err(msg: impl ToString) -> ToolOutput {
+    ToolOutput { content: msg.to_string(), is_error: true, display: None }
+}
+
+const CHART_PROPS: &str = r#"{
+  "title": {"type": "string"},
+  "description": {"type": "string", "description": "One sentence on what the chart shows"},
+  "chart_type": {"type": "string", "enum": ["bar", "line", "area", "pie", "number", "table"]},
+  "x": {"type": "string", "description": "Column for the x axis / category (omit for number)"},
+  "y": {"type": "array", "items": {"type": "string"}, "description": "Numeric column(s) to plot"},
+  "sql": {"type": "string", "description": "SQL query returning the chart data (SQL connections)"},
+  "mongo": {"type": "object", "description": "Mongo source instead of sql", "properties": {"db": {"type": "string"}, "collection": {"type": "string"}, "pipeline": {"type": "array"}}}
+}"#;
+
+pub fn definitions(driver: Driver) -> Vec<ToolDef> {
+    let t = |name: &str, desc: &str, props: Value, required: &[&str]| ToolDef {
+        name: name.into(),
+        description: desc.into(),
+        input_schema: json!({"type": "object", "properties": props, "required": required}),
+    };
+    let chart_props: Value = serde_json::from_str(CHART_PROPS).unwrap();
+    let mut defs = vec![];
+    if driver.is_sql() {
+        defs.extend([
+            t("list_schemas", "List schemas (databases for MySQL) available on this connection.", json!({}), &[]),
+            t("list_tables", "List tables and views in a schema with approximate row counts.", json!({"schema": {"type": "string"}}), &["schema"]),
+            t(
+                "describe_table",
+                "Columns (name, type, nullable, default, primary key), indexes, foreign keys and DDL of a table.",
+                json!({"schema": {"type": "string"}, "table": {"type": "string"}}),
+                &["table"],
+            ),
+            t(
+                "run_sql",
+                "Execute SQL on the user's database and return the rows. Prefer SELECT; write statements require user approval and may be disabled. Always add a LIMIT when exploring.",
+                json!({"sql": {"type": "string"}, "limit": {"type": "integer", "description": "max rows to return (default 200)"}}),
+                &["sql"],
+            ),
+            t(
+                "explain_sql",
+                "Return the database's execution plan for a query (EXPLAIN). Use to optimise queries; set analyze=true to actually run it and get real timings (read-only queries only).",
+                json!({"sql": {"type": "string"}, "analyze": {"type": "boolean"}}),
+                &["sql"],
+            ),
+        ]);
+    }
+    if driver == Driver::Redis {
+        defs.extend([
+            t("redis_scan", "Scan keys matching a glob pattern with their types and TTLs.", json!({"pattern": {"type": "string"}, "count": {"type": "integer"}}), &[]),
+            t(
+                "redis_command",
+                "Run a Redis command (e.g. 'HGETALL user:1', 'INFO memory'). Only read commands run without approval.",
+                json!({"command": {"type": "string"}}),
+                &["command"],
+            ),
+        ]);
+    }
+    if driver == Driver::Mongodb {
+        defs.extend([
+            t("list_databases", "List MongoDB databases.", json!({}), &[]),
+            t("list_collections", "List collections in a database with estimated counts.", json!({"db": {"type": "string"}}), &["db"]),
+            t("describe_collection", "Sampled field names/types, indexes and stats of a collection.", json!({"db": {"type": "string"}, "collection": {"type": "string"}}), &["db", "collection"]),
+            t(
+                "mongo_find",
+                "Find documents. filter/sort/projection are MongoDB query documents (extended JSON allowed).",
+                json!({"db": {"type": "string"}, "collection": {"type": "string"}, "filter": {"type": "object"}, "sort": {"type": "object"}, "projection": {"type": "object"}, "limit": {"type": "integer"}}),
+                &["db", "collection"],
+            ),
+            t(
+                "mongo_aggregate",
+                "Run an aggregation pipeline (array of stages) and return the resulting documents.",
+                json!({"db": {"type": "string"}, "collection": {"type": "string"}, "pipeline": {"type": "array"}, "limit": {"type": "integer"}}),
+                &["db", "collection", "pipeline"],
+            ),
+        ]);
+    }
+    if driver != Driver::Redis {
+        defs.push(t(
+            "create_chart",
+            "Run a query and render it as a chart card in the chat. The user can add it to a dashboard. Use for any visual answer.",
+            chart_props.clone(),
+            &["title", "chart_type"],
+        ));
+        defs.push(t(
+            "propose_dashboard",
+            "Build a whole dashboard from several chart definitions; each chart is validated by running its query. The user can save it with one click.",
+            json!({"title": {"type": "string"}, "description": {"type": "string"}, "charts": {"type": "array", "items": {"type": "object", "properties": chart_props}}}),
+            &["title", "charts"],
+        ));
+    }
+    defs
+}
+
+pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
+    let Ok(conn) = ctx.manager.get(&session.connection_id).await else {
+        return "You are AgentQL, a database assistant. The connection is currently offline.".into();
+    };
+    let cfg = &conn.config;
+    let mut s = format!(
+        "You are AgentQL, an expert database assistant embedded in a desktop SQL client. \
+         You are connected to a {} database named '{}' (connection '{}').\n\
+         Use the tools to inspect schema and run queries before answering; never guess table or column names. \
+         When you write SQL, use the {} dialect and put it in a ```sql fenced block so the user can insert it into the editor. \
+         Keep answers concise. When the user asks for a visual or a dashboard, use create_chart / propose_dashboard. \
+         For optimisation requests, call explain_sql, then explain the plan and propose a rewritten query and/or indexes.\n",
+        cfg.driver.label(),
+        cfg.database,
+        cfg.name,
+        cfg.driver.label()
+    );
+    if cfg.read_only {
+        s.push_str("This connection is READ-ONLY: never attempt write statements.\n");
+    }
+    match &conn.live {
+        Live::Sql(c) => {
+            if let Ok(schemas) = c.schemas().await {
+                s.push_str("\nSchemas and tables:\n");
+                let mut budget = 150usize;
+                for schema in schemas.iter().take(10) {
+                    if let Ok(tables) = c.tables(schema).await {
+                        let names: Vec<&str> = tables.iter().take(budget).map(|t| t.name.as_str()).collect();
+                        budget = budget.saturating_sub(names.len());
+                        s.push_str(&format!("- {schema}: {}{}\n", names.join(", "), if tables.len() > names.len() { ", …" } else { "" }));
+                    }
+                    if budget == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        Live::Mongo(m) => {
+            if let Ok(dbs) = m.databases().await {
+                s.push_str(&format!("\nDatabases: {}\n", dbs.join(", ")));
+                if let Some(db) = m.default_db.as_deref().or(dbs.first().map(|x| x.as_str())) {
+                    if let Ok(cols) = m.collections(db).await {
+                        let names: Vec<String> = cols.iter().filter_map(|c| c["name"].as_str().map(|s| s.to_string())).collect();
+                        s.push_str(&format!("Collections in {db}: {}\n", names.join(", ")));
+                    }
+                }
+            }
+        }
+        Live::Redis(r) => {
+            if let Ok(info) = r.info().await {
+                s.push_str(&format!(
+                    "\nRedis {} · {} keys · used memory {}\n",
+                    info["redis_version"].as_str().unwrap_or("?"),
+                    info["dbsize"],
+                    info["used_memory_human"].as_str().unwrap_or("?")
+                ));
+            }
+        }
+    }
+    s
+}
+
+fn str_arg<'a>(input: &'a Value, k: &str) -> Option<&'a str> {
+    input.get(k).and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty())
+}
+
+pub async fn execute(ctx: &Ctx, session: &ChatSession, name: &str, input: &Value) -> ToolOutput {
+    match execute_inner(ctx, session, name, input).await {
+        Ok(o) => o,
+        Err(e) => err(e),
+    }
+}
+
+async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Value) -> crate::error::Result<ToolOutput> {
+    let conn = ctx.manager.get(&session.connection_id).await?;
+    let settings = ctx.store.settings();
+    let writes_allowed = settings.agent_allow_writes && !conn.config.read_only;
+
+    match (&conn.live, name) {
+        (Live::Sql(c), "list_schemas") => Ok(ok(serde_json::to_string(&c.schemas().await?)?, None)),
+        (Live::Sql(c), "list_tables") => {
+            let schema = match str_arg(input, "schema") {
+                Some(s) => s.to_string(),
+                None => c.schemas().await?.into_iter().next().unwrap_or_default(),
+            };
+            let tables = c.tables(&schema).await?;
+            let lines: Vec<String> = tables
+                .iter()
+                .map(|t| format!("{} ({}{})", t.name, t.kind, t.row_estimate.map(|n| format!(", ~{n} rows")).unwrap_or_default()))
+                .collect();
+            Ok(ok(lines.join("\n"), None))
+        }
+        (Live::Sql(c), "describe_table") => {
+            let table = str_arg(input, "table").ok_or("table is required")?;
+            let schema = match str_arg(input, "schema") {
+                Some(s) => s.to_string(),
+                None => c.schemas().await?.into_iter().next().unwrap_or_default(),
+            };
+            let d = c.table_details(&schema, table).await?;
+            let mut s = format!("Table {schema}.{table}\nColumns:\n");
+            for col in &d.columns {
+                s.push_str(&format!(
+                    "- {} {}{}{}{}\n",
+                    col.name,
+                    col.data_type,
+                    if col.is_primary { " PK" } else { "" },
+                    if col.nullable { "" } else { " NOT NULL" },
+                    col.default.as_ref().map(|v| format!(" DEFAULT {v}")).unwrap_or_default()
+                ));
+            }
+            if !d.indexes.is_empty() {
+                s.push_str("Indexes:\n");
+                for i in &d.indexes {
+                    s.push_str(&format!("- {} ({}){}\n", i.name, i.columns.join(", "), if i.unique { " UNIQUE" } else { "" }));
+                }
+            }
+            if !d.foreign_keys.is_empty() {
+                s.push_str("Foreign keys:\n");
+                for f in &d.foreign_keys {
+                    s.push_str(&format!("- {} ({}) -> {}({})\n", f.name, f.columns.join(", "), f.ref_table, f.ref_columns.join(", ")));
+                }
+            }
+            Ok(ok(s, Some(json!({"type": "table_details", "schema": schema, "table": table, "details": d}))))
+        }
+        (Live::Sql(c), "run_sql") => {
+            let sql = str_arg(input, "sql").ok_or("sql is required")?;
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(200).min(2000) as u32;
+            if !is_read_only(conn.config.driver, sql) {
+                if !writes_allowed {
+                    return Ok(err("This statement writes data. Writes by the agent are disabled (Settings → AI → allow writes), or the connection is read-only. Ask the user to run it themselves by giving them the SQL."));
+                }
+                if !ctx.request_approval(&session.id, "The agent wants to run a write statement", sql).await {
+                    return Ok(err("The user declined to run this statement."));
+                }
+            }
+            let results = c.run(sql, limit).await?;
+            let mut text = String::new();
+            for r in &results {
+                text.push_str(&format_result(r, 50));
+                text.push('\n');
+            }
+            Ok(ok(text, Some(json!({"type": "query_results", "results": results}))))
+        }
+        (Live::Sql(c), "explain_sql") => {
+            let sql = str_arg(input, "sql").ok_or("sql is required")?;
+            let analyze = input.get("analyze").and_then(|v| v.as_bool()).unwrap_or(false);
+            if analyze && !is_read_only(conn.config.driver, sql) {
+                return Ok(err("EXPLAIN ANALYZE would execute a write statement; run plain explain instead."));
+            }
+            let stmt = split_statements(sql).into_iter().next().unwrap_or_default();
+            let r = c.run_one(&c.explain_sql(&stmt, analyze), 5000).await?;
+            let plan: Vec<String> = r.rows.iter().map(|row| row.iter().map(cell_text).collect::<Vec<_>>().join(" | ")).collect();
+            Ok(ok(plan.join("\n"), Some(json!({"type": "plan", "plan": plan.join("\n")}))))
+        }
+        (Live::Redis(r), "redis_scan") => {
+            let pattern = str_arg(input, "pattern").unwrap_or("*");
+            let count = input.get("count").and_then(|v| v.as_u64()).unwrap_or(100).min(1000) as u32;
+            let res = r.scan("0", pattern, count).await?;
+            let lines: Vec<String> = res.keys.iter().map(|k| format!("{} ({}, ttl {})", k.key, k.kind, k.ttl)).collect();
+            Ok(ok(format!("{}\nnext cursor: {}", lines.join("\n"), res.cursor), None))
+        }
+        (Live::Redis(r), "redis_command") => {
+            let cmd = str_arg(input, "command").ok_or("command is required")?;
+            if !crate::db::redis::is_read_only_command(cmd) {
+                if !writes_allowed {
+                    return Ok(err("Only read commands are allowed for the agent on this connection."));
+                }
+                if !ctx.request_approval(&session.id, "The agent wants to run a Redis write command", cmd).await {
+                    return Ok(err("The user declined to run this command."));
+                }
+            }
+            let v = r.command(cmd).await?;
+            Ok(ok(truncate(&serde_json::to_string_pretty(&v)?, 8000), Some(json!({"type": "json", "value": v}))))
+        }
+        (Live::Mongo(m), "list_databases") => Ok(ok(m.databases().await?.join("\n"), None)),
+        (Live::Mongo(m), "list_collections") => {
+            let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
+            let cols = m.collections(&db).await?;
+            Ok(ok(cols.iter().map(|c| format!("{} (~{} docs)", c["name"].as_str().unwrap_or("?"), c["count"])).collect::<Vec<_>>().join("\n"), None))
+        }
+        (Live::Mongo(m), "describe_collection") => {
+            let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
+            let coll = str_arg(input, "collection").ok_or("collection is required")?;
+            let info = m.collection_info(&db, coll).await?;
+            Ok(ok(truncate(&serde_json::to_string_pretty(&json!({"fields": info["fields"], "indexes": info["indexes"]}))?, 8000), Some(json!({"type": "json", "value": info}))))
+        }
+        (Live::Mongo(m), "mongo_find") => {
+            let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
+            let q = MongoFind {
+                db,
+                collection: str_arg(input, "collection").ok_or("collection is required")?.to_string(),
+                filter: input.get("filter").cloned(),
+                sort: input.get("sort").cloned(),
+                projection: input.get("projection").cloned(),
+                limit: input.get("limit").and_then(|v| v.as_i64()).unwrap_or(20).min(500),
+                skip: 0,
+            };
+            let page = m.find(&q).await?;
+            let text = format!("{} matching (showing {}):\n{}", page.total.map(|t| t.to_string()).unwrap_or("?".into()), page.docs.len(), truncate(&serde_json::to_string_pretty(&page.docs)?, 8000));
+            Ok(ok(text, Some(json!({"type": "documents", "docs": page.docs}))))
+        }
+        (Live::Mongo(m), "mongo_aggregate") => {
+            let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
+            let coll = str_arg(input, "collection").ok_or("collection is required")?;
+            let pipeline = input.get("pipeline").ok_or("pipeline is required")?;
+            if pipeline_writes(pipeline) && !writes_allowed {
+                return Ok(err("$out / $merge stages write data; agent writes are disabled."));
+            }
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100).min(2000) as usize;
+            let docs = m.aggregate(&db, coll, pipeline, limit).await?;
+            Ok(ok(truncate(&serde_json::to_string_pretty(&docs)?, 8000), Some(json!({"type": "documents", "docs": docs}))))
+        }
+        (_, "create_chart") => {
+            let spec = chart_spec(input, &conn.config.driver)?;
+            let data = run_chart_source(ctx, &session.connection_id, &spec["source"], writes_allowed).await?;
+            let summary = format!("Chart '{}' ready: {} rows, columns {}", spec["title"].as_str().unwrap_or(""), data.rows.len(), data.columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>().join(", "));
+            Ok(ok(summary, Some(json!({"type": "chart", "spec": spec, "data": data}))))
+        }
+        (_, "propose_dashboard") => {
+            let title = str_arg(input, "title").unwrap_or("Dashboard");
+            let charts = input.get("charts").and_then(|c| c.as_array()).ok_or("charts must be an array")?;
+            let mut out = vec![];
+            let mut notes = vec![];
+            for c in charts {
+                let spec = chart_spec(c, &conn.config.driver)?;
+                match run_chart_source(ctx, &session.connection_id, &spec["source"], writes_allowed).await {
+                    Ok(data) => {
+                        notes.push(format!("✓ {} ({} rows)", spec["title"].as_str().unwrap_or(""), data.rows.len()));
+                        out.push(json!({"spec": spec, "data": data}));
+                    }
+                    Err(e) => notes.push(format!("✗ {}: {e}", spec["title"].as_str().unwrap_or(""))),
+                }
+            }
+            Ok(ok(
+                format!("Dashboard '{title}' with {} charts:\n{}", out.len(), notes.join("\n")),
+                Some(json!({"type": "dashboard", "title": title, "description": input.get("description"), "charts": out})),
+            ))
+        }
+        _ => Ok(err(format!("unknown tool '{name}' for this connection type"))),
+    }
+}
+
+fn pipeline_writes(p: &Value) -> bool {
+    p.as_array().map(|a| a.iter().any(|s| s.get("$out").is_some() || s.get("$merge").is_some())).unwrap_or(false)
+}
+
+/// Normalised chart spec stored in dashboards: {title, description, chart_type, x, y[], source}.
+pub fn chart_spec(input: &Value, driver: &Driver) -> crate::error::Result<Value> {
+    let source = if let Some(sql) = str_arg(input, "sql") {
+        json!({"kind": "sql", "sql": sql})
+    } else if let Some(m) = input.get("mongo") {
+        json!({"kind": "mongo", "db": m.get("db"), "collection": m.get("collection"), "pipeline": m.get("pipeline").cloned().unwrap_or(json!([]))})
+    } else if driver.is_sql() {
+        return Err("chart needs a sql query".into());
+    } else {
+        return Err("chart needs a mongo source".into());
+    };
+    Ok(json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "title": str_arg(input, "title").unwrap_or("Untitled"),
+        "description": input.get("description"),
+        "chart_type": str_arg(input, "chart_type").unwrap_or("table"),
+        "x": input.get("x"),
+        "y": input.get("y").cloned().unwrap_or(json!([])),
+        "source": source,
+    }))
+}
+
+/// Execute a chart source and return tabular data. Shared by the agent and the dashboards page.
+pub async fn run_chart_source(ctx: &Ctx, connection_id: &str, source: &Value, allow_writes: bool) -> crate::error::Result<QueryResult> {
+    let conn = ctx.manager.get(connection_id).await?;
+    match (&conn.live, source.get("kind").and_then(|k| k.as_str())) {
+        (Live::Sql(c), Some("sql")) => {
+            let sql = source.get("sql").and_then(|s| s.as_str()).ok_or("missing sql")?;
+            if !allow_writes && !is_read_only(conn.config.driver, sql) {
+                return Err("chart queries must be read-only".into());
+            }
+            let mut results = c.run(sql, 5000).await?;
+            results.pop().ok_or_else(|| "query returned nothing".into())
+        }
+        (Live::Mongo(m), Some("mongo")) => {
+            let db = source.get("db").and_then(|s| s.as_str()).map(str::to_string).or_else(|| m.default_db.clone()).ok_or("missing db")?;
+            let coll = source.get("collection").and_then(|s| s.as_str()).ok_or("missing collection")?;
+            let pipeline = source.get("pipeline").ok_or("missing pipeline")?;
+            if pipeline_writes(pipeline) && !allow_writes {
+                return Err("chart pipelines must be read-only".into());
+            }
+            let docs = m.aggregate(&db, coll, pipeline, 5000).await?;
+            Ok(docs_to_table(&docs))
+        }
+        _ => Err("chart source does not match the connection type".into()),
+    }
+}
+
+pub fn docs_to_table(docs: &[Value]) -> QueryResult {
+    let mut cols: Vec<String> = vec![];
+    for d in docs {
+        if let Some(o) = d.as_object() {
+            for k in o.keys() {
+                if !cols.contains(k) {
+                    cols.push(k.clone());
+                }
+            }
+        }
+    }
+    QueryResult {
+        columns: cols.iter().map(|c| crate::db::Column { name: c.clone(), type_name: "bson".into() }).collect(),
+        rows: docs.iter().map(|d| cols.iter().map(|c| d.get(c).cloned().unwrap_or(Value::Null)).collect()).collect(),
+        ..Default::default()
+    }
+}
+
+fn cell_text(v: &Value) -> String {
+    match v {
+        Value::Null => "NULL".into(),
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Compact markdown rendering for the model.
+pub fn format_result(r: &QueryResult, max_rows: usize) -> String {
+    if r.columns.is_empty() {
+        return format!("OK, {} row(s) affected ({} ms)", r.affected.unwrap_or(0), r.duration_ms);
+    }
+    let mut s = String::new();
+    s.push_str(&format!("| {} |\n", r.columns.iter().map(|c| c.name.replace('|', "\\|")).collect::<Vec<_>>().join(" | ")));
+    s.push_str(&format!("|{}|\n", r.columns.iter().map(|_| "---").collect::<Vec<_>>().join("|")));
+    for row in r.rows.iter().take(max_rows) {
+        s.push_str(&format!("| {} |\n", row.iter().map(|v| truncate(&cell_text(v), 120).replace('|', "\\|").replace('\n', " ")).collect::<Vec<_>>().join(" | ")));
+    }
+    if r.rows.len() > max_rows {
+        s.push_str(&format!("… {} more rows not shown\n", r.rows.len() - max_rows));
+    }
+    s.push_str(&format!("({} rows{}, {} ms)", r.rows.len(), if r.truncated { ", truncated" } else { "" }, r.duration_ms));
+    s
+}
+
+pub fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max).collect::<String>()) }
+}
+
+/// Used by the MCP server: run a tool for a session and mirror events to the UI.
+pub async fn execute_for_mcp(ctx: &Ctx, session_id: &str, name: &str, input: &Value) -> ToolOutput {
+    let session = match ctx.load_session(session_id) {
+        Ok(s) => s,
+        Err(e) => return err(e),
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    ctx.emit(session_id, &AgentEvent::ToolCall { id: id.clone(), name: name.into(), input: input.clone() });
+    let out = execute(ctx, &session, name, input).await;
+    ctx.emit(session_id, &AgentEvent::ToolResult { id: id.clone(), content: out.content.clone(), is_error: out.is_error, display: out.display.clone() });
+    // Persist the call on the session so the transcript survives reloads.
+    if let Ok(mut s) = ctx.load_session(session_id) {
+        s.messages.push(super::Message::new("assistant", vec![super::Block::ToolUse { id: id.clone(), name: name.into(), input: input.clone() }]));
+        s.messages.push(super::Message::new("user", vec![super::Block::ToolResult { tool_use_id: id, content: out.content.clone(), is_error: out.is_error, display: out.display.clone() }]));
+        let _ = ctx.save_session(&mut s);
+    }
+    out
+}
