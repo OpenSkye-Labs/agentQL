@@ -40,11 +40,10 @@ impl SqlConn {
                         .username(&c.user)
                         .database(if c.database.is_empty() { "postgres" } else { &c.database }),
                 };
-                if let Some(pw) = &s.password {
-                    if !pw.is_empty() {
+                if let Some(pw) = &s.password
+                    && !pw.is_empty() {
                         o = o.password(pw);
                     }
-                }
                 if let Some(mode) = &c.ssl_mode {
                     o = o.ssl_mode(match mode.as_str() {
                         "disable" => PgSslMode::Disable,
@@ -90,11 +89,10 @@ impl SqlConn {
                         o
                     }
                 };
-                if let Some(pw) = &s.password {
-                    if !pw.is_empty() {
+                if let Some(pw) = &s.password
+                    && !pw.is_empty() {
                         o = o.password(pw);
                     }
-                }
                 if let Some(mode) = &c.ssl_mode {
                     o = o.ssl_mode(match mode.as_str() {
                         "disable" => MySqlSslMode::Disabled,

@@ -150,12 +150,11 @@ pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
         Live::Mongo(m) => {
             if let Ok(dbs) = m.databases().await {
                 s.push_str(&format!("\nDatabases: {}\n", dbs.join(", ")));
-                if let Some(db) = m.default_db.as_deref().or(dbs.first().map(|x| x.as_str())) {
-                    if let Ok(cols) = m.collections(db).await {
+                if let Some(db) = m.default_db.as_deref().or(dbs.first().map(|x| x.as_str()))
+                    && let Ok(cols) = m.collections(db).await {
                         let names: Vec<String> = cols.iter().filter_map(|c| c["name"].as_str().map(|s| s.to_string())).collect();
                         s.push_str(&format!("Collections in {db}: {}\n", names.join(", ")));
                     }
-                }
             }
         }
         Live::Redis(r) => {

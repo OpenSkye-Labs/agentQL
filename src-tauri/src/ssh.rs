@@ -183,10 +183,9 @@ async fn authenticate_with_agent(
 }
 
 fn shellexpand_home(p: &str) -> String {
-    if let Some(rest) = p.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+    if let Some(rest) = p.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
             return format!("{}/{}", home.to_string_lossy(), rest);
         }
-    }
     p.to_string()
 }

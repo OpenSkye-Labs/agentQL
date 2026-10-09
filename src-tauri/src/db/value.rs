@@ -117,7 +117,7 @@ fn format_interval(months: i32, days: i32, micros: i64) -> String {
         let us = a % 1_000_000;
         let mut t = format!("{}{:02}:{:02}:{:02}", if neg { "-" } else { "" }, h, m, s);
         if us != 0 {
-            t.push_str(&format!(".{:06}", us).trim_end_matches('0').to_string());
+            t.push_str(format!(".{:06}", us).trim_end_matches('0'));
         }
         parts.push(t);
     }

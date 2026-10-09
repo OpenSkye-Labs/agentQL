@@ -165,11 +165,10 @@ impl Manager {
     }
 
     pub async fn disconnect(&self, id: &str) {
-        if let Some(s) = self.sessions.write().await.remove(id) {
-            if let Live::Sql(c) = &s.live {
+        if let Some(s) = self.sessions.write().await.remove(id)
+            && let Live::Sql(c) = &s.live {
                 c.close().await;
             }
-        }
     }
 
     pub async fn get(&self, id: &str) -> Result<Arc<Session>> {

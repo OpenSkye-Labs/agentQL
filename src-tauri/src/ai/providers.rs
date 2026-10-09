@@ -262,12 +262,11 @@ async fn openai(
             finished = true;
         }
         let Some(delta) = ev.pointer("/choices/0/delta") else { return };
-        if let Some(t) = delta["content"].as_str() {
-            if !t.is_empty() {
+        if let Some(t) = delta["content"].as_str()
+            && !t.is_empty() {
                 text.push_str(t);
                 ctx.emit(session_id, &AgentEvent::TextDelta { text: t.into() });
             }
-        }
         if let Some(tcs) = delta["tool_calls"].as_array() {
             for tc in tcs {
                 let idx = tc["index"].as_u64().unwrap_or(calls.len() as u64) as usize;
@@ -408,8 +407,8 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
                     }
                 }
                 "assistant" => {
-                    if !got_delta {
-                        if let Some(content) = ev.pointer("/message/content").and_then(|c| c.as_array()) {
+                    if !got_delta
+                        && let Some(content) = ev.pointer("/message/content").and_then(|c| c.as_array()) {
                             for b in content {
                                 if let Some(t) = b["text"].as_str() {
                                     text.push_str(t);
@@ -418,7 +417,6 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
                                 }
                             }
                         }
-                    }
                     got_delta = false;
                 }
                 "result" => {

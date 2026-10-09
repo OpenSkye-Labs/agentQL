@@ -143,12 +143,11 @@ pub async fn connect(st: State<'_, AppState>, id: String, database: Option<Strin
         .ok_or_else(|| AppError::Msg("connection not found".into()))?;
     if let Some(db) = database.filter(|d| !d.is_empty()) {
         cfg.database = db.clone();
-        if let Some(url) = &cfg.url {
-            if let Ok(mut u) = url::Url::parse(url) {
+        if let Some(url) = &cfg.url
+            && let Ok(mut u) = url::Url::parse(url) {
                 u.set_path(&format!("/{db}"));
                 cfg.url = Some(u.to_string());
             }
-        }
     }
     let secrets = st.store.connection_secrets(&id);
     st.manager.disconnect(&id).await;

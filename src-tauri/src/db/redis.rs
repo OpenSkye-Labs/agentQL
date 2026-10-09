@@ -26,11 +26,10 @@ impl RedisConn {
         let url = match &c.url {
             Some(u) => {
                 let mut u = url::Url::parse(u).map_err(|e| AppError::Msg(format!("invalid url: {e}")))?;
-                if u.password().is_none() {
-                    if let Some(pw) = s.password.as_deref().filter(|p| !p.is_empty()) {
+                if u.password().is_none()
+                    && let Some(pw) = s.password.as_deref().filter(|p| !p.is_empty()) {
                         let _ = u.set_password(Some(pw));
                     }
-                }
                 u.to_string()
             }
             None => {
@@ -109,8 +108,8 @@ impl RedisConn {
         };
         let mut value = to_json(value);
         // RESP2 returns hashes as a flat [field, value, ...] array; normalise to an object.
-        if kind == "hash" {
-            if let Value::Array(items) = &value {
+        if kind == "hash"
+            && let Value::Array(items) = &value {
                 let mut map = serde_json::Map::new();
                 for pair in items.chunks(2) {
                     if let [k, v] = pair {
@@ -119,7 +118,6 @@ impl RedisConn {
                 }
                 value = Value::Object(map);
             }
-        }
         Ok(json!({ "key": key, "type": kind, "ttl": ttl, "size": size, "value": value }))
     }
 
