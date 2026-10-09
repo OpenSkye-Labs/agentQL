@@ -56,6 +56,7 @@ pub fn run() {
             commands::list_tables,
             commands::table_details,
             commands::fetch_table,
+            commands::count_table,
             commands::preview_changes,
             commands::apply_changes,
             commands::ssh_forget_host,

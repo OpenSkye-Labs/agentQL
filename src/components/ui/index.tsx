@@ -113,7 +113,7 @@ export function Dialog({
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <RDialog.Portal>
-        <RDialog.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]" />
+        <RDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
         <RDialog.Content
           className={clsx(
             "fixed left-1/2 top-1/2 z-50 w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-elev shadow-[var(--shadow)] flex flex-col max-h-[90vh]",

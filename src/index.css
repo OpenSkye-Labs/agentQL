@@ -21,7 +21,7 @@
   --danger-soft: #fde8e8;
   --null: #7b8290;
   --selection: rgba(59, 108, 246, 0.18);
-  --shadow: 0 8px 30px rgba(20, 24, 40, 0.14);
+  --shadow: 0 4px 16px rgba(20, 24, 40, 0.14);
   --radius: 8px;
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
@@ -50,7 +50,7 @@
     --danger-soft: #3a2224;
     --null: #7f879a;
     --selection: rgba(108, 147, 255, 0.25);
-    --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     color-scheme: dark;
   }
 }
@@ -74,7 +74,7 @@
   --danger-soft: #3a2224;
   --null: #7f879a;
   --selection: rgba(108, 147, 255, 0.25);
-  --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
 }
 

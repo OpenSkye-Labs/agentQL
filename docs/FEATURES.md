@@ -22,3 +22,6 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - Visual QA mode: `pnpm dev` then open `http://localhost:1420/?mock=1` to run the whole UI in a browser against in-page sample
   data (src/lib/mock.ts, dev builds only). Used to screenshot every screen and fix alignment issues.
 - Per-tab error boundaries: a crash inside one tab or the assistant panel shows an inline error with "Try again" instead of a blank window.
+- Performance pass: WebKitGTK DMA-BUF renderer (and compositing under WSL) disabled by default on Linux (`AGENTQL_GPU=1` opts
+  back in); one shared context menu for the grid and for the sidebar tree instead of a Radix menu per cell/row; no backdrop
+  blur; table pages render before COUNT(*) (count streams in afterwards, estimate shown meanwhile).

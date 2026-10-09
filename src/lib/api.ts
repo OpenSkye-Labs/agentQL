@@ -33,6 +33,7 @@ export const api = {
   listTables: (id: string, schema: string) => invoke<TableInfo[]>("list_tables", { id, schema }),
   tableDetails: (id: string, schema: string, table: string) => invoke<TableDetails>("table_details", { id, schema, table }),
   fetchTable: (id: string, query: TableQuery) => invoke<TablePage>("fetch_table", { id, query }),
+  countTable: (id: string, query: TableQuery) => invoke<number>("count_table", { id, query }),
   previewChanges: (id: string, schema: string | null, table: string, changes: RowChange[], types?: Record<string, string>) =>
     invoke<string[]>("preview_changes", { id, schema, table, changes, types }),
   applyChanges: (id: string, schema: string | null, table: string, changes: RowChange[], types?: Record<string, string>) =>

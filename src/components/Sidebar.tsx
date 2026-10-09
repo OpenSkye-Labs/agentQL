@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import {
   Bot, ChevronDown, ChevronRight, Database, Eye, FolderOpen, KeySquare, Braces, MoreHorizontal, Pencil, Plug, PlugZap, Plus, RefreshCw, Search,
@@ -9,6 +9,10 @@ import { api, errMsg } from "../lib/api";
 import { driverLabel, isSql, type ConnectionConfig, type TableInfo } from "../lib/types";
 import { Button, ContextMenu, Menu, Spinner, Tooltip } from "./ui";
 import { fmtCount } from "../lib/format";
+
+type Items = React.ComponentProps<typeof ContextMenu>["items"];
+/** One Radix context menu for the whole tree; rows just publish their items on right-click. */
+const MenuCtx = createContext<(items: Items) => void>(() => {});
 
 export function Sidebar({
   onNewConnection,
@@ -24,6 +28,7 @@ export function Sidebar({
   const filter = useStore((s) => s.sidebarFilter);
   const setFilter = useStore((s) => s.setSidebarFilter);
   const dashboards = useStore((s) => s.dashboards);
+  const [menuItems, setMenuItems] = useState<Items>([]);
 
   const groups = useMemo(() => {
     const m = new Map<string, ConnectionConfig[]>();
@@ -64,6 +69,8 @@ export function Sidebar({
           />
         </div>
       </div>
+      <MenuCtx.Provider value={setMenuItems}>
+      <ContextMenu items={menuItems.length ? menuItems : [{ label: "No actions here", disabled: true }]}>
       <div
         className="flex-1 overflow-auto scroll pb-4"
         role="tree"
@@ -102,6 +109,8 @@ export function Sidebar({
           </div>
         ))}
       </div>
+      </ContextMenu>
+      </MenuCtx.Provider>
     </aside>
   );
 }
@@ -186,10 +195,11 @@ function ConnectionNode({
     },
   ];
 
+  const publish = useContext(MenuCtx);
   return (
     <div>
-      <ContextMenu items={menu}>
         <div
+          onContextMenu={() => publish(menu)}
           role="treeitem"
           aria-expanded={connected ? open : undefined}
           aria-label={`${conn.name}, ${driverLabel(conn.driver)}, ${connected ? "connected" : loading ? "connecting" : "disconnected"}`}
@@ -216,7 +226,6 @@ function ConnectionNode({
             items={menu}
           />
         </div>
-      </ContextMenu>
       {connected && open && live && (
         <div role="group">
           {dashboards.map((d) => (
@@ -244,11 +253,13 @@ function Row({ depth, icon, label, meta, onOpen, onToggle, expanded, menu, activ
   menu?: React.ComponentProps<typeof ContextMenu>["items"];
   active?: boolean;
 }) {
-  const inner = (
+  const publish = useContext(MenuCtx);
+  return (
     <div
       role="treeitem"
       aria-expanded={onToggle ? expanded : undefined}
       tabIndex={0}
+      onContextMenu={() => publish(menu ?? [])}
       className={clsx("flex h-6 items-center gap-1.5 pr-2 text-xs cursor-default hover:bg-hover", active && "bg-active")}
       style={{ paddingLeft: 8 + depth * 14 }}
       onClick={() => (onToggle ? onToggle() : onOpen?.())}
@@ -267,7 +278,6 @@ function Row({ depth, icon, label, meta, onOpen, onToggle, expanded, menu, activ
       {meta && <span className="text-[10px] text-faint tabular-nums">{meta}</span>}
     </div>
   );
-  return menu ? <ContextMenu items={menu}>{inner}</ContextMenu> : inner;
 }
 
 function tableIcon(kind: string) {

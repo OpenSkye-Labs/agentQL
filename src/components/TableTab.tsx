@@ -44,12 +44,15 @@ export function TableTab({ tab }: { tab: TTab }) {
     setLoading(true);
     setError(null);
     try {
-      const p = await api.fetchTable(conn.id, { schema: tab.schema, table: tab.table, filter: filter || null, order_by: sort?.column ?? null, order_desc: sort?.desc ?? false, limit, offset });
+      const q = { schema: tab.schema, table: tab.table, filter: filter || null, order_by: sort?.column ?? null, order_desc: sort?.desc ?? false, limit, offset };
+      const p = await api.fetchTable(conn.id, q);
       if (gen !== generation.current) return; // a newer request superseded this one
-      setPage({ result: p.result, total: p.total, sql: p.sql_text });
+      setPage({ result: p.result, total: null, sql: p.sql_text });
       setEdits(new Map());
       setDeleted(new Set());
       setInserts(0);
+      // Exact count arrives separately so large tables render without waiting for COUNT(*).
+      void api.countTable(conn.id, q).then((total) => { if (gen === generation.current) setPage((pg) => (pg ? { ...pg, total } : pg)); }).catch(() => {});
     } catch (e) {
       if (gen !== generation.current) return;
       setError(errMsg(e));
@@ -139,6 +142,7 @@ export function TableTab({ tab }: { tab: TTab }) {
     }
   };
 
+  const estimate = useStore((s) => s.live[tab.connectionId]?.tables[tab.schema]?.find((t) => t.name === tab.table)?.row_estimate ?? null);
   if (!conn) return <Empty title="Connection removed" />;
   const total = page?.total ?? null;
   const from = offset + 1;
@@ -232,7 +236,7 @@ export function TableTab({ tab }: { tab: TTab }) {
           ) : (
             <div className="flex h-7 items-center gap-3 border-t border-border bg-elev px-2 text-[11px] text-muted" role="status">
               <span>
-                {page ? (total != null ? `${fmtCount(from)}–${fmtCount(to)} of ${fmtCount(total)}` : `${fmtCount(page.result.rows.length)} rows`) : "…"}
+                {page ? (total != null ? `${fmtCount(from)}–${fmtCount(to)} of ${fmtCount(total)}` : estimate != null && !filter ? `${fmtCount(from)}–${fmtCount(to)} of ~${fmtCount(estimate)}` : `${fmtCount(from)}–${fmtCount(to)}`) : "…"}
                 {filter && <span className="ml-1 text-accent">filtered</span>}
               </span>
               {page && <span>{fmtDuration(page.result.duration_ms)}</span>}

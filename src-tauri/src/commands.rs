@@ -235,8 +235,16 @@ pub async fn fetch_table(st: State<'_, AppState>, id: String, query: TableQuery)
     crate::db::sql::SqlConn::validate_filter(query.filter.as_deref())?;
     let sql_text = c.select_sql(&query);
     let result = c.run_one_read_only(&sql_text, query.limit.max(1)).await?;
-    let total = c.count(&query).await.ok();
-    Ok(TablePage { result, total, sql_text })
+    // The exact count is fetched separately (`count_table`) so big tables render immediately.
+    Ok(TablePage { result, total: None, sql_text })
+}
+
+#[tauri::command]
+pub async fn count_table(st: State<'_, AppState>, id: String, query: TableQuery) -> Result<i64> {
+    let s = st.manager.get(&id).await?;
+    let c = sql(&s).await?;
+    crate::db::sql::SqlConn::validate_filter(query.filter.as_deref())?;
+    c.count(&query).await
 }
 
 #[tauri::command]

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { clsx } from "clsx";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
-import type { Cell, QueryResult } from "../lib/types";
+import type { Cell, Column, QueryResult } from "../lib/types";
 import { cellFull, cellText, parseCell } from "../lib/format";
 import { ContextMenu, Button } from "./ui";
 
@@ -37,6 +37,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
   const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
   const [widths, setWidths] = useState<number[]>([]);
   const [clientSort, setClientSort] = useState<{ column: number; desc: boolean } | null>(null);
+  const [menuCell, setMenuCell] = useState<{ r: number; c: number } | null>(null);
   const gridId = useMemo(() => `grid-${Math.random().toString(36).slice(2, 8)}`, []);
 
   const cols = result.columns;
@@ -204,6 +205,30 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
     return clientSort?.column === ci ? (clientSort.desc ? "desc" : "asc") : null;
   };
 
+  const menuItems = (() => {
+    if (!menuCell || menuCell.r >= order.length || menuCell.c >= cols.length) return [{ label: "No cell selected", disabled: true }];
+    const rowIdx = order[menuCell.r];
+    const row = result.rows[rowIdx];
+    const c = cols[menuCell.c];
+    const key = `${rowIdx}:${c.name}`;
+    const v = edits?.has(key) ? edits.get(key)! : row[menuCell.c];
+    const cellOf = (cc: Column, i: number) => (edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`)! : row[i]);
+    return [
+      { label: "Copy value", onSelect: () => void navigator.clipboard.writeText(cellFull(v)) },
+      { label: "Copy row as JSON", onSelect: () => void navigator.clipboard.writeText(JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, cellOf(cc, i)])), null, 2)) },
+      { label: "Copy row as TSV", onSelect: () => void navigator.clipboard.writeText(cols.map((cc, i) => cellText(cellOf(cc, i))).join("\t")) },
+      { label: "View value", onSelect: () => setInspect(menuCell) },
+      ...(editable
+        ? [
+            { separator: true, label: "" },
+            { label: "Edit cell", onSelect: () => startEdit(menuCell.r, menuCell.c) },
+            { label: "Set NULL", onSelect: () => onEdit?.({ rowIndex: rowIdx, column: c.name, value: null }) },
+            { label: "Delete row", danger: true, onSelect: () => onDeleteRows?.([rowIdx]) },
+          ]
+        : []),
+    ];
+  })();
+
   const inspectValue = (() => {
     if (!inspect || inspect.r >= order.length || inspect.c >= cols.length) return undefined;
     const key = `${order[inspect.r]}:${cols[inspect.c].name}`;
@@ -212,6 +237,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
 
   return (
     <div className={clsx("flex h-full min-h-0", className)}>
+      <ContextMenu items={menuItems}>
       <div
         ref={parentRef}
         className="flex-1 overflow-auto scroll bg-elev font-mono text-xs"
@@ -278,27 +304,16 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                     const selected = inSelection(vi.index, ci);
                     const focused = sel?.r === vi.index && sel?.c === ci;
                     return (
-                      <ContextMenu
-                        key={ci}
-                        items={[
-                          { label: "Copy value", onSelect: () => void navigator.clipboard.writeText(cellFull(v)) },
-                          { label: "Copy row as JSON", onSelect: () => void navigator.clipboard.writeText(JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`) : row[i]])), null, 2)) },
-                          { label: "Copy row as TSV", onSelect: () => void navigator.clipboard.writeText(cols.map((cc, i) => cellText(edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`)! : row[i])).join("\t")) },
-                          { label: "View value", onSelect: () => setInspect({ r: vi.index, c: ci }) },
-                          ...(editable
-                            ? [
-                                { separator: true, label: "" },
-                                { label: "Edit cell", onSelect: () => startEdit(vi.index, ci) },
-                                { label: "Set NULL", onSelect: () => onEdit?.({ rowIndex: rowIdx, column: c.name, value: null }) },
-                                { label: "Delete row", danger: true, onSelect: () => onDeleteRows?.([rowIdx]) },
-                              ]
-                            : []),
-                        ]}
-                      >
                         <div
+                          key={ci}
                           role="gridcell"
                           id={`${gridId}-${vi.index}-${ci}`}
                           aria-selected={selected}
+                          onContextMenu={() => {
+                            setMenuCell({ r: vi.index, c: ci });
+                            setSel({ r: vi.index, c: ci });
+                            setAnchor({ r: vi.index, c: ci });
+                          }}
                           style={{ width: widths[ci] }}
                           className={clsx(
                             "relative flex shrink-0 items-center overflow-hidden border-b border-r border-border px-2 whitespace-nowrap",
@@ -343,7 +358,6 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                             <span className={clsx("truncate", typeof v === "number" && "ml-auto tabular-nums", typeof v === "boolean" && "text-accent")}>{cellText(v)}</span>
                           )}
                         </div>
-                      </ContextMenu>
                     );
                   })}
                 </div>
@@ -353,6 +367,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
           {order.length === 0 && <div className="p-6 text-center text-xs text-muted font-sans">No rows</div>}
         </div>
       </div>
+      </ContextMenu>
       {inspect && inspectValue !== undefined && (
         <aside className="flex w-80 shrink-0 flex-col border-l border-border bg-elev" aria-label="Cell inspector">
           <div className="flex h-7 items-center gap-2 border-b border-border px-2 text-xs">
