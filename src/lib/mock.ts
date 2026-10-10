@@ -413,6 +413,8 @@ const handlers: Record<string, Handler> = {
           ]
         : [],
   kv_set: () => null,
+  read_text_file: () => "select 1;\n",
+  write_text_file: () => null,
   history_add: () => null,
   set_agent_scope: () => null,
   ai_list_sessions: () => [{ ...session, messages: [] }],
