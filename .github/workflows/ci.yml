@@ -88,10 +88,30 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
+  # Type-check only on the other two desktop targets; clippy/tests run once on Linux.
+  rust-cross:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+      - run: cargo check
+
   # Single required status check for branch protection. Skipped jobs count as success.
   ci-ok:
     if: always()
-    needs: [changes, versions, frontend, rust]
+    needs: [changes, versions, frontend, rust, rust-cross]
     runs-on: ubuntu-22.04
     steps:
       - name: Check results

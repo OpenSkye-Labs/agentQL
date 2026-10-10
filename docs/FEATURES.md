@@ -47,3 +47,7 @@ Append-only record of shipped behaviour. Newest at the bottom.
   an "Update to vX.Y.Z" button that downloads, verifies the minisign signature against the pubkey in tauri.conf.json, installs and restarts.
 - Licensed under MIT (LICENSE, package.json, Cargo.toml). README gained the SignPath-required "Code signing policy" and
   "Privacy policy" sections plus a License section; SECURITY.md documents private vulnerability reporting.
+- Update dialogs: when a newer release is found the status bar button opens "Update available" with the release notes and
+  Later / Update now; after an update installs, "What's new in vX.Y.Z" shows that version's section of the bundled CHANGELOG.md once.
+- Windows build fix: ssh-agent auth uses the OpenSSH agent named pipe on Windows (russh `connect_named_pipe`); CI now runs
+  `cargo check` on Windows and macOS for Rust changes so cross-platform compile errors fail the PR, not the release build.
