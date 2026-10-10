@@ -28,3 +28,6 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - Assistant UI redesigned around an agent activity timeline: each turn shows "Working… / Worked for 8 s · 3 steps" with
   expandable steps (query text, row counts, result grids), charts and dashboard proposals surface as results, suggestion
   chips on the empty state, and a composer with the provider picker and read-only/writes toggle built in.
+- Public repo at github.com/OpenSkye-Labs/agentQL. GitHub Actions: `ci.yml` runs typecheck + cargo check/test on every push and PR;
+  `release.yml` builds macOS (arm64 + x64), Linux (.deb/.AppImage/.rpm) and Windows (.msi/.exe) via tauri-action on any `v*` tag and
+  publishes them as a draft GitHub Release. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z`, then publish the draft.
