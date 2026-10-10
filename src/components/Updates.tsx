@@ -54,47 +54,51 @@ export function UpdateButton() {
   const [dialog, setDialog] = useState<"update" | "whatsnew" | null>(null);
   const [installing, setInstalling] = useState(false);
   // An update found while "What's new" is showing waits here until that dialog closes.
-  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
-
-  const showUpdatePrompt = (version: string) => {
-    ls.set(PROMPTED, version);
-    setPendingPrompt(null);
-    setDialog("update");
-  };
+  const [pendingPrompt, setPendingPrompt] = useState(false);
 
   useEffect(() => {
-    // What's new: runs once per installed version, skipped on the very first launch.
-    getVersion()
-      .then((v) => {
+    let cancelled = false;
+    (async () => {
+      // 1. Installed version first (local, instant): "What's new" runs once per version, never on first launch.
+      let showingWhatsNew = false;
+      try {
+        const v = await getVersion();
+        if (cancelled) return;
         setCurrent(v);
         const seen = ls.get(LAST_SEEN);
         ls.set(LAST_SEEN, v);
-        if (seen && seen !== v && changelogFor(v)) setDialog((d) => d ?? "whatsnew");
-      })
-      .catch(() => {});
-    // ponytail: one check at startup; add a periodic re-check if sessions run for days.
-    api
-      .checkUpdate()
-      .then((u) => {
-        if (!u) return;
+        showingWhatsNew = !!seen && seen !== v && changelogFor(v) !== null;
+        if (showingWhatsNew) setDialog("whatsnew");
+      } catch {
+        /* not running under Tauri (browser mock): no version, no What's new */
+      }
+      // 2. Then the network check, so the two can never race for the dialog.
+      // ponytail: one check at startup; add a periodic re-check if sessions run for days.
+      try {
+        const u = await api.checkUpdate();
+        if (cancelled || !u) return;
         setUpdate(u);
         if (ls.get(PROMPTED) === u.version) return;
-        setDialog((d) => {
-          if (d) {
-            setPendingPrompt(u.version);
-            return d;
-          }
-          ls.set(PROMPTED, u.version);
-          return "update";
-        });
-      })
-      // Offline or no release yet: nothing the user can act on, so stay quiet (the button shows once a check succeeds).
-      .catch((e) => console.warn("update check failed", e));
+        if (showingWhatsNew) setPendingPrompt(true);
+        else setDialog("update");
+      } catch (e) {
+        // Offline or no release yet: nothing the user can act on, so stay quiet (the button shows once a check succeeds).
+        console.warn("update check failed", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  // Record "prompted" only once the update dialog has actually been shown.
+  useEffect(() => {
+    if (dialog === "update" && update) ls.set(PROMPTED, update.version);
+  }, [dialog, update]);
+
   const closeWhatsNew = () => {
-    if (pendingPrompt && update) showUpdatePrompt(update.version);
-    else setDialog(null);
+    setPendingPrompt(false);
+    setDialog(pendingPrompt && update ? "update" : null);
   };
 
   const install = () => {
