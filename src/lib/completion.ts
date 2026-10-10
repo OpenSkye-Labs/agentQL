@@ -174,6 +174,10 @@ export function contextKeywords(before: string, postgres = false): string[] {
 /** Only numbered placeholders (`${1}`, `${2:name}`) mark a saved query as a snippet; `'${HOME}'` stays literal SQL. */
 export const isSnippet = (sql: string) => /\$\{\d+(?::[^}]*)?\}/.test(sql);
 
+/** Escape `${name}` / `#{name}` that are not numbered Tab stops so the snippet parser leaves them literal. */
+export const snippetTemplate = (sql: string) =>
+  sql.replace(/([$#])\{(?!\d+(?::[^}]*)?\})([^}]*)\}/g, (_, sigil: string, body: string) => `${sigil}\\{${body}\\}`);
+
 export interface CompletionDeps {
   catalog: () => Catalogs;
   /** Snippet completions for saved queries that have a trigger word. */

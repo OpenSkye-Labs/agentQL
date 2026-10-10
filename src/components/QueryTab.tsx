@@ -8,7 +8,7 @@ import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
 import type { QueryResult } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
-import { buildNamespace, editorCompletions, isSnippet } from "../lib/completion";
+import { buildNamespace, editorCompletions, isSnippet, snippetTemplate } from "../lib/completion";
 import { SqlEditor, type SqlEditorHandle } from "./SqlEditor";
 import { ResultGrid } from "./ResultGrid";
 import { SHORTCUTS_EVENT } from "./ShortcutsDialog";
@@ -67,7 +67,12 @@ export function QueryTab({ tab }: { tab: QTab }) {
             .filter((q) => q.trigger)
             .map((q) =>
               isSnippet(q.sql)
-                ? snippetCompletion(q.sql, { label: q.trigger!, detail: q.name, type: "text", boost: 3 })
+                ? snippetCompletion(snippetTemplate(q.sql), {
+                    label: q.trigger!,
+                    detail: q.name,
+                    type: "text",
+                    boost: 3,
+                  })
                 : { label: q.trigger!, detail: q.name, type: "text", boost: 3, apply: q.sql },
             ),
       }),
@@ -287,7 +292,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
                     onSelect: () => {
                       // `${1:x}` placeholders become Tab stops; anything else loads verbatim.
                       if (isSnippet(q.sql)) {
-                        editor.current?.loadSnippet(q.sql);
+                        editor.current?.loadSnippet(snippetTemplate(q.sql));
                         updateTab(tab.id, { title: q.name });
                       } else updateTab(tab.id, { sql: q.sql, title: q.name });
                     },

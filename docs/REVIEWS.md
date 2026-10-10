@@ -119,4 +119,11 @@ Round 5: 2 findings (P2), both fixed:
 | 10  | P2  | Every saved query went through the snippet parser, so `'${HOME}'` loaded as `'HOME'` | `isSnippet()` (numbered placeholders only) decides between snippet load and verbatim load; same for trigger completions |
 | 11  | P2  | Sidebar table listing waited for the whole-schema catalog (slow on big SQLite files) | Tables are published first; the catalog loads independently and merges when it arrives                                  |
 
+Round 6: 2 findings (P2), both fixed:
+
+| #   | Sev | Finding                                                                                             | Resolution                                                                                    |
+| --- | --- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 12  | P2  | A numbered snippet that also contains `'${HOME}'` lost the literal braces                           | `snippetTemplate()` escapes every non-numbered `${…}` / `#{…}` before the snippet parser runs |
+| 13  | P2  | Catalog FK columns were comma-joined and re-split, so a column named `a,b` broke the JOIN predicate | Postgres returns `array_agg` (decoded as an array); MySQL joins on the ASCII unit separator   |
+
 Skipped: none.

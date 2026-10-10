@@ -961,9 +961,9 @@ impl SqlConn {
                 .await?,
                 self.rows(&format!(
                     "SELECT c.relname AS tbl, \
-                     (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS cols, \
+                     (SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS cols, \
                      rn.nspname AS ref_schema, rc.relname AS ref_table, \
-                     (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(con.confkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS ref_cols \
+                     (SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(con.confkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS ref_cols \
                      FROM pg_constraint con JOIN pg_class c ON c.oid = con.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
                      JOIN pg_class rc ON rc.oid = con.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace \
                      WHERE con.contype = 'f' AND n.nspname = {s} ORDER BY c.relname, con.conname"
@@ -977,9 +977,9 @@ impl SqlConn {
                 ))
                 .await?,
                 self.rows(&format!(
-                    "SELECT TABLE_NAME AS tbl, GROUP_CONCAT(COLUMN_NAME ORDER BY ORDINAL_POSITION) AS cols, \
+                    "SELECT TABLE_NAME AS tbl, GROUP_CONCAT(COLUMN_NAME ORDER BY ORDINAL_POSITION SEPARATOR '{US}') AS cols, \
                      REFERENCED_TABLE_SCHEMA AS ref_schema, REFERENCED_TABLE_NAME AS ref_table, \
-                     GROUP_CONCAT(REFERENCED_COLUMN_NAME ORDER BY ORDINAL_POSITION) AS ref_cols \
+                     GROUP_CONCAT(REFERENCED_COLUMN_NAME ORDER BY ORDINAL_POSITION SEPARATOR '{US}') AS ref_cols \
                      FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = {s} AND REFERENCED_TABLE_NAME IS NOT NULL \
                      GROUP BY TABLE_NAME, CONSTRAINT_NAME, REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME ORDER BY TABLE_NAME, CONSTRAINT_NAME"
                 ))
@@ -1021,10 +1021,10 @@ impl SqlConn {
                 .into_iter()
                 .map(|mut r| CatalogForeignKey {
                     table: take_str(&mut r, "tbl"),
-                    columns: split_csv(opt_str(&mut r, "cols")),
+                    columns: take_names(&mut r, "cols"),
                     ref_schema: opt_str(&mut r, "ref_schema"),
                     ref_table: take_str(&mut r, "ref_table"),
-                    ref_columns: split_csv(opt_str(&mut r, "ref_cols")),
+                    ref_columns: take_names(&mut r, "ref_cols"),
                 })
                 .collect(),
         })
@@ -1172,6 +1172,22 @@ fn take_bool(r: &mut HashMap<String, Value>, k: &str) -> bool {
         None => false,
     }
 }
+/// ASCII unit separator: joins identifier lists on MySQL, where a comma could be part of a name.
+const US: char = '\u{1f}';
+
+/// Identifier list as a Postgres array (JSON array) or a `US`-joined string (MySQL).
+fn take_names(r: &mut HashMap<String, Value>, k: &str) -> Vec<String> {
+    match r.remove(k) {
+        Some(Value::Array(a)) => a.into_iter().filter_map(json_str).collect(),
+        Some(Value::String(s)) => s
+            .split(US)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => vec![],
+    }
+}
+
 fn split_csv(s: Option<String>) -> Vec<String> {
     s.map(|s| {
         s.split(',')

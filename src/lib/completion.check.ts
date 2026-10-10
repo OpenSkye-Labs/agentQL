@@ -7,6 +7,7 @@ import {
   ident,
   isSnippet,
   joinSuggestions,
+  snippetTemplate,
   tableRefs,
 } from "./completion.ts";
 
@@ -139,4 +140,8 @@ assert.ok(contextKeywords("delete from t ").includes("WHERE"));
 assert.ok(isSnippet("select * from ${1:table} limit ${2}"));
 assert.ok(!isSnippet("select '${HOME}' as home"));
 assert.ok(!isSnippet("select 1"));
+assert.equal(
+  snippetTemplate("select '${HOME}', #{x} from ${1:orders} limit ${2}"),
+  "select '$\\{HOME\\}', #\\{x\\} from ${1:orders} limit ${2}",
+);
 console.log("completion.check ok");
