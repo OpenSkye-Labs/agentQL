@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "AgentQL - an agentic, cross-platform database client"
 authors = ["aindong"]
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/OpenSkye-Labs/agentQL"
 
 [lib]
 name = "agentql_lib"

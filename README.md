@@ -62,6 +62,33 @@ Agent writes are off by default; enabling them still requires a per-statement ap
 
 Pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers branches, checks, and how releases are cut.
 
+## Code signing policy
+
+Release builds are produced only by the public [release workflow](.github/workflows/release.yml) in this repository.
+Windows installers are to be signed through [SignPath.io](https://signpath.io) with a certificate from the
+[SignPath Foundation](https://signpath.org) (application pending). Updater artifacts are additionally signed with
+the project's minisign key, and the app verifies that signature before installing an update.
+
+- Committers and reviewers: [@aindong](https://github.com/aindong)
+- Approvers: [@aindong](https://github.com/aindong)
+
+## Privacy policy
+
+AgentQL does not transfer any information to other networked systems unless specifically requested by the user or
+the person installing or operating it. In practice it connects to:
+
+- the databases and SSH hosts you add as connections, when you use them;
+- the AI provider you configure (Anthropic, OpenAI, an OpenAI-compatible endpoint, or your local Claude Code /
+  Codex CLI), only when you send a message to the assistant;
+- `github.com`, once at startup, to check whether a newer release exists.
+
+No telemetry, analytics or crash reports are sent. Credentials are stored in the OS keychain or, when none is
+available, in a local file in the app data directory.
+
+## License
+
+[MIT](LICENSE).
+
 ## Docs
 
 `CLAUDE.md` (repo guide) · `docs/PLAN.md` · `docs/ARCHITECTURE.md` · `docs/TASKS.md` · `docs/FEATURES.md` ·

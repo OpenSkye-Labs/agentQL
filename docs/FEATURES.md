@@ -45,3 +45,5 @@ Append-only record of shipped behaviour. Newest at the bottom.
   so local builds need no key. Release assets include `.sig` files and `latest.json` for the updater plugin.
 - In-app updater (`tauri-plugin-updater`): the status bar checks `releases/latest/download/latest.json` once at startup and shows
   an "Update to vX.Y.Z" button that downloads, verifies the minisign signature against the pubkey in tauri.conf.json, installs and restarts.
+- Licensed under MIT (LICENSE, package.json, Cargo.toml). README gained the SignPath-required "Code signing policy" and
+  "Privacy policy" sections plus a License section; SECURITY.md documents private vulnerability reporting.
