@@ -48,5 +48,5 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - Licensed under MIT (LICENSE, package.json, Cargo.toml). README gained the SignPath-required "Code signing policy" and
   "Privacy policy" sections plus a License section; SECURITY.md documents private vulnerability reporting.
 - Brand: new app icon and logo ("talking database": cylinder with a chat tail and an amber band). Source of truth is
-  `assets/brand/icon.svg` / `mark.svg` / `logo.svg` / `logo-dark.svg`; platform icons regenerated with `pnpm tauri icon assets/brand/icon.svg`.
+  `assets/brand/icon.svg` / `logo.svg` / `logo-dark.svg`; platform icons regenerated with `pnpm tauri icon assets/brand/icon.svg`.
   README header uses the SVG lockup with a light/dark swap; `assets/brand/social-1080.png` is for social avatars and the GitHub social preview.
