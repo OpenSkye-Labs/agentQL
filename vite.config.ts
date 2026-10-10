@@ -11,7 +11,16 @@ export default defineConfig(() => ({
     rollupOptions: {
       output: {
         manualChunks: {
-          codemirror: ["@codemirror/view", "@codemirror/state", "@codemirror/language", "@codemirror/commands", "@codemirror/autocomplete", "@codemirror/lang-sql", "@codemirror/lang-json", "@lezer/highlight"],
+          codemirror: [
+            "@codemirror/view",
+            "@codemirror/state",
+            "@codemirror/language",
+            "@codemirror/commands",
+            "@codemirror/autocomplete",
+            "@codemirror/lang-sql",
+            "@codemirror/lang-json",
+            "@lezer/highlight",
+          ],
           charts: ["recharts"],
         },
       },

@@ -25,12 +25,33 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 futures = "0.3"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal", "bigdecimal", "time", "ipnetwork", "mac_address", "bit-vec"] }
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "mysql",
+  "sqlite",
+  "chrono",
+  "uuid",
+  "json",
+  "rust_decimal",
+  "bigdecimal",
+  "time",
+  "ipnetwork",
+  "mac_address",
+  "bit-vec",
+] }
 redis = { version = "0.27", features = ["tokio-comp", "tokio-rustls-comp"] }
 mongodb = "3"
 bson = { version = "2", features = ["serde_with-3", "chrono-0_4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
-keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "crypto-rust", "tokio"] }
+keyring = { version = "3", features = [
+  "apple-native",
+  "windows-native",
+  "async-secret-service",
+  "crypto-rust",
+  "tokio",
+] }
 sqlparser = "0.53"
 async-stream = "0.3"
 bytes = "1"

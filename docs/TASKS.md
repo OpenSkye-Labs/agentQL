@@ -3,6 +3,7 @@
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 
 ## Phase 1 — Backend core
+
 - [x] Config types, JSON store, keychain secrets with file fallback (`config.rs`)
 - [x] SSH tunnel (password / key file / agent) via russh (`ssh.rs`)
 - [x] sqlx connections for Postgres / MySQL / MariaDB / SQLite incl. SSL options and URL mode
@@ -17,6 +18,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] Codex review #1 → 22 fixes (see REVIEWS.md)
 
 ## Phase 2 — AI backend
+
 - [x] Session model + persistence
 - [x] Anthropic Messages streaming provider with tool use
 - [x] OpenAI-compatible chat completions streaming provider with tools
@@ -27,6 +29,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] In-process MCP endpoint (axum)
 
 ## Phase 3 — Frontend shell
+
 - [x] App shell, theming tokens, layout with resizable panels
 - [x] Connection manager dialog (all drivers, SSH, SSL, URL mode, test connection)
 - [x] Sidebar schema tree with search
@@ -38,12 +41,14 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] Query history + saved queries
 
 ## Phase 4 — AI frontend
+
 - [x] Provider settings (API keys, CLI detection, model list)
 - [x] Chat panel: streaming, tool cards, approval dialog, insert SQL into editor
 - [x] Charts in chat, dashboards page (grid of charts, refresh, save)
 - [x] "Optimise this query" / "Explain" actions from editor
 
 ## Phase 5 — Polish
+
 - [x] Live driver smoke tests against throwaway containers (docs/TESTING.md), all 7 passing
 - [x] Accessibility pass (focus order, ARIA, keyboard shortcuts, reduced motion, contrast)
 - [x] Codex review of backend (22 fixes) and frontend (13 fixes); accessibility review (15 fixes); visual QA pass — all logged in REVIEWS.md
