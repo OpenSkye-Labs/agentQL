@@ -1,5 +1,9 @@
 # AgentQL
 
+[![CI](https://github.com/OpenSkye-Labs/agentQL/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/OpenSkye-Labs/agentQL/actions/workflows/ci.yml)
+[![Release](https://github.com/OpenSkye-Labs/agentQL/actions/workflows/release.yml/badge.svg)](https://github.com/OpenSkye-Labs/agentQL/actions/workflows/release.yml)
+[![Version](https://img.shields.io/github/v/release/OpenSkye-Labs/agentQL?label=version&color=blue)](https://github.com/OpenSkye-Labs/agentQL/releases/latest)
+
 A native, cross-platform database client with an agent built in. Think TablePlus / DBeaver, plus an assistant
 that can read your schema, run queries, optimise SQL and build dashboards — using **your** Claude or OpenAI API
 key, or your existing **Claude Code** / **Codex (ChatGPT)** subscription.
@@ -27,7 +31,13 @@ SSH tunnel (agent, key file, or password). Passwords live in the OS keychain.
 - **Safety** — read-only connections and agent reads are enforced _by the database_ (READ ONLY transactions /
   `PRAGMA query_only`), not just by parsing.
 
-## Run it
+## Install
+
+Download the installer for your platform from the [latest release](https://github.com/OpenSkye-Labs/agentQL/releases/latest):
+macOS (Apple Silicon and Intel), Windows, and Linux (`.deb`, `.rpm`, `.AppImage`). The app checks for updates on
+startup and installs them in place.
+
+## Build from source
 
 ```bash
 pnpm install
@@ -47,6 +57,10 @@ Settings → AI providers. Add one or more of:
   over a local, token-protected MCP endpoint, so approvals and tool cards work the same way.
 
 Agent writes are off by default; enabling them still requires a per-statement approval in the chat.
+
+## Contributing
+
+Pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers branches, checks, and how releases are cut.
 
 ## Docs
 
