@@ -49,13 +49,15 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const schema = useMemo(() => (tables ? buildNamespace(tables, catalog ?? {}) : undefined), [tables, catalog]);
 
   // JOIN / keyword / snippet completion reads the latest data through refs so the editor is configured once.
-  const compDeps = useRef({ catalog, savedQueries, postgres: conn?.driver === "postgres" });
-  compDeps.current = { catalog, savedQueries, postgres: conn?.driver === "postgres" };
+  const driver = conn?.driver;
+  const compDeps = useRef({ catalog, savedQueries, driver });
+  compDeps.current = { catalog, savedQueries, driver };
   const completions = useMemo(
     () =>
       editorCompletions({
         catalog: () => compDeps.current.catalog ?? {},
-        postgres: () => compDeps.current.postgres,
+        postgres: () => compDeps.current.driver === "postgres",
+        quote: () => (compDeps.current.driver === "mysql" || compDeps.current.driver === "mariadb" ? "`" : '"'),
         snippets: () =>
           compDeps.current.savedQueries
             .filter((q) => q.trigger)

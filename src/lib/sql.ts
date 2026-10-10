@@ -25,7 +25,7 @@ export function statementBounds(doc: string): number[] {
 export function statementStart(doc: string, pos: number): number {
   const bounds = statementBounds(doc);
   let start = 0;
-  for (const b of bounds) if (b <= pos) start = b;
+  for (const b of bounds.slice(0, -1)) if (b <= pos) start = b; // last entry is the doc-end sentinel
   return start;
 }
 

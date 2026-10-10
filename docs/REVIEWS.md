@@ -80,3 +80,15 @@ pie charts cap at 7 slices + Other. Added per-tab error boundaries.
 `keyring` (async-secret-service via zbus) blocks on its own runtime; calling it inside an async Tauri command panicked the
 tokio worker (“Cannot start a runtime from within a runtime”), so `connect` never returned. All keychain calls now run on a
 plain thread (`off_runtime` in config.rs). Added an ignored latency test (`cargo test --lib keyring_latency -- --ignored`).
+
+## 2026-10-11 — M7 editor ergonomics (Codex, `codex exec review --base dev`)
+
+Round 1: 3 findings (all P2), all fixed with a self-check in `pnpm check`:
+
+| #   | Sev | Finding                                                                                                                              | Resolution                                                                                                                             |
+| --- | --- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P2  | `statementStart` treated the doc-end sentinel as a statement start, so Ctrl+Space at the end of the doc lost the JOIN/clause context | Sentinel excluded; checks for end-of-doc and "after `;`" positions                                                                     |
+| 2   | P2  | Generated JOIN clauses inserted unquoted mixed-case identifiers (Postgres folds them to lowercase)                                   | `ident()` quotes anything that is not plain lowercase with the dialect's quote (`"` / `` ` ``); aliases keep the quotes the user typed |
+| 3   | P2  | Reverse FKs owned by another schema were skipped for a schema-qualified table                                                        | Source-schema filter only on forward matches; cross-schema referencing tables are emitted schema-qualified                             |
+
+Skipped: none.

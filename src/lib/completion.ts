@@ -45,22 +45,28 @@ const NOT_ALIAS = new Set(
 );
 const unq = (s: string) => s.replace(/^["`]|["`]$/g, "");
 
-/** FROM/JOIN sources of a statement with their alias (the table name when none). */
+/** FROM/JOIN sources of a statement with their alias as written (the table name, quotes included, when none). */
 export function tableRefs(stmt: string): TableRef[] {
   const refs: TableRef[] = [];
   const re = /\b(?:from|join)\s+((?:["`]?[\w$]+["`]?\s*\.\s*)?["`]?[\w$]+["`]?)(?:\s+(?:as\s+)?(["`]?[\w$]+["`]?))?/gi;
   for (const m of stmt.matchAll(re)) {
-    const parts = m[1].split(".").map((p) => unq(p.trim()));
-    const table = parts.pop()!;
-    let alias = m[2] ? unq(m[2]) : table;
-    if (NOT_ALIAS.has(alias.toLowerCase())) alias = table;
-    refs.push({ schema: parts[0] ?? null, table, alias });
+    const raw = m[1].split(".").map((p) => p.trim());
+    const table = unq(raw[raw.length - 1]);
+    let alias = m[2] ?? raw[raw.length - 1];
+    if (NOT_ALIAS.has(unq(alias).toLowerCase())) alias = raw[raw.length - 1];
+    refs.push({ schema: raw.length > 1 ? unq(raw[0]) : null, table, alias });
   }
   return refs;
 }
 
+/** Quote an identifier unless it is plain lowercase; `q` is the dialect's quote character.
+ *  ponytail: reserved words (a table named `order`) stay unquoted; add a keyword set if it bites. */
+export function ident(name: string, q: string): string {
+  return /^[a-z_][a-z0-9_$]*$/.test(name) ? name : `${q}${name.split(q).join(q + q)}${q}`;
+}
+
 /** `JOIN other o ON o.id = t.other_id` options for every FK touching a table already in the statement. */
-export function joinSuggestions(stmt: string, catalog: Catalogs): Completion[] {
+export function joinSuggestions(stmt: string, catalog: Catalogs, q = '"'): Completion[] {
   const refs = tableRefs(stmt);
   if (!refs.length) return [];
   const used = new Set(refs.map((r) => r.alias.toLowerCase()));
@@ -78,19 +84,26 @@ export function joinSuggestions(stmt: string, catalog: Catalogs): Completion[] {
     seen.add(label);
     out.push({ label, type: "type", detail, boost: 2 });
   };
+  const qualified = (schema: string | null, table: string, from: string) =>
+    schema && schema !== from ? `${ident(schema, q)}.${ident(table, q)}` : ident(table, q);
   for (const r of refs) {
     for (const [schema, cat] of Object.entries(catalog)) {
-      if (r.schema && r.schema !== schema) continue;
       for (const fk of cat.foreign_keys) {
-        if (fk.table === r.table) {
-          const ref = fk.ref_schema && fk.ref_schema !== schema ? `${fk.ref_schema}.${fk.ref_table}` : fk.ref_table;
+        const refSchema = fk.ref_schema ?? schema;
+        if (fk.table === r.table && (!r.schema || r.schema === schema)) {
+          // forward: r.col → ref_table.ref_col
           const a = aliasFor(fk.ref_table);
-          const on = fk.columns.map((c, i) => `${a}.${fk.ref_columns[i]} = ${r.alias}.${c}`).join(" AND ");
-          push(ref, a, on, `${r.table}.${fk.columns.join(",")} →`);
-        } else if (fk.ref_table === r.table && (!r.schema || (fk.ref_schema ?? schema) === r.schema)) {
+          const on = fk.columns
+            .map((c, i) => `${a}.${ident(fk.ref_columns[i], q)} = ${r.alias}.${ident(c, q)}`)
+            .join(" AND ");
+          push(qualified(refSchema, fk.ref_table, schema), a, on, `${r.table}.${fk.columns.join(",")} →`);
+        } else if (fk.ref_table === r.table && (!r.schema || refSchema === r.schema)) {
+          // reverse: other.col → r.ref_col (the other table may live in another schema)
           const a = aliasFor(fk.table);
-          const on = fk.columns.map((c, i) => `${a}.${c} = ${r.alias}.${fk.ref_columns[i]}`).join(" AND ");
-          push(fk.table, a, on, `← ${fk.table}.${fk.columns.join(",")}`);
+          const on = fk.columns
+            .map((c, i) => `${a}.${ident(c, q)} = ${r.alias}.${ident(fk.ref_columns[i], q)}`)
+            .join(" AND ");
+          push(qualified(schema, fk.table, refSchema), a, on, `← ${fk.table}.${fk.columns.join(",")}`);
         }
       }
     }
@@ -157,6 +170,8 @@ export interface CompletionDeps {
   /** Snippet completions for saved queries that have a trigger word. */
   snippets: () => Completion[];
   postgres: () => boolean;
+  /** Identifier quote character of the dialect: `"` or `` ` ``. */
+  quote: () => string;
 }
 
 /** Extra completion source merged with lang-sql's schema/keyword completion. */
@@ -169,7 +184,7 @@ export function editorCompletions(deps: CompletionDeps) {
     const before = doc.slice(start, word.from);
     if (/\.\s*$/.test(before)) return null; // `alias.` → lang-sql lists the columns
     const options: Completion[] = /\bjoin\s+$/i.test(before)
-      ? joinSuggestions(doc.slice(start, word.to), deps.catalog())
+      ? joinSuggestions(doc.slice(start, word.to), deps.catalog(), deps.quote())
       : [
           ...contextKeywords(before, deps.postgres()).map((label) => ({ label, type: "keyword", boost: 1 })),
           ...deps.snippets(),
