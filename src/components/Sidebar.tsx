@@ -20,6 +20,7 @@ import {
   Table2,
   Trash2,
   FileCode2,
+  GitCompare,
   Layers,
   LayoutDashboard,
   Network,
@@ -193,6 +194,12 @@ function ConnectionNode({
       icon: <Bot size={13} />,
       disabled: !connected,
       onSelect: () => askAssistant(`Give me an overview of the ${conn.name} database.`),
+    },
+    {
+      label: "Schema diff…",
+      icon: <GitCompare size={13} />,
+      disabled: !connected,
+      onSelect: () => openTab({ kind: "diff", connectionId: conn.id, title: "Schema diff" }),
     },
     {
       label: "Refresh",
@@ -410,6 +417,11 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
                   label: "ER diagram",
                   icon: <Network size={13} />,
                   onSelect: () => openTab({ kind: "erd", connectionId: conn.id, title: `ERD · ${schema}`, schema }),
+                },
+                {
+                  label: "Compare schema…",
+                  icon: <GitCompare size={13} />,
+                  onSelect: () => openTab({ kind: "diff", connectionId: conn.id, title: "Schema diff", schema }),
                 },
               ]}
             />

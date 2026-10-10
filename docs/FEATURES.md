@@ -59,3 +59,10 @@ Append-only record of shipped behaviour. Newest at the bottom.
   lays them out with dagre (left-to-right ranks) and draws them as plain SVG: PK columns highlighted, FK columns marked,
   edges from the FK column to the referenced table. Wheel zooms around the cursor, drag pans, hovering a table lights up
   its relations, clicking opens the table tab. Export writes SVG (theme colours inlined) or PNG (2x) via the save dialog.
+- Schema diff (M4): "Schema diff…" on a connection (or "Compare schema…" on a schema) opens a tab with two
+  (connection, schema) pickers over the connected SQL databases. Compare introspects both sides, matches objects by name,
+  lists them as added / removed / changed / unchanged and shows a line diff of the DDL (schema qualification and MySQL
+  AUTO_INCREMENT counters normalised away). "Copy as migration" writes SQL that moves A towards B: CREATE TABLE
+  synthesised from the metadata, drop statements for tables, views and materialized views, ADD / DROP COLUMN, and
+  review comments for type changes, indexes, foreign keys and views. Two databases on one Postgres server need two
+  connections.

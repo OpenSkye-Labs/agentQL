@@ -80,7 +80,7 @@ M4 Schema tools (M)
 
 - [x] Foreign-key click-through in the grid
 - [x] ER diagram per schema (auto-layout, pan/zoom, export SVG/PNG)
-- [ ] Schema diff between two connections/databases, copy as migration
+- [x] Schema diff between two connections/databases, copy as migration
 
 M5 Scale (M)
 

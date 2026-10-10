@@ -94,3 +94,16 @@ plain thread (`off_runtime` in config.rs). Added an ignored latency test (`cargo
 
 No findings on the diagram. The run also reviewed the in-progress schema diff files (not yet wired in); those findings
 are logged under the schema diff entry below.
+
+## 2026-10-11 — M4 schema diff (Codex, `codex exec review --uncommitted`, 2 rounds)
+
+| #   | Sev | Finding                                                                                | Resolution                                                                                    |
+| --- | --- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 1   | P1  | Diff tab not reachable (reviewed mid-increment)                                        | Wired: App route, connection menu "Schema diff…", schema menu "Compare schema…"               |
+| 2   | P1  | Migration was written for B's schema/driver although it runs on A                      | Generated for A's schema and dialect; added tables are synthesised from metadata, not B's DDL |
+| 3   | P2  | Cross-schema compare flagged every object because DDL carries the schema qualification | `normaliseDdl` strips the object's own qualification (outside string literals)                |
+| 4   | P2  | Changed views emitted ALTER TABLE ADD/DROP COLUMN                                      | Column statements only for tables; views/matviews get B's definition as a review comment      |
+| 5   | P2  | Removed materialized views used the plain view drop statement                          | Materialized views get their own drop statement                                               |
+| 6   | P2  | Normalisation could rewrite `'a.example'` string literals                              | Replacement skips `'…'` literals                                                              |
+| 7   | P2  | MySQL string defaults rendered unquoted (`DEFAULT pending`)                            | Literal-vs-expression heuristic quotes literals for mysql/mariadb (`ponytail:` comment)       |
+| 8   | P2  | AUTO_INCREMENT dropped from synthesised columns                                        | `extra` preserved: AUTO_INCREMENT appended, other extras as inline comment                    |
