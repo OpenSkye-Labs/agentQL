@@ -126,4 +126,5 @@ Round 6: 2 findings (P2), both fixed:
 | 12  | P2  | A numbered snippet that also contains `'${HOME}'` lost the literal braces                           | `snippetTemplate()` escapes every non-numbered `${…}` / `#{…}` before the snippet parser runs |
 | 13  | P2  | Catalog FK columns were comma-joined and re-split, so a column named `a,b` broke the JOIN predicate | Postgres returns `array_agg` (decoded as an array); MySQL joins on the ASCII unit separator   |
 
-Skipped: none.
+Round 7: clean ("No actionable regressions were identified"). Live Postgres/MySQL checks of the catalog SQL still to
+be done against the docs/TESTING.md containers (no Docker on the authoring machine).
