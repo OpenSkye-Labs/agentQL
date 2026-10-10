@@ -44,20 +44,24 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const [active, setActive] = useState(0);
   const inFlight = useRef(0);
 
+  const driver = conn?.driver;
+  const quote = driver === "mysql" || driver === "mariadb" ? "`" : '"';
   const tables = live?.tables;
   const catalog = live?.catalog;
-  const schema = useMemo(() => (tables ? buildNamespace(tables, catalog ?? {}) : undefined), [tables, catalog]);
+  const schema = useMemo(
+    () => (tables ? buildNamespace(tables, catalog ?? {}, quote) : undefined),
+    [tables, catalog, quote],
+  );
 
   // JOIN / keyword / snippet completion reads the latest data through refs so the editor is configured once.
-  const driver = conn?.driver;
-  const compDeps = useRef({ catalog, savedQueries, driver });
-  compDeps.current = { catalog, savedQueries, driver };
+  const compDeps = useRef({ catalog, savedQueries, driver, quote });
+  compDeps.current = { catalog, savedQueries, driver, quote };
   const completions = useMemo(
     () =>
       editorCompletions({
         catalog: () => compDeps.current.catalog ?? {},
         postgres: () => compDeps.current.driver === "postgres",
-        quote: () => (compDeps.current.driver === "mysql" || compDeps.current.driver === "mariadb" ? "`" : '"'),
+        quote: () => compDeps.current.quote,
         snippets: () =>
           compDeps.current.savedQueries
             .filter((q) => q.trigger)

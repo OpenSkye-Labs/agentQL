@@ -8,6 +8,7 @@ const catalog = {
       { table: "orders", name: "id", data_type: "int" },
       { table: "orders", name: "customer_id", data_type: "int" },
       { table: "customers", name: "id", data_type: "int" },
+      { table: "Claim", name: "candidateId", data_type: "uuid" },
     ],
     foreign_keys: [
       { table: "orders", columns: ["customer_id"], ref_schema: "public", ref_table: "customers", ref_columns: ["id"] },
@@ -39,6 +40,18 @@ assert.deepEqual(
 );
 assert.equal(ns["public.orders"], ns.orders);
 assert.deepEqual(ns.order_items, []);
+// mixed-case columns get a quoted `apply` (lang-sql quotes table names itself, not custom column objects)
+const claimNs = buildNamespace(
+  { public: [{ schema: "public", name: "Claim", kind: "table", row_estimate: null }] },
+  catalog,
+) as Record<string, { label: string; apply?: string }[]>;
+const claimCols = claimNs.Claim;
+assert.deepEqual(claimCols, [{ label: "candidateId", type: "property", detail: "uuid", apply: '"candidateId"' }]);
+const mysqlNs = buildNamespace({ public: tables.public }, catalog, "`") as Record<
+  string,
+  { label: string; apply?: string }[]
+>;
+assert.equal(mysqlNs.orders[0].apply, undefined);
 
 // aliases: AS, bare, schema-qualified, keyword after the table is not an alias
 assert.deepEqual(
@@ -49,6 +62,12 @@ assert.deepEqual(
   ],
 );
 assert.deepEqual(tableRefs('select 1 from "Orders" where x'), [{ schema: null, table: "Orders", alias: '"Orders"' }]);
+// a clause keyword is never consumed as an alias, so the next JOIN source is still found
+assert.deepEqual(tableRefs("select * from orders join customers c on c.id = orders.customer_id join "), [
+  { schema: null, table: "orders", alias: "orders" },
+  { schema: null, table: "customers", alias: "c" },
+]);
+assert.deepEqual(tableRefs("select * from orders as o, customers"), [{ schema: null, table: "orders", alias: "o" }]);
 
 // JOIN suggestions: forward FK (orders → customers) and reverse FK (order_items → orders)
 const joins = joinSuggestions("select * from orders o join ", catalog).map((c) => c.label);
@@ -62,8 +81,13 @@ assert.deepEqual(
   joinSuggestions('select * from "Claim" join ', catalog).map((c) => c.label),
   ['"Candidate" c ON c.id = "Claim"."candidateId"'],
 );
+// a schema-qualified source keeps its join targets qualified (it is probably outside the search path)
 assert.deepEqual(
   joinSuggestions("select * from public.customers c join ", catalog).map((c) => c.label),
+  ["public.orders o ON o.customer_id = c.id", "audit.events e ON e.customer_id = c.id"],
+);
+assert.deepEqual(
+  joinSuggestions("select * from customers c join ", catalog).map((c) => c.label),
   ["orders o ON o.customer_id = c.id", "audit.events e ON e.customer_id = c.id"],
 );
 assert.deepEqual(

@@ -91,4 +91,12 @@ Round 1: 3 findings (all P2), all fixed with a self-check in `pnpm check`:
 | 2   | P2  | Generated JOIN clauses inserted unquoted mixed-case identifiers (Postgres folds them to lowercase)                                   | `ident()` quotes anything that is not plain lowercase with the dialect's quote (`"` / `` ` ``); aliases keep the quotes the user typed |
 | 3   | P2  | Reverse FKs owned by another schema were skipped for a schema-qualified table                                                        | Source-schema filter only on forward matches; cross-schema referencing tables are emitted schema-qualified                             |
 
+Round 2: 3 findings (all P2), all fixed with self-checks:
+
+| #   | Sev | Finding                                                                                                   | Resolution                                                                                       |
+| --- | --- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 4   | P2  | Column completions inserted unquoted mixed-case names (`c.candidateId`), which Postgres folds             | Column completions carry a dialect-quoted `apply`; lang-sql already quotes table names itself    |
+| 5   | P2  | `FROM audit.orders o JOIN` suggested a bare `customers` although the user is outside the search path      | Join targets stay schema-qualified whenever the source reference was qualified or schemas differ |
+| 6   | P2  | The alias regex consumed `JOIN` as a (rejected) alias, so `FROM orders JOIN customers c` lost `customers` | Alias group refuses clause keywords with a negative lookahead; scan resumes at the keyword       |
+
 Skipped: none.

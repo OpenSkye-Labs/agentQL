@@ -13,15 +13,23 @@ export type Catalogs = Record<string, SchemaCatalog>;
 
 const escapeDots = (s: string) => s.replace(/\./g, "\\.");
 
-/** Tables (bare and schema-qualified) with their columns for lang-sql's schema completion. */
-export function buildNamespace(tables: Record<string, TableInfo[]>, catalog: Catalogs): SQLNamespace {
+/** Quote an identifier unless it is plain lowercase; `q` is the dialect's quote character.
+ *  ponytail: reserved words (a table named `order`) stay unquoted; add a keyword set if it bites. */
+export function ident(name: string, q: string): string {
+  return /^[a-z_][a-z0-9_$]*$/.test(name) ? name : `${q}${name.split(q).join(q + q)}${q}`;
+}
+
+/** Tables (bare and schema-qualified) with their columns for lang-sql's schema completion.
+ *  Table names are namespace keys, which lang-sql quotes itself; column objects need an explicit quoted `apply`. */
+export function buildNamespace(tables: Record<string, TableInfo[]>, catalog: Catalogs, q = '"'): SQLNamespace {
   const ns: SQLNamespace = {};
   for (const [schema, list] of Object.entries(tables)) {
     const cols = new Map<string, Completion[]>();
     for (const c of catalog[schema]?.columns ?? []) {
       let arr = cols.get(c.table);
       if (!arr) cols.set(c.table, (arr = []));
-      arr.push({ label: c.name, type: "property", detail: c.data_type });
+      const apply = ident(c.name, q);
+      arr.push({ label: c.name, type: "property", detail: c.data_type, ...(apply !== c.name && { apply }) });
     }
     for (const t of list) {
       const entry = cols.get(t.name) ?? [];
@@ -38,31 +46,28 @@ export interface TableRef {
   alias: string;
 }
 
-const NOT_ALIAS = new Set(
-  "where on join left right inner outer cross full natural group order having limit offset union set using as select returning window fetch for values with lateral except intersect straight_join".split(
-    " ",
-  ),
-);
+const NOT_ALIAS =
+  "where on join left right inner outer cross full natural group order having limit offset union set using as select returning window fetch for values with lateral except intersect straight_join";
 const unq = (s: string) => s.replace(/^["`]|["`]$/g, "");
+const ID = '["`]?[\\w$]+["`]?';
+// `FROM t [AS] alias`: the alias group refuses clause keywords so `FROM orders JOIN x` leaves `JOIN` to the next match.
+const REF_RE = new RegExp(
+  `\\b(?:from|join)\\s+((?:${ID}\\s*\\.\\s*)?${ID})(?:\\s+(?:as\\s+)?(?!(?:${NOT_ALIAS.split(" ").join("|")})\\b)(${ID}))?`,
+  "gi",
+);
 
 /** FROM/JOIN sources of a statement with their alias as written (the table name, quotes included, when none). */
 export function tableRefs(stmt: string): TableRef[] {
   const refs: TableRef[] = [];
-  const re = /\b(?:from|join)\s+((?:["`]?[\w$]+["`]?\s*\.\s*)?["`]?[\w$]+["`]?)(?:\s+(?:as\s+)?(["`]?[\w$]+["`]?))?/gi;
-  for (const m of stmt.matchAll(re)) {
+  for (const m of stmt.matchAll(REF_RE)) {
     const raw = m[1].split(".").map((p) => p.trim());
-    const table = unq(raw[raw.length - 1]);
-    let alias = m[2] ?? raw[raw.length - 1];
-    if (NOT_ALIAS.has(unq(alias).toLowerCase())) alias = raw[raw.length - 1];
-    refs.push({ schema: raw.length > 1 ? unq(raw[0]) : null, table, alias });
+    refs.push({
+      schema: raw.length > 1 ? unq(raw[0]) : null,
+      table: unq(raw[raw.length - 1]),
+      alias: m[2] ?? raw[raw.length - 1],
+    });
   }
   return refs;
-}
-
-/** Quote an identifier unless it is plain lowercase; `q` is the dialect's quote character.
- *  ponytail: reserved words (a table named `order`) stay unquoted; add a keyword set if it bites. */
-export function ident(name: string, q: string): string {
-  return /^[a-z_][a-z0-9_$]*$/.test(name) ? name : `${q}${name.split(q).join(q + q)}${q}`;
 }
 
 /** `JOIN other o ON o.id = t.other_id` options for every FK touching a table already in the statement. */
@@ -84,9 +89,10 @@ export function joinSuggestions(stmt: string, catalog: Catalogs, q = '"'): Compl
     seen.add(label);
     out.push({ label, type: "type", detail, boost: 2 });
   };
-  const qualified = (schema: string | null, table: string, from: string) =>
-    schema && schema !== from ? `${ident(schema, q)}.${ident(table, q)}` : ident(table, q);
   for (const r of refs) {
+    // A schema-qualified source is probably outside the search path, so qualify its join targets too.
+    const qualified = (schema: string, table: string, from: string) =>
+      r.schema || schema !== from ? `${ident(schema, q)}.${ident(table, q)}` : ident(table, q);
     for (const [schema, cat] of Object.entries(catalog)) {
       for (const fk of cat.foreign_keys) {
         const refSchema = fk.ref_schema ?? schema;
