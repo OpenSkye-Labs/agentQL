@@ -34,7 +34,15 @@ function blank(driver: Driver = "postgres"): ConnectionConfig {
   };
 }
 
-export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; edit: ConnectionConfig | null; onOpenChange: (o: boolean) => void }) {
+export function ConnectionDialog({
+  open,
+  edit,
+  onOpenChange,
+}: {
+  open: boolean;
+  edit: ConnectionConfig | null;
+  onOpenChange: (o: boolean) => void;
+}) {
   const refresh = useStore((s) => s.refreshConnections);
   const connect = useStore((s) => s.connect);
   const toast = useStore((s) => s.toast);
@@ -126,7 +134,12 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
       footer={
         <>
           {testResult && (
-            <span className={clsx("mr-auto flex items-center gap-1.5 text-xs selectable", testResult.ok ? "text-success" : "text-danger")}>
+            <span
+              className={clsx(
+                "mr-auto flex items-center gap-1.5 text-xs selectable",
+                testResult.ok ? "text-success" : "text-danger",
+              )}
+            >
               {testResult.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />} {testResult.text}
             </span>
           )}
@@ -151,7 +164,9 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
               key={d.id}
               className={clsx(
                 "cursor-pointer rounded-md border px-2 py-2 text-center text-xs font-medium focus-within:outline-2 focus-within:outline-accent",
-                cfg.driver === d.id ? "border-accent bg-accent-soft text-fg" : "border-border bg-elev text-muted hover:bg-hover",
+                cfg.driver === d.id
+                  ? "border-accent bg-accent-soft text-fg"
+                  : "border-border bg-elev text-muted hover:bg-hover",
               )}
             >
               <input
@@ -171,18 +186,44 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
 
         <div className="grid grid-cols-[1fr_160px_auto] gap-3 items-start">
           <Field label="Name">
-            <Input value={cfg.name} onChange={(e) => set("name", e.target.value)} placeholder={defaultName(cfg)} autoFocus />
+            <Input
+              value={cfg.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder={defaultName(cfg)}
+              autoFocus
+            />
           </Field>
           <Field label="Group">
-            <Input value={cfg.group ?? ""} onChange={(e) => set("group", e.target.value)} placeholder="optional, e.g. Production" />
+            <Input
+              value={cfg.group ?? ""}
+              onChange={(e) => set("group", e.target.value)}
+              placeholder="optional, e.g. Production"
+            />
           </Field>
           <Field label="Color">
             <fieldset className="flex h-8 items-center gap-0.5 -ml-1">
               <legend className="sr-only">Color</legend>
               {COLORS.map((c, i) => (
-                <label key={c} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full focus-within:outline-2 focus-within:outline-accent" title={COLOR_NAMES[i]}>
-                  <input type="radio" name="color" className="sr-only" checked={cfg.color === c} onChange={() => set("color", c)} aria-label={COLOR_NAMES[i]} />
-                  <span className={clsx("h-4 w-4 rounded-full ring-offset-2 ring-offset-elev", cfg.color === c && "ring-2 ring-accent")} style={{ background: c }} />
+                <label
+                  key={c}
+                  className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full focus-within:outline-2 focus-within:outline-accent"
+                  title={COLOR_NAMES[i]}
+                >
+                  <input
+                    type="radio"
+                    name="color"
+                    className="sr-only"
+                    checked={cfg.color === c}
+                    onChange={() => set("color", c)}
+                    aria-label={COLOR_NAMES[i]}
+                  />
+                  <span
+                    className={clsx(
+                      "h-4 w-4 rounded-full ring-offset-2 ring-offset-elev",
+                      cfg.color === c && "ring-2 ring-accent",
+                    )}
+                    style={{ background: c }}
+                  />
                 </label>
               ))}
             </fieldset>
@@ -192,9 +233,19 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
         {!sqlite && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted">Connect with</span>
-            <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Connection method">
+            <div
+              className="inline-flex rounded-md border border-border p-0.5"
+              role="group"
+              aria-label="Connection method"
+            >
               {(["fields", "url"] as const).map((m) => (
-                <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} className={clsx("rounded px-2.5 py-1", mode === m ? "bg-active text-fg" : "text-muted hover:text-fg")}>
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={mode === m}
+                  onClick={() => setMode(m)}
+                  className={clsx("rounded px-2.5 py-1", mode === m ? "bg-active text-fg" : "text-muted hover:text-fg")}
+                >
                   {m === "fields" ? "Host & credentials" : "Connection URL"}
                 </button>
               ))}
@@ -205,15 +256,32 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
         {sqlite ? (
           <Field label="Database file">
             <div className="flex gap-2">
-              <Input value={cfg.file_path ?? ""} onChange={(e) => set("file_path", e.target.value)} placeholder="/path/to/database.sqlite (created if missing)" />
-              <Button onClick={() => pickFile((p) => set("file_path", p), [{ name: "SQLite", extensions: ["sqlite", "db", "sqlite3"] }])} aria-label="Browse">
+              <Input
+                value={cfg.file_path ?? ""}
+                onChange={(e) => set("file_path", e.target.value)}
+                placeholder="/path/to/database.sqlite (created if missing)"
+              />
+              <Button
+                onClick={() =>
+                  pickFile((p) => set("file_path", p), [{ name: "SQLite", extensions: ["sqlite", "db", "sqlite3"] }])
+                }
+                aria-label="Browse"
+              >
                 <FolderOpen size={14} />
               </Button>
             </div>
           </Field>
         ) : mode === "url" ? (
-          <Field label="URL" hint="postgres://user@host:5432/db · mysql://… · redis://… · mongodb+srv://… Leave the password out and set it below.">
-            <Input value={cfg.url ?? ""} onChange={(e) => set("url", e.target.value)} placeholder={`${cfg.driver === "postgres" ? "postgres" : cfg.driver === "mongodb" ? "mongodb" : cfg.driver}://user@host:${cfg.port}/${cfg.driver === "redis" ? "0" : "db"}`} className="font-mono" />
+          <Field
+            label="URL"
+            hint="postgres://user@host:5432/db · mysql://… · redis://… · mongodb+srv://… Leave the password out and set it below."
+          >
+            <Input
+              value={cfg.url ?? ""}
+              onChange={(e) => set("url", e.target.value)}
+              placeholder={`${cfg.driver === "postgres" ? "postgres" : cfg.driver === "mongodb" ? "mongodb" : cfg.driver}://user@host:${cfg.port}/${cfg.driver === "redis" ? "0" : "db"}`}
+              className="font-mono"
+            />
           </Field>
         ) : (
           <div className="grid grid-cols-[1fr_100px] gap-3">
@@ -232,10 +300,23 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
               <Input value={cfg.user} onChange={(e) => set("user", e.target.value)} autoComplete="off" />
             </Field>
             <Field label="Password">
-              <Input type="password" value={secrets.password ?? ""} onChange={(e) => setSecrets((s) => ({ ...s, password: e.target.value }))} autoComplete="new-password" />
+              <Input
+                type="password"
+                value={secrets.password ?? ""}
+                onChange={(e) => setSecrets((s) => ({ ...s, password: e.target.value }))}
+                autoComplete="new-password"
+              />
             </Field>
-            <Field label={cfg.driver === "redis" ? "DB index" : cfg.driver === "mongodb" ? "Auth / default database" : "Database"}>
-              <Input value={cfg.database} onChange={(e) => set("database", e.target.value)} placeholder={cfg.driver === "redis" ? "0" : cfg.driver === "mongodb" ? "admin" : ""} />
+            <Field
+              label={
+                cfg.driver === "redis" ? "DB index" : cfg.driver === "mongodb" ? "Auth / default database" : "Database"
+              }
+            >
+              <Input
+                value={cfg.database}
+                onChange={(e) => set("database", e.target.value)}
+                placeholder={cfg.driver === "redis" ? "0" : cfg.driver === "mongodb" ? "admin" : ""}
+              />
             </Field>
           </div>
         )}
@@ -255,20 +336,41 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
               </Field>
               <Field label="CA certificate">
                 <div className="flex gap-1">
-                  <Input value={cfg.ssl_ca_path ?? ""} onChange={(e) => set("ssl_ca_path", e.target.value)} placeholder="optional" />
-                  <Button onClick={() => pickFile((p) => set("ssl_ca_path", p))} aria-label="Browse for CA certificate"><FolderOpen size={14} /></Button>
+                  <Input
+                    value={cfg.ssl_ca_path ?? ""}
+                    onChange={(e) => set("ssl_ca_path", e.target.value)}
+                    placeholder="optional"
+                  />
+                  <Button onClick={() => pickFile((p) => set("ssl_ca_path", p))} aria-label="Browse for CA certificate">
+                    <FolderOpen size={14} />
+                  </Button>
                 </div>
               </Field>
               <Field label="Client certificate">
                 <div className="flex gap-1">
-                  <Input value={cfg.ssl_cert_path ?? ""} onChange={(e) => set("ssl_cert_path", e.target.value)} placeholder="optional" />
-                  <Button onClick={() => pickFile((p) => set("ssl_cert_path", p))} aria-label="Browse for client certificate"><FolderOpen size={14} /></Button>
+                  <Input
+                    value={cfg.ssl_cert_path ?? ""}
+                    onChange={(e) => set("ssl_cert_path", e.target.value)}
+                    placeholder="optional"
+                  />
+                  <Button
+                    onClick={() => pickFile((p) => set("ssl_cert_path", p))}
+                    aria-label="Browse for client certificate"
+                  >
+                    <FolderOpen size={14} />
+                  </Button>
                 </div>
               </Field>
               <Field label="Client key">
                 <div className="flex gap-1">
-                  <Input value={cfg.ssl_key_path ?? ""} onChange={(e) => set("ssl_key_path", e.target.value)} placeholder="optional" />
-                  <Button onClick={() => pickFile((p) => set("ssl_key_path", p))} aria-label="Browse for client key"><FolderOpen size={14} /></Button>
+                  <Input
+                    value={cfg.ssl_key_path ?? ""}
+                    onChange={(e) => set("ssl_key_path", e.target.value)}
+                    placeholder="optional"
+                  />
+                  <Button onClick={() => pickFile((p) => set("ssl_key_path", p))} aria-label="Browse for client key">
+                    <FolderOpen size={14} />
+                  </Button>
                 </div>
               </Field>
             </div>
@@ -277,18 +379,54 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
 
         {!sqlite && (
           <div className="rounded-md border border-border p-3 flex flex-col gap-3">
-            <Switch checked={useSsh} onChange={setUseSsh} label="Connect over SSH tunnel" description="The database host/port above is resolved from the SSH server." />
+            <Switch
+              checked={useSsh}
+              onChange={setUseSsh}
+              label="Connect over SSH tunnel"
+              description="The database host/port above is resolved from the SSH server."
+            />
             {useSsh && (
               <>
                 <div className="grid grid-cols-[1fr_90px_1fr] gap-3 items-start">
                   <Field label="SSH host">
-                    <Input value={cfg.ssh?.host ?? ""} onChange={(e) => set("ssh", { host: e.target.value, port: cfg.ssh?.port ?? 22, user: cfg.ssh?.user ?? "", auth: "agent" })} />
+                    <Input
+                      value={cfg.ssh?.host ?? ""}
+                      onChange={(e) =>
+                        set("ssh", {
+                          host: e.target.value,
+                          port: cfg.ssh?.port ?? 22,
+                          user: cfg.ssh?.user ?? "",
+                          auth: "agent",
+                        })
+                      }
+                    />
                   </Field>
                   <Field label="Port">
-                    <Input type="number" value={cfg.ssh?.port ?? 22} onChange={(e) => set("ssh", { host: cfg.ssh?.host ?? "", port: Number(e.target.value), user: cfg.ssh?.user ?? "", auth: "agent" })} />
+                    <Input
+                      type="number"
+                      value={cfg.ssh?.port ?? 22}
+                      onChange={(e) =>
+                        set("ssh", {
+                          host: cfg.ssh?.host ?? "",
+                          port: Number(e.target.value),
+                          user: cfg.ssh?.user ?? "",
+                          auth: "agent",
+                        })
+                      }
+                    />
                   </Field>
                   <Field label="SSH user">
-                    <Input value={cfg.ssh?.user ?? ""} onChange={(e) => set("ssh", { host: cfg.ssh?.host ?? "", port: cfg.ssh?.port ?? 22, user: e.target.value, auth: "agent" })} />
+                    <Input
+                      value={cfg.ssh?.user ?? ""}
+                      onChange={(e) =>
+                        set("ssh", {
+                          host: cfg.ssh?.host ?? "",
+                          port: cfg.ssh?.port ?? 22,
+                          user: e.target.value,
+                          auth: "agent",
+                        })
+                      }
+                    />
                   </Field>
                 </div>
                 <div className="grid grid-cols-[150px_1fr_1fr] gap-3 items-start">
@@ -304,17 +442,28 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
                       <Field label="Key file">
                         <div className="flex gap-1">
                           <Input value={keyPath} onChange={(e) => setKeyPath(e.target.value)} />
-                          <Button onClick={() => pickFile(setKeyPath)} aria-label="Browse for key"><FolderOpen size={14} /></Button>
+                          <Button onClick={() => pickFile(setKeyPath)} aria-label="Browse for key">
+                            <FolderOpen size={14} />
+                          </Button>
                         </div>
                       </Field>
                       <Field label="Passphrase">
-                        <Input type="password" value={secrets.ssh_key_passphrase ?? ""} onChange={(e) => setSecrets((s) => ({ ...s, ssh_key_passphrase: e.target.value }))} placeholder="if encrypted" />
+                        <Input
+                          type="password"
+                          value={secrets.ssh_key_passphrase ?? ""}
+                          onChange={(e) => setSecrets((s) => ({ ...s, ssh_key_passphrase: e.target.value }))}
+                          placeholder="if encrypted"
+                        />
                       </Field>
                     </>
                   )}
                   {sshAuth === "password" && (
                     <Field label="SSH password">
-                      <Input type="password" value={secrets.ssh_password ?? ""} onChange={(e) => setSecrets((s) => ({ ...s, ssh_password: e.target.value }))} />
+                      <Input
+                        type="password"
+                        value={secrets.ssh_password ?? ""}
+                        onChange={(e) => setSecrets((s) => ({ ...s, ssh_password: e.target.value }))}
+                      />
                     </Field>
                   )}
                 </div>
@@ -323,12 +472,22 @@ export function ConnectionDialog({ open, edit, onOpenChange }: { open: boolean; 
           </div>
         )}
 
-        <Switch checked={cfg.read_only} onChange={(v) => set("read_only", v)} label="Read-only connection" description="Blocks write statements from the editor, the grid and the agent." />
+        <Switch
+          checked={cfg.read_only}
+          onChange={(v) => set("read_only", v)}
+          label="Read-only connection"
+          description="Blocks write statements from the editor, the grid and the agent."
+        />
         {sql && cfg.driver === "postgres" && (
-          <Field label="Extra options" hint="PostgreSQL runtime parameters, one per line as key=value (e.g. search_path=app,public)">
+          <Field
+            label="Extra options"
+            hint="PostgreSQL runtime parameters, one per line as key=value (e.g. search_path=app,public)"
+          >
             <textarea
               className="h-16 w-full rounded-md border border-border bg-elev px-2.5 py-1.5 font-mono text-xs selectable"
-              value={Object.entries(cfg.options).map(([k, v]) => `${k}=${v}`).join("\n")}
+              value={Object.entries(cfg.options)
+                .map(([k, v]) => `${k}=${v}`)
+                .join("\n")}
               onChange={(e) => {
                 const o: Record<string, string> = {};
                 for (const line of e.target.value.split("\n")) {

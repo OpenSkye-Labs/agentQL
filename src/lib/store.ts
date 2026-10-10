@@ -136,7 +136,15 @@ export const useStore = create<State>((set, get) => ({
       set((s) => ({
         live: {
           ...s.live,
-          [id]: { id, database: r.database, version: r.server_version, schemas, tables: {}, databases, expanded: first ? { [first]: true } : {} },
+          [id]: {
+            id,
+            database: r.database,
+            version: r.server_version,
+            schemas,
+            tables: {},
+            databases,
+            expanded: first ? { [first]: true } : {},
+          },
         },
       }));
       if (first) await get().loadTables(id, first);
@@ -158,7 +166,7 @@ export const useStore = create<State>((set, get) => ({
       const live = { ...s.live };
       delete live[id];
       const tabs = s.tabs.filter((t) => t.connectionId !== id);
-      const activeTab = tabs.some((t) => t.id === s.activeTab) ? s.activeTab : tabs[tabs.length - 1]?.id ?? null;
+      const activeTab = tabs.some((t) => t.id === s.activeTab) ? s.activeTab : (tabs[tabs.length - 1]?.id ?? null);
       return { live, tabs, activeTab };
     });
   },
@@ -250,7 +258,9 @@ export const useStore = create<State>((set, get) => ({
   },
 
   saveDashboard: async (d) => {
-    const list = get().dashboards.filter((x) => x.id !== d.id).concat({ ...d, updated_at: new Date().toISOString() });
+    const list = get()
+      .dashboards.filter((x) => x.id !== d.id)
+      .concat({ ...d, updated_at: new Date().toISOString() });
     await api.kvSet("dashboards", list);
     set({ dashboards: list });
   },
@@ -261,7 +271,9 @@ export const useStore = create<State>((set, get) => ({
     for (const t of get().tabs) if (t.kind === "dashboard" && t.dashboardId === id) get().closeTab(t.id);
   },
   saveQuery: async (q) => {
-    const list = get().savedQueries.filter((x) => x.id !== q.id).concat(q);
+    const list = get()
+      .savedQueries.filter((x) => x.id !== q.id)
+      .concat(q);
     await api.kvSet("saved_queries", list);
     set({ savedQueries: list });
   },
@@ -280,7 +292,8 @@ export const useStore = create<State>((set, get) => ({
     await api.kvSet("history", []);
   },
   setSidebarFilter: (sidebarFilter) => set({ sidebarFilter }),
-  setChatOpen: (chatOpen, sessionId) => set((s) => ({ chatOpen, chatSessionId: sessionId === undefined ? s.chatSessionId : sessionId })),
+  setChatOpen: (chatOpen, sessionId) =>
+    set((s) => ({ chatOpen, chatSessionId: sessionId === undefined ? s.chatSessionId : sessionId })),
   askAssistant: (prefill) => set({ chatOpen: true, chatPrefill: prefill }),
   takeChatPrefill: () => {
     const p = get().chatPrefill;
@@ -301,5 +314,6 @@ export function applyTheme(theme: string, fontSize: number | null) {
 }
 
 export const useActiveTab = () => useStore((s) => s.tabs.find((t) => t.id === s.activeTab) ?? null);
-export const useConnection = (id: string | null) => useStore((s) => (id ? s.connections.find((c) => c.id === id) ?? null : null));
+export const useConnection = (id: string | null) =>
+  useStore((s) => (id ? (s.connections.find((c) => c.id === id) ?? null) : null));
 export { type ChatSession };

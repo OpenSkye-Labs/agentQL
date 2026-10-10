@@ -25,17 +25,36 @@ impl RedisConn {
     pub async fn connect(c: &ConnectionConfig, s: &ConnectionSecrets) -> Result<RedisConn> {
         let url = match &c.url {
             Some(u) => {
-                let mut u = url::Url::parse(u).map_err(|e| AppError::Msg(format!("invalid url: {e}")))?;
+                let mut u =
+                    url::Url::parse(u).map_err(|e| AppError::Msg(format!("invalid url: {e}")))?;
                 if u.password().is_none()
-                    && let Some(pw) = s.password.as_deref().filter(|p| !p.is_empty()) {
-                        let _ = u.set_password(Some(pw));
-                    }
+                    && let Some(pw) = s.password.as_deref().filter(|p| !p.is_empty())
+                {
+                    let _ = u.set_password(Some(pw));
+                }
                 u.to_string()
             }
             None => {
-                let scheme = if c.ssl_mode.as_deref().is_some_and(|m| m != "disable" && m != "prefer") { "rediss" } else { "redis" };
-                let mut u = url::Url::parse(&format!("{scheme}://{}:{}/{}", c.host, if c.port == 0 { 6379 } else { c.port }, if c.database.is_empty() { "0" } else { &c.database }))
-                    .map_err(|e| AppError::Msg(format!("invalid redis target: {e}")))?;
+                let scheme = if c
+                    .ssl_mode
+                    .as_deref()
+                    .is_some_and(|m| m != "disable" && m != "prefer")
+                {
+                    "rediss"
+                } else {
+                    "redis"
+                };
+                let mut u = url::Url::parse(&format!(
+                    "{scheme}://{}:{}/{}",
+                    c.host,
+                    if c.port == 0 { 6379 } else { c.port },
+                    if c.database.is_empty() {
+                        "0"
+                    } else {
+                        &c.database
+                    }
+                ))
+                .map_err(|e| AppError::Msg(format!("invalid redis target: {e}")))?;
                 if !c.user.is_empty() {
                     let _ = u.set_username(&c.user);
                 }
@@ -46,9 +65,12 @@ impl RedisConn {
             }
         };
         let client = redis::Client::open(url)?;
-        let conn = tokio::time::timeout(std::time::Duration::from_secs(15), client.get_multiplexed_async_connection())
-            .await
-            .map_err(|_| AppError::Msg("redis connection timed out".into()))??;
+        let conn = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            client.get_multiplexed_async_connection(),
+        )
+        .await
+        .map_err(|_| AppError::Msg("redis connection timed out".into()))??;
         Ok(RedisConn { conn })
     }
 
@@ -70,17 +92,30 @@ impl RedisConn {
         for k in &keys {
             pipe.cmd("TYPE").arg(k).cmd("TTL").arg(k);
         }
-        let meta: Vec<redis::Value> = if keys.is_empty() { vec![] } else { pipe.query_async(&mut con).await? };
+        let meta: Vec<redis::Value> = if keys.is_empty() {
+            vec![]
+        } else {
+            pipe.query_async(&mut con).await?
+        };
         let out = keys
             .into_iter()
             .enumerate()
             .map(|(i, key)| RedisKey {
                 key,
-                kind: meta.get(i * 2).map(|v| to_json(v.clone()).as_str().unwrap_or("").to_string()).unwrap_or_default(),
-                ttl: meta.get(i * 2 + 1).and_then(|v| to_json(v.clone()).as_i64()).unwrap_or(-1),
+                kind: meta
+                    .get(i * 2)
+                    .map(|v| to_json(v.clone()).as_str().unwrap_or("").to_string())
+                    .unwrap_or_default(),
+                ttl: meta
+                    .get(i * 2 + 1)
+                    .and_then(|v| to_json(v.clone()).as_i64())
+                    .unwrap_or(-1),
             })
             .collect();
-        Ok(ScanResult { cursor: next, keys: out })
+        Ok(ScanResult {
+            cursor: next,
+            keys: out,
+        })
     }
 
     pub async fn get_key(&self, key: &str) -> Result<Value> {
@@ -90,34 +125,93 @@ impl RedisConn {
         let value: redis::Value = match kind.as_str() {
             "string" => redis::cmd("GET").arg(key).query_async(&mut con).await?,
             "hash" => redis::cmd("HGETALL").arg(key).query_async(&mut con).await?,
-            "list" => redis::cmd("LRANGE").arg(key).arg(0).arg(999).query_async(&mut con).await?,
-            "set" => redis::cmd("SMEMBERS").arg(key).query_async(&mut con).await?,
-            "zset" => redis::cmd("ZRANGE").arg(key).arg(0).arg(999).arg("WITHSCORES").query_async(&mut con).await?,
-            "stream" => redis::cmd("XRANGE").arg(key).arg("-").arg("+").arg("COUNT").arg(200).query_async(&mut con).await?,
+            "list" => {
+                redis::cmd("LRANGE")
+                    .arg(key)
+                    .arg(0)
+                    .arg(999)
+                    .query_async(&mut con)
+                    .await?
+            }
+            "set" => {
+                redis::cmd("SMEMBERS")
+                    .arg(key)
+                    .query_async(&mut con)
+                    .await?
+            }
+            "zset" => {
+                redis::cmd("ZRANGE")
+                    .arg(key)
+                    .arg(0)
+                    .arg(999)
+                    .arg("WITHSCORES")
+                    .query_async(&mut con)
+                    .await?
+            }
+            "stream" => {
+                redis::cmd("XRANGE")
+                    .arg(key)
+                    .arg("-")
+                    .arg("+")
+                    .arg("COUNT")
+                    .arg(200)
+                    .query_async(&mut con)
+                    .await?
+            }
             "none" => return Err(AppError::Msg(format!("key '{key}' does not exist"))),
             _ => redis::Value::Nil,
         };
         let size: i64 = match kind.as_str() {
-            "string" => redis::cmd("STRLEN").arg(key).query_async(&mut con).await.unwrap_or(0),
-            "hash" => redis::cmd("HLEN").arg(key).query_async(&mut con).await.unwrap_or(0),
-            "list" => redis::cmd("LLEN").arg(key).query_async(&mut con).await.unwrap_or(0),
-            "set" => redis::cmd("SCARD").arg(key).query_async(&mut con).await.unwrap_or(0),
-            "zset" => redis::cmd("ZCARD").arg(key).query_async(&mut con).await.unwrap_or(0),
-            "stream" => redis::cmd("XLEN").arg(key).query_async(&mut con).await.unwrap_or(0),
+            "string" => redis::cmd("STRLEN")
+                .arg(key)
+                .query_async(&mut con)
+                .await
+                .unwrap_or(0),
+            "hash" => redis::cmd("HLEN")
+                .arg(key)
+                .query_async(&mut con)
+                .await
+                .unwrap_or(0),
+            "list" => redis::cmd("LLEN")
+                .arg(key)
+                .query_async(&mut con)
+                .await
+                .unwrap_or(0),
+            "set" => redis::cmd("SCARD")
+                .arg(key)
+                .query_async(&mut con)
+                .await
+                .unwrap_or(0),
+            "zset" => redis::cmd("ZCARD")
+                .arg(key)
+                .query_async(&mut con)
+                .await
+                .unwrap_or(0),
+            "stream" => redis::cmd("XLEN")
+                .arg(key)
+                .query_async(&mut con)
+                .await
+                .unwrap_or(0),
             _ => 0,
         };
         let mut value = to_json(value);
         // RESP2 returns hashes as a flat [field, value, ...] array; normalise to an object.
         if kind == "hash"
-            && let Value::Array(items) = &value {
-                let mut map = serde_json::Map::new();
-                for pair in items.chunks(2) {
-                    if let [k, v] = pair {
-                        map.insert(k.as_str().map(str::to_string).unwrap_or_else(|| k.to_string()), v.clone());
-                    }
+            && let Value::Array(items) = &value
+        {
+            let mut map = serde_json::Map::new();
+            for pair in items.chunks(2) {
+                if let [k, v] = pair {
+                    map.insert(
+                        k.as_str()
+                            .map(str::to_string)
+                            .unwrap_or_else(|| k.to_string()),
+                        v.clone(),
+                    );
                 }
-                value = Value::Object(map);
             }
+            value = Value::Object(map);
+        }
         Ok(json!({ "key": key, "type": kind, "ttl": ttl, "size": size, "value": value }))
     }
 
@@ -128,7 +222,9 @@ impl RedisConn {
 
     /// Run a command from pre-split arguments (no quoting rules apply; safe for arbitrary keys/values).
     pub async fn exec(&self, args: &[String]) -> Result<Value> {
-        let Some((name, rest)) = args.split_first() else { return Err(AppError::Msg("empty command".into())) };
+        let Some((name, rest)) = args.split_first() else {
+            return Err(AppError::Msg("empty command".into()));
+        };
         let mut cmd = redis::cmd(name);
         for a in rest {
             cmd.arg(a);
@@ -160,11 +256,57 @@ pub fn is_read_only_args(args: &[String]) -> bool {
     let name = args.first().map(|s| s.to_uppercase()).unwrap_or_default();
     matches!(
         name.as_str(),
-        "GET" | "MGET" | "HGET" | "HGETALL" | "HMGET" | "HKEYS" | "HVALS" | "HLEN" | "HEXISTS" | "LRANGE" | "LLEN" | "LINDEX"
-            | "SMEMBERS" | "SCARD" | "SISMEMBER" | "ZRANGE" | "ZRANGEBYSCORE" | "ZREVRANGE" | "ZCARD" | "ZSCORE" | "ZRANK"
-            | "SCAN" | "SSCAN" | "HSCAN" | "ZSCAN" | "KEYS" | "TYPE" | "TTL" | "PTTL" | "EXISTS" | "STRLEN" | "DBSIZE"
-            | "INFO" | "PING" | "ECHO" | "TIME" | "XRANGE" | "XREVRANGE" | "XLEN" | "XINFO" | "OBJECT" | "MEMORY"
-            | "RANDOMKEY" | "GETRANGE" | "BITCOUNT" | "PFCOUNT" | "GEOPOS" | "GEODIST" | "JSON.GET" | "FT.SEARCH" | "DUMP"
+        "GET"
+            | "MGET"
+            | "HGET"
+            | "HGETALL"
+            | "HMGET"
+            | "HKEYS"
+            | "HVALS"
+            | "HLEN"
+            | "HEXISTS"
+            | "LRANGE"
+            | "LLEN"
+            | "LINDEX"
+            | "SMEMBERS"
+            | "SCARD"
+            | "SISMEMBER"
+            | "ZRANGE"
+            | "ZRANGEBYSCORE"
+            | "ZREVRANGE"
+            | "ZCARD"
+            | "ZSCORE"
+            | "ZRANK"
+            | "SCAN"
+            | "SSCAN"
+            | "HSCAN"
+            | "ZSCAN"
+            | "KEYS"
+            | "TYPE"
+            | "TTL"
+            | "PTTL"
+            | "EXISTS"
+            | "STRLEN"
+            | "DBSIZE"
+            | "INFO"
+            | "PING"
+            | "ECHO"
+            | "TIME"
+            | "XRANGE"
+            | "XREVRANGE"
+            | "XLEN"
+            | "XINFO"
+            | "OBJECT"
+            | "MEMORY"
+            | "RANDOMKEY"
+            | "GETRANGE"
+            | "BITCOUNT"
+            | "PFCOUNT"
+            | "GEOPOS"
+            | "GEODIST"
+            | "JSON.GET"
+            | "FT.SEARCH"
+            | "DUMP"
     )
 }
 
@@ -217,7 +359,15 @@ pub fn to_json(v: redis::Value) -> Value {
         R::Okay => Value::String("OK".into()),
         R::Map(m) => Value::Object(
             m.into_iter()
-                .map(|(k, v)| (to_json(k).as_str().map(str::to_string).unwrap_or_else(|| "?".into()), to_json(v)))
+                .map(|(k, v)| {
+                    (
+                        to_json(k)
+                            .as_str()
+                            .map(str::to_string)
+                            .unwrap_or_else(|| "?".into()),
+                        to_json(v),
+                    )
+                })
                 .collect(),
         ),
         R::Set(a) => Value::Array(a.into_iter().map(to_json).collect()),

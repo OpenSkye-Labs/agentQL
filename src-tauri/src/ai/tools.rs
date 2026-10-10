@@ -3,9 +3,9 @@
 
 use super::{AgentEvent, ChatSession, Ctx, ToolDef};
 use crate::config::Driver;
+use crate::db::mongo::MongoFind;
 use crate::db::sql::{is_read_only, split_statements};
 use crate::db::{Live, QueryResult};
-use crate::db::mongo::MongoFind;
 use serde_json::{Value, json};
 
 pub struct ToolOutput {
@@ -15,10 +15,18 @@ pub struct ToolOutput {
 }
 
 fn ok(content: String, display: Option<Value>) -> ToolOutput {
-    ToolOutput { content, is_error: false, display }
+    ToolOutput {
+        content,
+        is_error: false,
+        display,
+    }
 }
 fn err(msg: impl ToString) -> ToolOutput {
-    ToolOutput { content: msg.to_string(), is_error: true, display: None }
+    ToolOutput {
+        content: msg.to_string(),
+        is_error: true,
+        display: None,
+    }
 }
 
 const CHART_PROPS: &str = r#"{
@@ -112,7 +120,8 @@ pub fn definitions(driver: Driver) -> Vec<ToolDef> {
 
 pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
     let Ok(conn) = ctx.manager.get(&session.connection_id).await else {
-        return "You are AgentQL, a database assistant. The connection is currently offline.".into();
+        return "You are AgentQL, a database assistant. The connection is currently offline."
+            .into();
     };
     let cfg = &conn.config;
     let mut s = format!(
@@ -137,9 +146,21 @@ pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
                 let mut budget = 150usize;
                 for schema in schemas.iter().take(10) {
                     if let Ok(tables) = c.tables(schema).await {
-                        let names: Vec<&str> = tables.iter().take(budget).map(|t| t.name.as_str()).collect();
+                        let names: Vec<&str> = tables
+                            .iter()
+                            .take(budget)
+                            .map(|t| t.name.as_str())
+                            .collect();
                         budget = budget.saturating_sub(names.len());
-                        s.push_str(&format!("- {schema}: {}{}\n", names.join(", "), if tables.len() > names.len() { ", …" } else { "" }));
+                        s.push_str(&format!(
+                            "- {schema}: {}{}\n",
+                            names.join(", "),
+                            if tables.len() > names.len() {
+                                ", …"
+                            } else {
+                                ""
+                            }
+                        ));
                     }
                     if budget == 0 {
                         break;
@@ -151,10 +172,14 @@ pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
             if let Ok(dbs) = m.databases().await {
                 s.push_str(&format!("\nDatabases: {}\n", dbs.join(", ")));
                 if let Some(db) = m.default_db.as_deref().or(dbs.first().map(|x| x.as_str()))
-                    && let Ok(cols) = m.collections(db).await {
-                        let names: Vec<String> = cols.iter().filter_map(|c| c["name"].as_str().map(|s| s.to_string())).collect();
-                        s.push_str(&format!("Collections in {db}: {}\n", names.join(", ")));
-                    }
+                    && let Ok(cols) = m.collections(db).await
+                {
+                    let names: Vec<String> = cols
+                        .iter()
+                        .filter_map(|c| c["name"].as_str().map(|s| s.to_string()))
+                        .collect();
+                    s.push_str(&format!("Collections in {db}: {}\n", names.join(", ")));
+                }
             }
         }
         Live::Redis(r) => {
@@ -172,7 +197,10 @@ pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
 }
 
 fn str_arg<'a>(input: &'a Value, k: &str) -> Option<&'a str> {
-    input.get(k).and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty())
+    input
+        .get(k)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
 }
 
 pub async fn execute(ctx: &Ctx, session: &ChatSession, name: &str, input: &Value) -> ToolOutput {
@@ -182,7 +210,12 @@ pub async fn execute(ctx: &Ctx, session: &ChatSession, name: &str, input: &Value
     }
 }
 
-async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Value) -> crate::error::Result<ToolOutput> {
+async fn execute_inner(
+    ctx: &Ctx,
+    session: &ChatSession,
+    name: &str,
+    input: &Value,
+) -> crate::error::Result<ToolOutput> {
     let conn = ctx.manager.get(&session.connection_id).await?;
     let settings = ctx.store.settings();
     let writes_allowed = settings.agent_allow_writes && !conn.config.read_only;
@@ -197,7 +230,16 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
             let tables = c.tables(&schema).await?;
             let lines: Vec<String> = tables
                 .iter()
-                .map(|t| format!("{} ({}{})", t.name, t.kind, t.row_estimate.map(|n| format!(", ~{n} rows")).unwrap_or_default()))
+                .map(|t| {
+                    format!(
+                        "{} ({}{})",
+                        t.name,
+                        t.kind,
+                        t.row_estimate
+                            .map(|n| format!(", ~{n} rows"))
+                            .unwrap_or_default()
+                    )
+                })
                 .collect();
             Ok(ok(lines.join("\n"), None))
         }
@@ -216,144 +258,307 @@ async fn execute_inner(ctx: &Ctx, session: &ChatSession, name: &str, input: &Val
                     col.data_type,
                     if col.is_primary { " PK" } else { "" },
                     if col.nullable { "" } else { " NOT NULL" },
-                    col.default.as_ref().map(|v| format!(" DEFAULT {v}")).unwrap_or_default()
+                    col.default
+                        .as_ref()
+                        .map(|v| format!(" DEFAULT {v}"))
+                        .unwrap_or_default()
                 ));
             }
             if !d.indexes.is_empty() {
                 s.push_str("Indexes:\n");
                 for i in &d.indexes {
-                    s.push_str(&format!("- {} ({}){}\n", i.name, i.columns.join(", "), if i.unique { " UNIQUE" } else { "" }));
+                    s.push_str(&format!(
+                        "- {} ({}){}\n",
+                        i.name,
+                        i.columns.join(", "),
+                        if i.unique { " UNIQUE" } else { "" }
+                    ));
                 }
             }
             if !d.foreign_keys.is_empty() {
                 s.push_str("Foreign keys:\n");
                 for f in &d.foreign_keys {
-                    s.push_str(&format!("- {} ({}) -> {}({})\n", f.name, f.columns.join(", "), f.ref_table, f.ref_columns.join(", ")));
+                    s.push_str(&format!(
+                        "- {} ({}) -> {}({})\n",
+                        f.name,
+                        f.columns.join(", "),
+                        f.ref_table,
+                        f.ref_columns.join(", ")
+                    ));
                 }
             }
-            Ok(ok(s, Some(json!({"type": "table_details", "schema": schema, "table": table, "details": d}))))
+            Ok(ok(
+                s,
+                Some(
+                    json!({"type": "table_details", "schema": schema, "table": table, "details": d}),
+                ),
+            ))
         }
         (Live::Sql(c), "run_sql") => {
             let sql = str_arg(input, "sql").ok_or("sql is required")?;
-            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(200).min(2000) as u32;
+            let limit = input
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(200)
+                .min(2000) as u32;
             let read_only = is_read_only(conn.config.driver, sql);
             if !read_only {
                 if !writes_allowed {
-                    return Ok(err("This statement writes data. Writes by the agent are disabled (Settings → AI → allow writes), or the connection is read-only. Ask the user to run it themselves by giving them the SQL."));
+                    return Ok(err(
+                        "This statement writes data. Writes by the agent are disabled (Settings → AI → allow writes), or the connection is read-only. Ask the user to run it themselves by giving them the SQL.",
+                    ));
                 }
-                if !ctx.request_approval(&session.id, "The agent wants to run a write statement", sql).await {
+                if !ctx
+                    .request_approval(&session.id, "The agent wants to run a write statement", sql)
+                    .await
+                {
                     return Ok(err("The user declined to run this statement."));
                 }
             }
-            let results = if read_only { c.run_read_only(sql, limit).await? } else { c.run(sql, limit).await? };
+            let results = if read_only {
+                c.run_read_only(sql, limit).await?
+            } else {
+                c.run(sql, limit).await?
+            };
             let mut text = String::new();
             for r in &results {
                 text.push_str(&format_result(r, 50));
                 text.push('\n');
             }
-            Ok(ok(text, Some(json!({"type": "query_results", "results": results}))))
+            Ok(ok(
+                text,
+                Some(json!({"type": "query_results", "results": results})),
+            ))
         }
         (Live::Sql(c), "explain_sql") => {
             let sql = str_arg(input, "sql").ok_or("sql is required")?;
-            let analyze = input.get("analyze").and_then(|v| v.as_bool()).unwrap_or(false);
+            let analyze = input
+                .get("analyze")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if analyze && !is_read_only(conn.config.driver, sql) {
-                return Ok(err("EXPLAIN ANALYZE would execute a write statement; run plain explain instead."));
+                return Ok(err(
+                    "EXPLAIN ANALYZE would execute a write statement; run plain explain instead.",
+                ));
             }
             let stmt = split_statements(sql).into_iter().next().unwrap_or_default();
-            let r = c.run_one_read_only(&c.explain_sql(&stmt, analyze), 5000).await?;
-            let plan: Vec<String> = r.rows.iter().map(|row| row.iter().map(cell_text).collect::<Vec<_>>().join(" | ")).collect();
-            Ok(ok(plan.join("\n"), Some(json!({"type": "plan", "plan": plan.join("\n")}))))
+            let r = c
+                .run_one_read_only(&c.explain_sql(&stmt, analyze), 5000)
+                .await?;
+            let plan: Vec<String> = r
+                .rows
+                .iter()
+                .map(|row| row.iter().map(cell_text).collect::<Vec<_>>().join(" | "))
+                .collect();
+            Ok(ok(
+                plan.join("\n"),
+                Some(json!({"type": "plan", "plan": plan.join("\n")})),
+            ))
         }
         (Live::Redis(r), "redis_scan") => {
             let pattern = str_arg(input, "pattern").unwrap_or("*");
-            let count = input.get("count").and_then(|v| v.as_u64()).unwrap_or(100).min(1000) as u32;
+            let count = input
+                .get("count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(100)
+                .min(1000) as u32;
             let res = r.scan("0", pattern, count).await?;
-            let lines: Vec<String> = res.keys.iter().map(|k| format!("{} ({}, ttl {})", k.key, k.kind, k.ttl)).collect();
-            Ok(ok(format!("{}\nnext cursor: {}", lines.join("\n"), res.cursor), None))
+            let lines: Vec<String> = res
+                .keys
+                .iter()
+                .map(|k| format!("{} ({}, ttl {})", k.key, k.kind, k.ttl))
+                .collect();
+            Ok(ok(
+                format!("{}\nnext cursor: {}", lines.join("\n"), res.cursor),
+                None,
+            ))
         }
         (Live::Redis(r), "redis_command") => {
             let cmd = str_arg(input, "command").ok_or("command is required")?;
             if !crate::db::redis::is_read_only_command(cmd) {
                 if !writes_allowed {
-                    return Ok(err("Only read commands are allowed for the agent on this connection."));
+                    return Ok(err(
+                        "Only read commands are allowed for the agent on this connection.",
+                    ));
                 }
-                if !ctx.request_approval(&session.id, "The agent wants to run a Redis write command", cmd).await {
+                if !ctx
+                    .request_approval(
+                        &session.id,
+                        "The agent wants to run a Redis write command",
+                        cmd,
+                    )
+                    .await
+                {
                     return Ok(err("The user declined to run this command."));
                 }
             }
             let v = r.command(cmd).await?;
-            Ok(ok(truncate(&serde_json::to_string_pretty(&v)?, 8000), Some(json!({"type": "json", "value": v}))))
+            Ok(ok(
+                truncate(&serde_json::to_string_pretty(&v)?, 8000),
+                Some(json!({"type": "json", "value": v})),
+            ))
         }
         (Live::Mongo(m), "list_databases") => Ok(ok(m.databases().await?.join("\n"), None)),
         (Live::Mongo(m), "list_collections") => {
-            let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
+            let db = str_arg(input, "db")
+                .map(str::to_string)
+                .or_else(|| m.default_db.clone())
+                .ok_or("db is required")?;
             let cols = m.collections(&db).await?;
-            Ok(ok(cols.iter().map(|c| format!("{} (~{} docs)", c["name"].as_str().unwrap_or("?"), c["count"])).collect::<Vec<_>>().join("\n"), None))
+            Ok(ok(
+                cols.iter()
+                    .map(|c| {
+                        format!(
+                            "{} (~{} docs)",
+                            c["name"].as_str().unwrap_or("?"),
+                            c["count"]
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                None,
+            ))
         }
         (Live::Mongo(m), "describe_collection") => {
-            let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
+            let db = str_arg(input, "db")
+                .map(str::to_string)
+                .or_else(|| m.default_db.clone())
+                .ok_or("db is required")?;
             let coll = str_arg(input, "collection").ok_or("collection is required")?;
             let info = m.collection_info(&db, coll).await?;
-            Ok(ok(truncate(&serde_json::to_string_pretty(&json!({"fields": info["fields"], "indexes": info["indexes"]}))?, 8000), Some(json!({"type": "json", "value": info}))))
+            Ok(ok(
+                truncate(
+                    &serde_json::to_string_pretty(
+                        &json!({"fields": info["fields"], "indexes": info["indexes"]}),
+                    )?,
+                    8000,
+                ),
+                Some(json!({"type": "json", "value": info})),
+            ))
         }
         (Live::Mongo(m), "mongo_find") => {
-            let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
+            let db = str_arg(input, "db")
+                .map(str::to_string)
+                .or_else(|| m.default_db.clone())
+                .ok_or("db is required")?;
             let q = MongoFind {
                 db,
-                collection: str_arg(input, "collection").ok_or("collection is required")?.to_string(),
+                collection: str_arg(input, "collection")
+                    .ok_or("collection is required")?
+                    .to_string(),
                 filter: input.get("filter").cloned(),
                 sort: input.get("sort").cloned(),
                 projection: input.get("projection").cloned(),
-                limit: input.get("limit").and_then(|v| v.as_i64()).unwrap_or(20).min(500),
+                limit: input
+                    .get("limit")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(20)
+                    .min(500),
                 skip: 0,
             };
             let page = m.find(&q).await?;
-            let text = format!("{} matching (showing {}):\n{}", page.total.map(|t| t.to_string()).unwrap_or("?".into()), page.docs.len(), truncate(&serde_json::to_string_pretty(&page.docs)?, 8000));
-            Ok(ok(text, Some(json!({"type": "documents", "docs": page.docs}))))
+            let text = format!(
+                "{} matching (showing {}):\n{}",
+                page.total.map(|t| t.to_string()).unwrap_or("?".into()),
+                page.docs.len(),
+                truncate(&serde_json::to_string_pretty(&page.docs)?, 8000)
+            );
+            Ok(ok(
+                text,
+                Some(json!({"type": "documents", "docs": page.docs})),
+            ))
         }
         (Live::Mongo(m), "mongo_aggregate") => {
-            let db = str_arg(input, "db").map(str::to_string).or_else(|| m.default_db.clone()).ok_or("db is required")?;
+            let db = str_arg(input, "db")
+                .map(str::to_string)
+                .or_else(|| m.default_db.clone())
+                .ok_or("db is required")?;
             let coll = str_arg(input, "collection").ok_or("collection is required")?;
             let pipeline = input.get("pipeline").ok_or("pipeline is required")?;
             if pipeline_writes(pipeline) {
                 if !writes_allowed {
-                    return Ok(err("$out / $merge stages write data; agent writes are disabled."));
+                    return Ok(err(
+                        "$out / $merge stages write data; agent writes are disabled.",
+                    ));
                 }
-                if !ctx.request_approval(&session.id, "The agent wants to run a writing aggregation ($out/$merge)", &pipeline.to_string()).await {
+                if !ctx
+                    .request_approval(
+                        &session.id,
+                        "The agent wants to run a writing aggregation ($out/$merge)",
+                        &pipeline.to_string(),
+                    )
+                    .await
+                {
                     return Ok(err("The user declined to run this pipeline."));
                 }
             }
-            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100).min(2000) as usize;
+            let limit = input
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(100)
+                .min(2000) as usize;
             let docs = m.aggregate(&db, coll, pipeline, limit).await?;
-            Ok(ok(truncate(&serde_json::to_string_pretty(&docs)?, 8000), Some(json!({"type": "documents", "docs": docs}))))
+            Ok(ok(
+                truncate(&serde_json::to_string_pretty(&docs)?, 8000),
+                Some(json!({"type": "documents", "docs": docs})),
+            ))
         }
         (_, "create_chart") => {
             let spec = chart_spec(input, &conn.config.driver)?;
             let data = run_chart_source(ctx, &session.connection_id, &spec["source"]).await?;
-            let summary = format!("Chart '{}' ready: {} rows, columns {}", spec["title"].as_str().unwrap_or(""), data.rows.len(), data.columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>().join(", "));
-            Ok(ok(summary, Some(json!({"type": "chart", "spec": spec, "data": data}))))
+            let summary = format!(
+                "Chart '{}' ready: {} rows, columns {}",
+                spec["title"].as_str().unwrap_or(""),
+                data.rows.len(),
+                data.columns
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            Ok(ok(
+                summary,
+                Some(json!({"type": "chart", "spec": spec, "data": data})),
+            ))
         }
         (_, "propose_dashboard") => {
             let title = str_arg(input, "title").unwrap_or("Dashboard");
-            let charts = input.get("charts").and_then(|c| c.as_array()).ok_or("charts must be an array")?;
+            let charts = input
+                .get("charts")
+                .and_then(|c| c.as_array())
+                .ok_or("charts must be an array")?;
             let mut out = vec![];
             let mut notes = vec![];
             for c in charts {
                 let spec = chart_spec(c, &conn.config.driver)?;
                 match run_chart_source(ctx, &session.connection_id, &spec["source"]).await {
                     Ok(data) => {
-                        notes.push(format!("✓ {} ({} rows)", spec["title"].as_str().unwrap_or(""), data.rows.len()));
+                        notes.push(format!(
+                            "✓ {} ({} rows)",
+                            spec["title"].as_str().unwrap_or(""),
+                            data.rows.len()
+                        ));
                         out.push(json!({"spec": spec, "data": data}));
                     }
-                    Err(e) => notes.push(format!("✗ {}: {e}", spec["title"].as_str().unwrap_or(""))),
+                    Err(e) => {
+                        notes.push(format!("✗ {}: {e}", spec["title"].as_str().unwrap_or("")))
+                    }
                 }
             }
             Ok(ok(
-                format!("Dashboard '{title}' with {} charts:\n{}", out.len(), notes.join("\n")),
-                Some(json!({"type": "dashboard", "title": title, "description": input.get("description"), "charts": out})),
+                format!(
+                    "Dashboard '{title}' with {} charts:\n{}",
+                    out.len(),
+                    notes.join("\n")
+                ),
+                Some(
+                    json!({"type": "dashboard", "title": title, "description": input.get("description"), "charts": out}),
+                ),
             ))
         }
-        _ => Ok(err(format!("unknown tool '{name}' for this connection type"))),
+        _ => Ok(err(format!(
+            "unknown tool '{name}' for this connection type"
+        ))),
     }
 }
 
@@ -383,11 +588,18 @@ pub fn chart_spec(input: &Value, driver: &Driver) -> crate::error::Result<Value>
 
 /// Execute a chart source and return tabular data. Shared by the agent and the dashboards page.
 /// Chart sources are always read-only (classifier + database-enforced).
-pub async fn run_chart_source(ctx: &Ctx, connection_id: &str, source: &Value) -> crate::error::Result<QueryResult> {
+pub async fn run_chart_source(
+    ctx: &Ctx,
+    connection_id: &str,
+    source: &Value,
+) -> crate::error::Result<QueryResult> {
     let conn = ctx.manager.get(connection_id).await?;
     match (&conn.live, source.get("kind").and_then(|k| k.as_str())) {
         (Live::Sql(c), Some("sql")) => {
-            let sql = source.get("sql").and_then(|s| s.as_str()).ok_or("missing sql")?;
+            let sql = source
+                .get("sql")
+                .and_then(|s| s.as_str())
+                .ok_or("missing sql")?;
             if !is_read_only(conn.config.driver, sql) {
                 return Err("chart queries must be read-only".into());
             }
@@ -395,8 +607,16 @@ pub async fn run_chart_source(ctx: &Ctx, connection_id: &str, source: &Value) ->
             results.pop().ok_or_else(|| "query returned nothing".into())
         }
         (Live::Mongo(m), Some("mongo")) => {
-            let db = source.get("db").and_then(|s| s.as_str()).map(str::to_string).or_else(|| m.default_db.clone()).ok_or("missing db")?;
-            let coll = source.get("collection").and_then(|s| s.as_str()).ok_or("missing collection")?;
+            let db = source
+                .get("db")
+                .and_then(|s| s.as_str())
+                .map(str::to_string)
+                .or_else(|| m.default_db.clone())
+                .ok_or("missing db")?;
+            let coll = source
+                .get("collection")
+                .and_then(|s| s.as_str())
+                .ok_or("missing collection")?;
             let pipeline = source.get("pipeline").ok_or("missing pipeline")?;
             if pipeline_writes(pipeline) {
                 return Err("chart pipelines must be read-only".into());
@@ -420,8 +640,21 @@ pub fn docs_to_table(docs: &[Value]) -> QueryResult {
         }
     }
     QueryResult {
-        columns: cols.iter().map(|c| crate::db::Column { name: c.clone(), type_name: "bson".into() }).collect(),
-        rows: docs.iter().map(|d| cols.iter().map(|c| d.get(c).cloned().unwrap_or(Value::Null)).collect()).collect(),
+        columns: cols
+            .iter()
+            .map(|c| crate::db::Column {
+                name: c.clone(),
+                type_name: "bson".into(),
+            })
+            .collect(),
+        rows: docs
+            .iter()
+            .map(|d| {
+                cols.iter()
+                    .map(|c| d.get(c).cloned().unwrap_or(Value::Null))
+                    .collect()
+            })
+            .collect(),
         ..Default::default()
     }
 }
@@ -437,23 +670,61 @@ fn cell_text(v: &Value) -> String {
 /// Compact markdown rendering for the model.
 pub fn format_result(r: &QueryResult, max_rows: usize) -> String {
     if r.columns.is_empty() {
-        return format!("OK, {} row(s) affected ({} ms)", r.affected.unwrap_or(0), r.duration_ms);
+        return format!(
+            "OK, {} row(s) affected ({} ms)",
+            r.affected.unwrap_or(0),
+            r.duration_ms
+        );
     }
     let mut s = String::new();
-    s.push_str(&format!("| {} |\n", r.columns.iter().map(|c| c.name.replace('|', "\\|")).collect::<Vec<_>>().join(" | ")));
-    s.push_str(&format!("|{}|\n", r.columns.iter().map(|_| "---").collect::<Vec<_>>().join("|")));
+    s.push_str(&format!(
+        "| {} |\n",
+        r.columns
+            .iter()
+            .map(|c| c.name.replace('|', "\\|"))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    ));
+    s.push_str(&format!(
+        "|{}|\n",
+        r.columns
+            .iter()
+            .map(|_| "---")
+            .collect::<Vec<_>>()
+            .join("|")
+    ));
     for row in r.rows.iter().take(max_rows) {
-        s.push_str(&format!("| {} |\n", row.iter().map(|v| truncate(&cell_text(v), 120).replace('|', "\\|").replace('\n', " ")).collect::<Vec<_>>().join(" | ")));
+        s.push_str(&format!(
+            "| {} |\n",
+            row.iter()
+                .map(|v| truncate(&cell_text(v), 120)
+                    .replace('|', "\\|")
+                    .replace('\n', " "))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
     }
     if r.rows.len() > max_rows {
-        s.push_str(&format!("… {} more rows not shown\n", r.rows.len() - max_rows));
+        s.push_str(&format!(
+            "… {} more rows not shown\n",
+            r.rows.len() - max_rows
+        ));
     }
-    s.push_str(&format!("({} rows{}, {} ms)", r.rows.len(), if r.truncated { ", truncated" } else { "" }, r.duration_ms));
+    s.push_str(&format!(
+        "({} rows{}, {} ms)",
+        r.rows.len(),
+        if r.truncated { ", truncated" } else { "" },
+        r.duration_ms
+    ));
     s
 }
 
 pub fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max).collect::<String>()) }
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max).collect::<String>())
+    }
 }
 
 /// Used by the MCP server: run a tool for a session and mirror events to the UI.
@@ -463,13 +734,43 @@ pub async fn execute_for_mcp(ctx: &Ctx, session_id: &str, name: &str, input: &Va
         Err(e) => return err(e),
     };
     let id = uuid::Uuid::new_v4().to_string();
-    ctx.emit(session_id, &AgentEvent::ToolCall { id: id.clone(), name: name.into(), input: input.clone() });
+    ctx.emit(
+        session_id,
+        &AgentEvent::ToolCall {
+            id: id.clone(),
+            name: name.into(),
+            input: input.clone(),
+        },
+    );
     let out = execute(ctx, &session, name, input).await;
-    ctx.emit(session_id, &AgentEvent::ToolResult { id: id.clone(), content: out.content.clone(), is_error: out.is_error, display: out.display.clone() });
+    ctx.emit(
+        session_id,
+        &AgentEvent::ToolResult {
+            id: id.clone(),
+            content: out.content.clone(),
+            is_error: out.is_error,
+            display: out.display.clone(),
+        },
+    );
     // Persist the call on the session so the transcript survives reloads.
     if let Ok(mut s) = ctx.load_session(session_id) {
-        s.messages.push(super::Message::new("assistant", vec![super::Block::ToolUse { id: id.clone(), name: name.into(), input: input.clone() }]));
-        s.messages.push(super::Message::new("user", vec![super::Block::ToolResult { tool_use_id: id, content: out.content.clone(), is_error: out.is_error, display: out.display.clone() }]));
+        s.messages.push(super::Message::new(
+            "assistant",
+            vec![super::Block::ToolUse {
+                id: id.clone(),
+                name: name.into(),
+                input: input.clone(),
+            }],
+        ));
+        s.messages.push(super::Message::new(
+            "user",
+            vec![super::Block::ToolResult {
+                tool_use_id: id,
+                content: out.content.clone(),
+                is_error: out.is_error,
+                display: out.display.clone(),
+            }],
+        ));
         let _ = ctx.save_session(&mut s);
     }
     out

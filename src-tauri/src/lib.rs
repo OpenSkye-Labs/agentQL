@@ -20,6 +20,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = app.path().app_data_dir().expect("app data dir");
             let state = AppState {
@@ -27,7 +28,12 @@ pub fn run() {
                 store: Arc::new(config::Store::new(dir)),
                 agent: Arc::new(ai::Agent::default()),
             };
-            let ctx = ai::Ctx { app: app.handle().clone(), manager: state.manager.clone(), store: state.store.clone(), agent: state.agent.clone() };
+            let ctx = ai::Ctx {
+                app: app.handle().clone(),
+                manager: state.manager.clone(),
+                store: state.store.clone(),
+                agent: state.agent.clone(),
+            };
             app.manage(state);
             tauri::async_runtime::spawn(async move {
                 match mcp::start(ctx.clone()).await {
@@ -40,6 +46,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::check_update,
+            commands::install_update,
             commands::list_connections,
             commands::save_connection,
             commands::delete_connection,

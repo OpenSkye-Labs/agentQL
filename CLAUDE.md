@@ -5,6 +5,7 @@ inspired by TablePlus / DBeaver / Navicat, with an agentic AI layer that can cha
 write and optimise SQL, and build dashboards.
 
 ## Stack
+
 - **Backend**: Rust 2024, Tauri 2, sqlx 0.8 (postgres, mysql/mariadb, sqlite), redis 0.27, mongodb 3,
   russh (SSH tunnels), keyring (OS keychain, file fallback), reqwest (LLM APIs), axum (in-process MCP server).
 - **Frontend**: Vite 7, React 19, TypeScript, Tailwind v4, Radix UI (`radix-ui`), CodeMirror 6,
@@ -12,6 +13,7 @@ write and optimise SQL, and build dashboards.
 - Package manager: `pnpm`. Rust via `cargo` (run from `src-tauri/`).
 
 ## Commands
+
 ```bash
 pnpm install                 # frontend deps
 pnpm tauri dev               # run the desktop app (vite + cargo)
@@ -22,6 +24,7 @@ pnpm tauri build             # release bundles
 ```
 
 ## Layout
+
 ```
 src-tauri/src/
   lib.rs          Tauri builder, managed state, command registration
@@ -38,6 +41,7 @@ docs/             PLAN.md, ARCHITECTURE.md, TASKS.md, FEATURES.md, REVIEWS.md
 ```
 
 ## Conventions
+
 - Rust commands return `Result<T, AppError>`; `AppError` serialises to a plain string for the UI.
 - Query results are driver-agnostic `QueryResult { columns, rows: Vec<Vec<serde_json::Value>> }`.
 - Binary values are encoded as `{ "$bytes": base64, "len": n }`.
@@ -46,3 +50,16 @@ docs/             PLAN.md, ARCHITECTURE.md, TASKS.md, FEATURES.md, REVIEWS.md
 - Deliberate simplifications are marked with a `ponytail:` comment naming the ceiling and the upgrade path.
 - Every feature or decision is recorded in `docs/` (TASKS.md board, FEATURES.md log). Keep them current.
 - Code is reviewed with Codex (`codex exec review --uncommitted`); findings and fixes go to `docs/REVIEWS.md`.
+
+## Workflow
+
+- `dev` is the default/integration branch; `main` is the release branch and only moves by PR from `dev`.
+  Both are protected: no direct pushes, squash-merge only, green `ci-ok` check and a code-owner review.
+  Work on a branch off `dev` (`feat/...`, `fix/...`), push, open a PR against `dev`. See CONTRIBUTING.md.
+- Frontend quality gates: `pnpm format:check` (oxfmt), `pnpm lint` (oxlint), `pnpm typecheck`, `pnpm check`, `pnpm build`.
+  Rust: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. CI runs only the stack you touched.
+- Versioning is automated by release-please from conventional-commit PR titles (`feat:` minor, `fix:` patch).
+  Feature PRs squash into `dev`; `dev` -> `main` uses a merge commit; release-please opens a release PR on `main`
+  that bumps package.json / tauri.conf.json / Cargo.toml + CHANGELOG.md; merging it tags and builds the installers.
+  Never bump versions by hand (`pnpm version:check` guards consistency in CI).
+- Commits and PRs carry no AI co-author or "generated with" trailers.

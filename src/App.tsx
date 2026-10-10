@@ -79,7 +79,11 @@ export default function App() {
       <div className="flex h-full flex-col bg-bg text-fg">
         <PanelGroup direction="horizontal" className="flex-1 min-h-0" autoSaveId="agentql-main">
           <Panel defaultSize={20} minSize={14} maxSize={40} className="min-w-[200px]">
-            <Sidebar onNewConnection={() => setConnDialog({ open: true, edit: null })} onEditConnection={(c) => setConnDialog({ open: true, edit: c })} onOpenSettings={() => setSettingsOpen(true)} />
+            <Sidebar
+              onNewConnection={() => setConnDialog({ open: true, edit: null })}
+              onEditConnection={(c) => setConnDialog({ open: true, edit: c })}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
           </Panel>
           <ResizeHandle />
           <Panel minSize={30}>
@@ -87,10 +91,16 @@ export default function App() {
               <TabBar />
               <main className="flex-1 min-h-0 relative" role="main">
                 {tabs.map((t) => (
-                  <div key={t.id} className={clsx("absolute inset-0 flex flex-col", t.id !== activeTab?.id && "hidden")} aria-hidden={t.id !== activeTab?.id}>
+                  <div
+                    key={t.id}
+                    className={clsx("absolute inset-0 flex flex-col", t.id !== activeTab?.id && "hidden")}
+                    aria-hidden={t.id !== activeTab?.id}
+                  >
                     <ErrorBoundary label="tab">
                       <Suspense fallback={<Loading />}>
-                        {t.kind === "welcome" && <Welcome onNewConnection={() => setConnDialog({ open: true, edit: null })} />}
+                        {t.kind === "welcome" && (
+                          <Welcome onNewConnection={() => setConnDialog({ open: true, edit: null })} />
+                        )}
                         {t.kind === "query" && <QueryTab tab={t} />}
                         {t.kind === "table" && <TableTab tab={t} />}
                         {t.kind === "redis" && <RedisTab tab={t} />}
@@ -118,7 +128,11 @@ export default function App() {
         </PanelGroup>
         <StatusBar onToggleChat={() => setChatOpen(!chatOpen)} />
         <Toasts />
-        <ConnectionDialog open={connDialog.open} edit={connDialog.edit ?? null} onOpenChange={(o) => setConnDialog((d) => ({ ...d, open: o }))} />
+        <ConnectionDialog
+          open={connDialog.open}
+          edit={connDialog.edit ?? null}
+          onOpenChange={(o) => setConnDialog((d) => ({ ...d, open: o }))}
+        />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       </div>
     </TooltipProvider>
@@ -134,5 +148,7 @@ function Loading() {
 }
 
 function ResizeHandle() {
-  return <PanelResizeHandle className="w-px bg-border hover:bg-accent data-[resize-handle-active]:bg-accent transition-colors relative after:absolute after:inset-y-0 after:-left-1 after:-right-1" />;
+  return (
+    <PanelResizeHandle className="w-px bg-border hover:bg-accent data-[resize-handle-active]:bg-accent transition-colors relative after:absolute after:inset-y-0 after:-left-1 after:-right-1" />
+  );
 }

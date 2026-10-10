@@ -10,7 +10,9 @@ fn main() {
             // SAFETY: set before any other thread exists.
             unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
         }
-        let wsl = std::fs::read_to_string("/proc/version").map(|v| v.to_lowercase().contains("microsoft")).unwrap_or(false);
+        let wsl = std::fs::read_to_string("/proc/version")
+            .map(|v| v.to_lowercase().contains("microsoft"))
+            .unwrap_or(false);
         if wsl && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
             unsafe { std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1") };
         }

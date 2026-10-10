@@ -2,7 +2,10 @@
 //! dynamic result decoding, schema introspection and table editing helpers.
 
 use super::value::{mysql_value, pg_value, sqlite_value};
-use super::{Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult, RowChange, TableDetails, TableInfo, TableQuery};
+use super::{
+    Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult, RowChange, TableDetails, TableInfo,
+    TableQuery,
+};
 use crate::config::{ConnectionConfig, ConnectionSecrets, Driver};
 use crate::error::{AppError, Result};
 use futures::StreamExt;
@@ -33,17 +36,23 @@ impl SqlConn {
         let pool = match c.driver {
             Driver::Postgres => {
                 let mut o = match &c.url {
-                    Some(url) => PgConnectOptions::from_str(url).map_err(|e| AppError::Msg(format!("invalid url: {e}")))?,
+                    Some(url) => PgConnectOptions::from_str(url)
+                        .map_err(|e| AppError::Msg(format!("invalid url: {e}")))?,
                     None => PgConnectOptions::new()
                         .host(&c.host)
                         .port(if c.port == 0 { 5432 } else { c.port })
                         .username(&c.user)
-                        .database(if c.database.is_empty() { "postgres" } else { &c.database }),
+                        .database(if c.database.is_empty() {
+                            "postgres"
+                        } else {
+                            &c.database
+                        }),
                 };
                 if let Some(pw) = &s.password
-                    && !pw.is_empty() {
-                        o = o.password(pw);
-                    }
+                    && !pw.is_empty()
+                {
+                    o = o.password(pw);
+                }
                 if let Some(mode) = &c.ssl_mode {
                     o = o.ssl_mode(match mode.as_str() {
                         "disable" => PgSslMode::Disable,
@@ -63,7 +72,9 @@ impl SqlConn {
                 if let Some(p) = c.ssl_key_path.as_deref().filter(|p| !p.is_empty()) {
                     o = o.ssl_client_key(p);
                 }
-                o = o.application_name("AgentQL").log_statements(log::LevelFilter::Off);
+                o = o
+                    .application_name("AgentQL")
+                    .log_statements(log::LevelFilter::Off);
                 for (k, v) in &c.options {
                     o = o.options([(k.as_str(), v.as_str())]);
                 }
@@ -77,7 +88,8 @@ impl SqlConn {
             }
             Driver::Mysql | Driver::Mariadb => {
                 let mut o = match &c.url {
-                    Some(url) => MySqlConnectOptions::from_str(url).map_err(|e| AppError::Msg(format!("invalid url: {e}")))?,
+                    Some(url) => MySqlConnectOptions::from_str(url)
+                        .map_err(|e| AppError::Msg(format!("invalid url: {e}")))?,
                     None => {
                         let mut o = MySqlConnectOptions::new()
                             .host(&c.host)
@@ -90,9 +102,10 @@ impl SqlConn {
                     }
                 };
                 if let Some(pw) = &s.password
-                    && !pw.is_empty() {
-                        o = o.password(pw);
-                    }
+                    && !pw.is_empty()
+                {
+                    o = o.password(pw);
+                }
                 if let Some(mode) = &c.ssl_mode {
                     o = o.ssl_mode(match mode.as_str() {
                         "disable" => MySqlSslMode::Disabled,
@@ -140,7 +153,10 @@ impl SqlConn {
             }
             _ => return Err(AppError::Msg("not a sql driver".into())),
         };
-        Ok(SqlConn { driver: c.driver, pool })
+        Ok(SqlConn {
+            driver: c.driver,
+            pool,
+        })
     }
 
     pub async fn close(&self) {
@@ -189,7 +205,9 @@ impl SqlConn {
             (Pool::Lite(p), false) => exec_stream!(p, sql, limit, sqlite_value)?,
             (Pool::Pg(p), true) => {
                 let mut tx = p.begin().await?;
-                sqlx::query("SET TRANSACTION READ ONLY").execute(&mut *tx).await?;
+                sqlx::query("SET TRANSACTION READ ONLY")
+                    .execute(&mut *tx)
+                    .await?;
                 let r = exec_stream!(&mut *tx, sql, limit, pg_value);
                 let _ = tx.rollback().await;
                 r?
@@ -197,7 +215,9 @@ impl SqlConn {
             (Pool::My(p), true) => {
                 // START TRANSACTION is not preparable on MySQL; SET TRANSACTION (next txn only) + begin() is.
                 let mut conn = p.acquire().await?;
-                sqlx::query("SET TRANSACTION READ ONLY").execute(&mut *conn).await?;
+                sqlx::query("SET TRANSACTION READ ONLY")
+                    .execute(&mut *conn)
+                    .await?;
                 let mut tx = sqlx::Connection::begin(&mut *conn).await?;
                 let r = exec_stream!(&mut *tx, sql, limit, mysql_value);
                 let _ = tx.rollback().await;
@@ -205,9 +225,13 @@ impl SqlConn {
             }
             (Pool::Lite(p), true) => {
                 let mut conn = p.acquire().await?;
-                sqlx::query("PRAGMA query_only = 1").execute(&mut *conn).await?;
+                sqlx::query("PRAGMA query_only = 1")
+                    .execute(&mut *conn)
+                    .await?;
                 let r = exec_stream!(&mut *conn, sql, limit, sqlite_value);
-                let _ = sqlx::query("PRAGMA query_only = 0").execute(&mut *conn).await;
+                let _ = sqlx::query("PRAGMA query_only = 0")
+                    .execute(&mut *conn)
+                    .await;
                 r?
             }
         };
@@ -227,21 +251,30 @@ impl SqlConn {
                 .await?
                 .columns()
                 .iter()
-                .map(|c| Column { name: c.name().to_string(), type_name: c.type_info().name().to_string() })
+                .map(|c| Column {
+                    name: c.name().to_string(),
+                    type_name: c.type_info().name().to_string(),
+                })
                 .collect(),
             Pool::My(p) => p
                 .describe(sql)
                 .await?
                 .columns()
                 .iter()
-                .map(|c| Column { name: c.name().to_string(), type_name: c.type_info().name().to_string() })
+                .map(|c| Column {
+                    name: c.name().to_string(),
+                    type_name: c.type_info().name().to_string(),
+                })
                 .collect(),
             Pool::Lite(p) => p
                 .describe(sql)
                 .await?
                 .columns()
                 .iter()
-                .map(|c| Column { name: c.name().to_string(), type_name: c.type_info().name().to_string() })
+                .map(|c| Column {
+                    name: c.name().to_string(),
+                    type_name: c.type_info().name().to_string(),
+                })
                 .collect(),
         })
     }
@@ -251,7 +284,13 @@ impl SqlConn {
         let r = self.run_one(sql, 100_000).await?;
         Ok(r.rows
             .into_iter()
-            .map(|row| r.columns.iter().zip(row).map(|(c, v)| (c.name.clone(), v)).collect())
+            .map(|row| {
+                r.columns
+                    .iter()
+                    .zip(row)
+                    .map(|(c, v)| (c.name.clone(), v))
+                    .collect()
+            })
             .collect())
     }
 
@@ -293,7 +332,11 @@ impl SqlConn {
                 }
             }
             Driver::Mysql | Driver::Mariadb => {
-                if analyze { format!("EXPLAIN ANALYZE {sql}") } else { format!("EXPLAIN {sql}") }
+                if analyze {
+                    format!("EXPLAIN ANALYZE {sql}")
+                } else {
+                    format!("EXPLAIN {sql}")
+                }
             }
             _ => format!("EXPLAIN QUERY PLAN {sql}"),
         }
@@ -313,7 +356,9 @@ impl SqlConn {
             Some(s) if !s.is_empty() && self.driver != Driver::Sqlite => {
                 format!("{}.{}", self.quote_ident(s), self.quote_ident(table))
             }
-            Some(s) if !s.is_empty() && s != "main" => format!("{}.{}", self.quote_ident(s), self.quote_ident(table)),
+            Some(s) if !s.is_empty() && s != "main" => {
+                format!("{}.{}", self.quote_ident(s), self.quote_ident(table))
+            }
             _ => self.quote_ident(table),
         }
     }
@@ -326,21 +371,32 @@ impl SqlConn {
     pub fn literal_typed(&self, v: &Value, type_hint: Option<&str>) -> String {
         let hint = type_hint.map(|t| t.to_lowercase()).unwrap_or_default();
         if let Some(b64) = v.get("$bytes").and_then(|b| b.as_str()) {
-            let safe: String = b64.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=').collect();
+            let safe: String = b64
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=')
+                .collect();
             return match self.driver {
                 Driver::Postgres => format!("decode('{safe}', 'base64')"),
                 Driver::Mysql | Driver::Mariadb => format!("FROM_BASE64('{safe}')"),
                 _ => {
                     use base64::Engine;
-                    let bytes = base64::engine::general_purpose::STANDARD.decode(&safe).unwrap_or_default();
-                    format!("X'{}'", bytes.iter().map(|b| format!("{b:02X}")).collect::<String>())
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(&safe)
+                        .unwrap_or_default();
+                    format!(
+                        "X'{}'",
+                        bytes.iter().map(|b| format!("{b:02X}")).collect::<String>()
+                    )
                 }
             };
         }
         match v {
             Value::Null => "NULL".into(),
             Value::Bool(b) => {
-                if matches!(self.driver, Driver::Mysql | Driver::Mariadb | Driver::Sqlite) {
+                if matches!(
+                    self.driver,
+                    Driver::Mysql | Driver::Mariadb | Driver::Sqlite
+                ) {
                     if *b { "1".into() } else { "0".into() }
                 } else if *b {
                     "TRUE".into()
@@ -359,13 +415,19 @@ impl SqlConn {
                     format!("'{esc}'")
                 }
             }
-            Value::Array(items) if self.driver == Driver::Postgres && !hint.contains("json") && items.iter().all(|i| !i.is_array() && !i.is_object()) => {
+            Value::Array(items)
+                if self.driver == Driver::Postgres
+                    && !hint.contains("json")
+                    && items.iter().all(|i| !i.is_array() && !i.is_object()) =>
+            {
                 // Postgres array literal: '{a,b}' with elements double-quoted.
                 let parts: Vec<String> = items
                     .iter()
                     .map(|i| match i {
                         Value::Null => "NULL".to_string(),
-                        Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+                        Value::String(s) => {
+                            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+                        }
                         other => other.to_string(),
                     })
                     .collect();
@@ -384,37 +446,65 @@ impl SqlConn {
 
     /// A browse filter must be exactly one expression: no extra statements or trailing comments.
     pub fn validate_filter(filter: Option<&str>) -> Result<()> {
-        let Some(f) = filter.map(str::trim).filter(|f| !f.is_empty()) else { return Ok(()) };
+        let Some(f) = filter.map(str::trim).filter(|f| !f.is_empty()) else {
+            return Ok(());
+        };
         let parts = split_statements(f);
-        if parts.len() != 1 || parts[0] != f.trim_end_matches(';').trim() || f.contains("--") || f.contains("/*") {
-            return Err(AppError::Msg("filter must be a single WHERE expression".into()));
+        if parts.len() != 1
+            || parts[0] != f.trim_end_matches(';').trim()
+            || f.contains("--")
+            || f.contains("/*")
+        {
+            return Err(AppError::Msg(
+                "filter must be a single WHERE expression".into(),
+            ));
         }
         Ok(())
     }
 
     pub fn select_sql(&self, q: &TableQuery) -> String {
-        let mut sql = format!("SELECT * FROM {}", self.qualified(q.schema.as_deref(), &q.table));
+        let mut sql = format!(
+            "SELECT * FROM {}",
+            self.qualified(q.schema.as_deref(), &q.table)
+        );
         if let Some(f) = q.filter.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
             sql.push_str(&format!(" WHERE {f}"));
         }
         if let Some(o) = q.order_by.as_deref().filter(|o| !o.is_empty()) {
-            sql.push_str(&format!(" ORDER BY {} {}", self.quote_ident(o), if q.order_desc { "DESC" } else { "ASC" }));
+            sql.push_str(&format!(
+                " ORDER BY {} {}",
+                self.quote_ident(o),
+                if q.order_desc { "DESC" } else { "ASC" }
+            ));
         }
         sql.push_str(&format!(" LIMIT {} OFFSET {}", q.limit.max(1), q.offset));
         sql
     }
 
     pub async fn count(&self, q: &TableQuery) -> Result<i64> {
-        let mut sql = format!("SELECT COUNT(*) AS n FROM {}", self.qualified(q.schema.as_deref(), &q.table));
+        let mut sql = format!(
+            "SELECT COUNT(*) AS n FROM {}",
+            self.qualified(q.schema.as_deref(), &q.table)
+        );
         if let Some(f) = q.filter.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
             sql.push_str(&format!(" WHERE {f}"));
         }
         let r = self.run_one_read_only(&sql, 1).await?;
-        Ok(r.rows.first().and_then(|r| r.first()).and_then(json_i64).unwrap_or(0))
+        Ok(r.rows
+            .first()
+            .and_then(|r| r.first())
+            .and_then(json_i64)
+            .unwrap_or(0))
     }
 
     /// Turn grid edits into SQL statements (not executed).
-    pub fn change_sql(&self, schema: Option<&str>, table: &str, changes: &[RowChange], types: &HashMap<String, String>) -> Vec<String> {
+    pub fn change_sql(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+        changes: &[RowChange],
+        types: &HashMap<String, String>,
+    ) -> Vec<String> {
         let t = self.qualified(schema, table);
         let lit = |k: &str, v: &Value| self.literal_typed(v, types.get(k).map(String::as_str));
         let where_of = |key: &HashMap<String, Value>| -> String {
@@ -435,8 +525,10 @@ impl SqlConn {
             .iter()
             .map(|c| match c {
                 RowChange::Update { key, values } => {
-                    let mut sets: Vec<String> =
-                        values.iter().map(|(k, v)| format!("{} = {}", self.quote_ident(k), lit(k, v))).collect();
+                    let mut sets: Vec<String> = values
+                        .iter()
+                        .map(|(k, v)| format!("{} = {}", self.quote_ident(k), lit(k, v)))
+                        .collect();
                     sets.sort();
                     format!("UPDATE {t} SET {} WHERE {}", sets.join(", "), where_of(key))
                 }
@@ -449,7 +541,11 @@ impl SqlConn {
                     cols.sort();
                     let names: Vec<String> = cols.iter().map(|c| self.quote_ident(c)).collect();
                     let vals: Vec<String> = cols.iter().map(|c| lit(c, &values[*c])).collect();
-                    format!("INSERT INTO {t} ({}) VALUES ({})", names.join(", "), vals.join(", "))
+                    format!(
+                        "INSERT INTO {t} ({}) VALUES ({})",
+                        names.join(", "),
+                        vals.join(", ")
+                    )
                 }
                 RowChange::Delete { key } => format!("DELETE FROM {t} WHERE {}", where_of(key)),
             })
@@ -460,28 +556,50 @@ impl SqlConn {
 
     pub async fn databases(&self) -> Result<Vec<String>> {
         let sql = match self.driver {
-            Driver::Postgres => "SELECT datname AS name FROM pg_database WHERE NOT datistemplate ORDER BY 1",
+            Driver::Postgres => {
+                "SELECT datname AS name FROM pg_database WHERE NOT datistemplate ORDER BY 1"
+            }
             Driver::Mysql | Driver::Mariadb => "SHOW DATABASES",
             Driver::Sqlite => return Ok(vec!["main".into()]),
             _ => unreachable!(),
         };
-        Ok(self.rows(sql).await?.into_iter().filter_map(|r| r.into_values().next()).filter_map(json_str).collect())
+        Ok(self
+            .rows(sql)
+            .await?
+            .into_iter()
+            .filter_map(|r| r.into_values().next())
+            .filter_map(json_str)
+            .collect())
     }
 
     pub async fn schemas(&self) -> Result<Vec<String>> {
         match self.driver {
             Driver::Postgres => {
                 let sql = "SELECT nspname AS name FROM pg_namespace WHERE nspname NOT IN ('pg_catalog','information_schema','pg_toast') AND nspname NOT LIKE 'pg_temp%' AND nspname NOT LIKE 'pg_toast_temp%' ORDER BY (nspname <> 'public'), nspname";
-                Ok(self.rows(sql).await?.into_iter().filter_map(|mut r| r.remove("name")).filter_map(json_str).collect())
+                Ok(self
+                    .rows(sql)
+                    .await?
+                    .into_iter()
+                    .filter_map(|mut r| r.remove("name"))
+                    .filter_map(json_str)
+                    .collect())
             }
             Driver::Mysql | Driver::Mariadb => {
                 let rows = self.rows("SELECT DATABASE() AS db").await?;
-                let current = rows.first().and_then(|r| r.get("db").cloned()).and_then(json_str);
+                let current = rows
+                    .first()
+                    .and_then(|r| r.get("db").cloned())
+                    .and_then(json_str);
                 let mut dbs: Vec<String> = self
                     .databases()
                     .await?
                     .into_iter()
-                    .filter(|d| !matches!(d.as_str(), "information_schema" | "performance_schema" | "mysql" | "sys"))
+                    .filter(|d| {
+                        !matches!(
+                            d.as_str(),
+                            "information_schema" | "performance_schema" | "mysql" | "sys"
+                        )
+                    })
                     .collect();
                 if let Some(c) = current {
                     dbs.sort_by_key(|d| (d != &c, d.clone()));
@@ -520,7 +638,11 @@ impl SqlConn {
                 self.rows(&sql).await?
             }
             Driver::Sqlite => {
-                let master = if schema == "main" { "sqlite_master".to_string() } else { format!("{}.sqlite_master", self.quote_ident(schema)) };
+                let master = if schema == "main" {
+                    "sqlite_master".to_string()
+                } else {
+                    format!("{}.sqlite_master", self.quote_ident(schema))
+                };
                 let sql = format!(
                     "SELECT {} AS schema, name, type AS kind, NULL AS est FROM {master} WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name",
                     self.literal(&Value::String(schema.into()))
@@ -541,10 +663,17 @@ impl SqlConn {
                     _ => "table",
                 };
                 TableInfo {
-                    schema: r.remove("schema").and_then(json_str).unwrap_or_else(|| schema.to_string()),
+                    schema: r
+                        .remove("schema")
+                        .and_then(json_str)
+                        .unwrap_or_else(|| schema.to_string()),
                     name: r.remove("name").and_then(json_str).unwrap_or_default(),
                     kind: kind.to_string(),
-                    row_estimate: r.remove("est").as_ref().and_then(json_i64).filter(|n| *n >= 0),
+                    row_estimate: r
+                        .remove("est")
+                        .as_ref()
+                        .and_then(json_i64)
+                        .filter(|n| *n >= 0),
                 }
             })
             .collect())
@@ -615,16 +744,26 @@ impl SqlConn {
                     })
                     .collect();
                 let view = self
-                    .rows(&format!("SELECT pg_get_viewdef(format('%I.%I', {s}, {t})::regclass, true) AS def"))
+                    .rows(&format!(
+                        "SELECT pg_get_viewdef(format('%I.%I', {s}, {t})::regclass, true) AS def"
+                    ))
                     .await
                     .ok()
                     .and_then(|r| r.into_iter().next())
                     .and_then(|mut r| opt_str(&mut r, "def"));
                 let ddl = match view {
-                    Some(def) => Some(format!("CREATE OR REPLACE VIEW {} AS\n{def}", self.qualified(Some(schema), table))),
+                    Some(def) => Some(format!(
+                        "CREATE OR REPLACE VIEW {} AS\n{def}",
+                        self.qualified(Some(schema), table)
+                    )),
                     None => Some(self.synth_ddl(schema, table, &columns, &indexes, &foreign_keys)),
                 };
-                Ok(TableDetails { columns, indexes, foreign_keys, ddl })
+                Ok(TableDetails {
+                    columns,
+                    indexes,
+                    foreign_keys,
+                    ddl,
+                })
             }
             Driver::Mysql | Driver::Mariadb => {
                 let cols = self
@@ -650,12 +789,18 @@ impl SqlConn {
                     ))
                     .await?;
                 let ddl = self
-                    .rows(&format!("SHOW CREATE TABLE {}", self.qualified(Some(schema), table)))
+                    .rows(&format!(
+                        "SHOW CREATE TABLE {}",
+                        self.qualified(Some(schema), table)
+                    ))
                     .await
                     .ok()
                     .and_then(|r| r.into_iter().next())
                     .and_then(|r| {
-                        r.get("Create Table").or_else(|| r.get("Create View")).cloned().and_then(json_str)
+                        r.get("Create Table")
+                            .or_else(|| r.get("Create View"))
+                            .cloned()
+                            .and_then(json_str)
                     });
                 Ok(TableDetails {
                     columns: cols
@@ -699,16 +844,30 @@ impl SqlConn {
             }
             Driver::Sqlite => {
                 let q = self.quote_ident(table);
-                let pfx = if schema == "main" || schema.is_empty() { String::new() } else { format!("{}.", self.quote_ident(schema)) };
+                let pfx = if schema == "main" || schema.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}.", self.quote_ident(schema))
+                };
                 let cols = self.rows(&format!("PRAGMA {pfx}table_info({q})")).await?;
                 let idx_list = self.rows(&format!("PRAGMA {pfx}index_list({q})")).await?;
-                let fk_rows = self.rows(&format!("PRAGMA {pfx}foreign_key_list({q})")).await?;
+                let fk_rows = self
+                    .rows(&format!("PRAGMA {pfx}foreign_key_list({q})"))
+                    .await?;
                 let mut indexes = vec![];
                 for mut r in idx_list {
                     let name = take_str(&mut r, "name");
-                    let info = self.rows(&format!("PRAGMA {pfx}index_info({})", self.quote_ident(&name))).await?;
+                    let info = self
+                        .rows(&format!(
+                            "PRAGMA {pfx}index_info({})",
+                            self.quote_ident(&name)
+                        ))
+                        .await?;
                     indexes.push(IndexInfo {
-                        columns: info.into_iter().map(|mut c| take_str(&mut c, "name")).collect(),
+                        columns: info
+                            .into_iter()
+                            .map(|mut c| take_str(&mut c, "name"))
+                            .collect(),
                         unique: take_i64(&mut r, "unique") == 1,
                         primary: take_str(&mut r, "origin") == "pk",
                         definition: None,
@@ -726,7 +885,11 @@ impl SqlConn {
                     e.columns.push(take_str(&mut r, "from"));
                     e.ref_columns.push(take_str(&mut r, "to"));
                 }
-                let master = if schema == "main" { "sqlite_master".to_string() } else { format!("{}.sqlite_master", self.quote_ident(schema)) };
+                let master = if schema == "main" {
+                    "sqlite_master".to_string()
+                } else {
+                    format!("{}.sqlite_master", self.quote_ident(schema))
+                };
                 let ddl = self
                     .rows(&format!("SELECT sql FROM {master} WHERE name = {t}"))
                     .await
@@ -758,7 +921,14 @@ impl SqlConn {
         }
     }
 
-    fn synth_ddl(&self, schema: &str, table: &str, cols: &[ColumnInfo], idx: &[IndexInfo], fks: &[ForeignKeyInfo]) -> String {
+    fn synth_ddl(
+        &self,
+        schema: &str,
+        table: &str,
+        cols: &[ColumnInfo],
+        idx: &[IndexInfo],
+        fks: &[ForeignKeyInfo],
+    ) -> String {
         let mut lines: Vec<String> = cols
             .iter()
             .map(|c| {
@@ -773,18 +943,37 @@ impl SqlConn {
             })
             .collect();
         if let Some(pk) = idx.iter().find(|i| i.primary) {
-            lines.push(format!("  PRIMARY KEY ({})", pk.columns.iter().map(|c| self.quote_ident(c)).collect::<Vec<_>>().join(", ")));
+            lines.push(format!(
+                "  PRIMARY KEY ({})",
+                pk.columns
+                    .iter()
+                    .map(|c| self.quote_ident(c))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         for fk in fks {
             lines.push(format!(
                 "  CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({})",
                 self.quote_ident(&fk.name),
-                fk.columns.iter().map(|c| self.quote_ident(c)).collect::<Vec<_>>().join(", "),
+                fk.columns
+                    .iter()
+                    .map(|c| self.quote_ident(c))
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 self.qualified(fk.ref_schema.as_deref(), &fk.ref_table),
-                fk.ref_columns.iter().map(|c| self.quote_ident(c)).collect::<Vec<_>>().join(", ")
+                fk.ref_columns
+                    .iter()
+                    .map(|c| self.quote_ident(c))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
-        let mut out = format!("CREATE TABLE {} (\n{}\n);", self.qualified(Some(schema), table), lines.join(",\n"));
+        let mut out = format!(
+            "CREATE TABLE {} (\n{}\n);",
+            self.qualified(Some(schema), table),
+            lines.join(",\n")
+        );
         for i in idx.iter().filter(|i| !i.primary) {
             if let Some(d) = &i.definition {
                 out.push_str(&format!("\n{d};"));
@@ -819,14 +1008,18 @@ macro_rules! exec_stream {
                         res.columns = row
                             .columns()
                             .iter()
-                            .map(|c| Column { name: c.name().to_string(), type_name: c.type_info().name().to_string() })
+                            .map(|c| Column {
+                                name: c.name().to_string(),
+                                type_name: c.type_info().name().to_string(),
+                            })
                             .collect();
                     }
                     if res.rows.len() as u32 >= $limit {
                         res.truncated = true;
                         break;
                     }
-                    res.rows.push((0..row.len()).map(|i| $conv(&row, i)).collect());
+                    res.rows
+                        .push((0..row.len()).map(|i| $conv(&row, i)).collect());
                 }
             }
         }
@@ -871,7 +1064,13 @@ fn take_bool(r: &mut HashMap<String, Value>, k: &str) -> bool {
     }
 }
 fn split_csv(s: Option<String>) -> Vec<String> {
-    s.map(|s| s.split(',').map(|p| p.trim().trim_matches('"').to_string()).filter(|p| !p.is_empty()).collect()).unwrap_or_default()
+    s.map(|s| {
+        s.split(',')
+            .map(|p| p.trim().trim_matches('"').to_string())
+            .filter(|p| !p.is_empty())
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// Split a script on `;` outside strings, comments and dollar-quotes.
@@ -983,7 +1182,18 @@ fn has_code(s: &str) -> bool {
 
 pub fn is_query_like(sql: &str) -> bool {
     let first = first_word(sql);
-    matches!(first.as_str(), "SELECT" | "WITH" | "SHOW" | "EXPLAIN" | "DESCRIBE" | "DESC" | "VALUES" | "TABLE" | "PRAGMA")
+    matches!(
+        first.as_str(),
+        "SELECT"
+            | "WITH"
+            | "SHOW"
+            | "EXPLAIN"
+            | "DESCRIBE"
+            | "DESC"
+            | "VALUES"
+            | "TABLE"
+            | "PRAGMA"
+    )
 }
 
 fn query_is_read_only(q: &sqlparser::ast::Query) -> bool {
@@ -1000,7 +1210,9 @@ fn query_is_read_only(q: &sqlparser::ast::Query) -> bool {
     let select_into = matches!(q.body.as_ref(), SetExpr::Select(sel) if sel.into.is_some());
     !select_into
         && body_ok(&q.body)
-        && q.with.as_ref().is_none_or(|w| w.cte_tables.iter().all(|c| query_is_read_only(&c.query)))
+        && q.with
+            .as_ref()
+            .is_none_or(|w| w.cte_tables.iter().all(|c| query_is_read_only(&c.query)))
 }
 
 /// Conservative read-only check used to gate agent tool calls.
@@ -1015,11 +1227,21 @@ pub fn is_read_only(driver: Driver, sql: &str) -> bool {
     match sqlparser::parser::Parser::parse_sql(&*dialect, sql) {
         Ok(stmts) => stmts.iter().all(|s| match s {
             Statement::Query(q) => query_is_read_only(q),
-            Statement::Explain { analyze, statement, .. } => !*analyze || statement_is_read_only(statement),
+            Statement::Explain {
+                analyze, statement, ..
+            } => !*analyze || statement_is_read_only(statement),
             Statement::Pragma { value, .. } => value.is_none(),
-            Statement::ExplainTable { .. } | Statement::ShowColumns { .. } | Statement::ShowTables { .. }
-            | Statement::ShowCreate { .. } | Statement::ShowFunctions { .. } | Statement::ShowVariable { .. } | Statement::ShowVariables { .. }
-            | Statement::ShowStatus { .. } | Statement::ShowDatabases { .. } | Statement::ShowSchemas { .. } | Statement::ShowViews { .. }
+            Statement::ExplainTable { .. }
+            | Statement::ShowColumns { .. }
+            | Statement::ShowTables { .. }
+            | Statement::ShowCreate { .. }
+            | Statement::ShowFunctions { .. }
+            | Statement::ShowVariable { .. }
+            | Statement::ShowVariables { .. }
+            | Statement::ShowStatus { .. }
+            | Statement::ShowDatabases { .. }
+            | Statement::ShowSchemas { .. }
+            | Statement::ShowViews { .. }
             | Statement::ShowCollation { .. } => true,
             _ => false,
         }),
@@ -1037,7 +1259,9 @@ fn statement_is_read_only(s: &sqlparser::ast::Statement) -> bool {
     use sqlparser::ast::Statement;
     match s {
         Statement::Query(q) => query_is_read_only(q),
-        Statement::Explain { analyze, statement, .. } => !*analyze || statement_is_read_only(statement),
+        Statement::Explain {
+            analyze, statement, ..
+        } => !*analyze || statement_is_read_only(statement),
         _ => false,
     }
 }
@@ -1055,20 +1279,34 @@ mod tests {
     use super::*;
     #[test]
     fn splits_and_classifies() {
-        let parts = split_statements("select 1; -- c;\nselect ';' as x; /* a; */ insert into t values ($$a;b$$)");
+        let parts = split_statements(
+            "select 1; -- c;\nselect ';' as x; /* a; */ insert into t values ($$a;b$$)",
+        );
         assert_eq!(parts.len(), 3);
         assert!(parts[1].ends_with("select ';' as x"), "{}", parts[1]);
         assert_eq!(split_statements("select 1; -- trailing").len(), 1);
         assert!(!has_code(" /* x */ -- y\n"));
-        assert!(is_read_only(Driver::Postgres, "select * from t where a = 'drop'"));
+        assert!(is_read_only(
+            Driver::Postgres,
+            "select * from t where a = 'drop'"
+        ));
         assert!(!is_read_only(Driver::Postgres, "delete from t"));
-        assert!(!is_read_only(Driver::Postgres, "with x as (select 1) insert into t select * from x"));
+        assert!(!is_read_only(
+            Driver::Postgres,
+            "with x as (select 1) insert into t select * from x"
+        ));
         assert!(is_read_only(Driver::Mysql, "SHOW TABLES"));
-        assert!(!is_read_only(Driver::Postgres, "EXPLAIN ANALYZE DELETE FROM t"));
+        assert!(!is_read_only(
+            Driver::Postgres,
+            "EXPLAIN ANALYZE DELETE FROM t"
+        ));
         assert!(is_read_only(Driver::Postgres, "EXPLAIN DELETE FROM t"));
         assert!(!is_read_only(Driver::Sqlite, "PRAGMA user_version = 3"));
         assert!(is_read_only(Driver::Sqlite, "PRAGMA user_version"));
-        assert!(!is_read_only(Driver::Postgres, "WITH x AS (select 1) FROBNICATE"));
+        assert!(!is_read_only(
+            Driver::Postgres,
+            "WITH x AS (select 1) FROBNICATE"
+        ));
         assert!(SqlConn::validate_filter(Some("id = 1")).is_ok());
         assert!(SqlConn::validate_filter(Some("0; DELETE FROM t; --")).is_err());
         assert!(SqlConn::validate_filter(Some("name = 'a;b'")).is_ok());

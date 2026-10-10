@@ -36,7 +36,10 @@ export function TabBar() {
               key={t.id}
               items={[
                 { label: "Close", onSelect: () => close(t.id), shortcut: `${mod}+W` },
-                { label: "Close others", onSelect: () => tabs.filter((x) => x.id !== t.id && x.kind !== "welcome").forEach((x) => close(x.id)) },
+                {
+                  label: "Close others",
+                  onSelect: () => tabs.filter((x) => x.id !== t.id && x.kind !== "welcome").forEach((x) => close(x.id)),
+                },
                 { label: "Close all", onSelect: () => tabs.forEach((x) => close(x.id)) },
               ]}
             >
@@ -49,11 +52,20 @@ export function TabBar() {
                   if (e.key === "Enter" || e.key === " ") setActive(t.id);
                   if (e.key === "Delete" || e.key === "Backspace") close(t.id);
                   const idx = tabs.findIndex((x) => x.id === t.id);
-                  const target = e.key === "ArrowRight" ? idx + 1 : e.key === "ArrowLeft" ? idx - 1 : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+                  const target =
+                    e.key === "ArrowRight"
+                      ? idx + 1
+                      : e.key === "ArrowLeft"
+                        ? idx - 1
+                        : e.key === "Home"
+                          ? 0
+                          : e.key === "End"
+                            ? tabs.length - 1
+                            : -1;
                   if (target >= 0 && target < tabs.length) {
                     e.preventDefault();
                     setActive(tabs[target].id);
-                    (e.currentTarget.parentElement?.querySelectorAll<HTMLElement>("[role=tab]")[target])?.focus();
+                    e.currentTarget.parentElement?.querySelectorAll<HTMLElement>("[role=tab]")[target]?.focus();
                   }
                 }}
                 onAuxClick={(e) => e.button === 1 && close(t.id)}
@@ -62,7 +74,12 @@ export function TabBar() {
                   active ? "bg-bg text-fg" : "text-muted hover:bg-hover hover:text-fg",
                 )}
               >
-                {active && <span className="absolute inset-x-0 top-0 h-[2px]" style={{ background: conn?.color ?? "var(--accent)" }} />}
+                {active && (
+                  <span
+                    className="absolute inset-x-0 top-0 h-[2px]"
+                    style={{ background: conn?.color ?? "var(--accent)" }}
+                  />
+                )}
                 <span className="shrink-0 text-faint">{icons[t.kind]}</span>
                 <span className="truncate flex-1">{t.title}</span>
                 {t.kind !== "welcome" && (
@@ -72,7 +89,10 @@ export function TabBar() {
                       close(t.id);
                     }}
                     aria-label={`Close ${t.title}`}
-                    className={clsx("rounded p-1 hover:bg-active focus-visible:opacity-100", active ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70")}
+                    className={clsx(
+                      "rounded p-1 hover:bg-active focus-visible:opacity-100",
+                      active ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70",
+                    )}
                   >
                     <X size={12} />
                   </button>

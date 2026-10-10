@@ -25,7 +25,11 @@ export function statementAt(doc: string, pos: number): string {
       const text = doc.slice(start, end).trim();
       if (text) return text.replace(/;$/, "");
       // cursor right after a ';' on blank space → previous statement
-      if (b > 0) return doc.slice(bounds[b - 1], start).trim().replace(/;$/, "");
+      if (b > 0)
+        return doc
+          .slice(bounds[b - 1], start)
+          .trim()
+          .replace(/;$/, "");
     }
   }
   return doc.trim();

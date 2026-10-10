@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_api(
     ctx: &Ctx,
     client: &reqwest::Client,
@@ -20,8 +21,18 @@ pub async fn stream_api(
     tools: &[ToolDef],
 ) -> Result<Vec<Block>> {
     match provider.kind.as_str() {
-        "anthropic" => anthropic(ctx, client, provider, api_key, session_id, system, messages, tools).await,
-        _ => openai(ctx, client, provider, api_key, session_id, system, messages, tools).await,
+        "anthropic" => {
+            anthropic(
+                ctx, client, provider, api_key, session_id, system, messages, tools,
+            )
+            .await
+        }
+        _ => {
+            openai(
+                ctx, client, provider, api_key, session_id, system, messages, tools,
+            )
+            .await
+        }
     }
 }
 
@@ -34,7 +45,9 @@ async fn for_each_sse<F: FnMut(Value)>(resp: reqwest::Response, mut f: F) -> Res
         buf.extend_from_slice(&chunk?);
         while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
             let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
-            let line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1]).trim_end_matches('\r').to_string();
+            let line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1])
+                .trim_end_matches('\r')
+                .to_string();
             if let Some(data) = line.strip_prefix("data:") {
                 let data = data.trim();
                 if data.is_empty() {
@@ -57,7 +70,11 @@ fn parse_tool_args(raw: &str) -> Result<Value> {
     if raw.trim().is_empty() {
         return Ok(json!({}));
     }
-    serde_json::from_str(raw).map_err(|e| AppError::Msg(format!("model returned invalid tool arguments ({e}); please retry")))
+    serde_json::from_str(raw).map_err(|e| {
+        AppError::Msg(format!(
+            "model returned invalid tool arguments ({e}); please retry"
+        ))
+    })
 }
 
 async fn check(resp: reqwest::Response) -> Result<reqwest::Response> {
@@ -68,13 +85,21 @@ async fn check(resp: reqwest::Response) -> Result<reqwest::Response> {
     let body = resp.text().await.unwrap_or_default();
     let msg = serde_json::from_str::<Value>(&body)
         .ok()
-        .and_then(|v| v.pointer("/error/message").and_then(|m| m.as_str()).map(str::to_string))
+        .and_then(|v| {
+            v.pointer("/error/message")
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+        })
         .unwrap_or(body);
-    Err(AppError::Msg(format!("{status}: {}", super::tools::truncate(&msg, 600))))
+    Err(AppError::Msg(format!(
+        "{status}: {}",
+        super::tools::truncate(&msg, 600)
+    )))
 }
 
 // ----------------------------------------------------------------- Anthropic
 
+#[allow(clippy::too_many_arguments)]
 async fn anthropic(
     ctx: &Ctx,
     client: &reqwest::Client,
@@ -85,7 +110,11 @@ async fn anthropic(
     messages: &[Message],
     tools: &[ToolDef],
 ) -> Result<Vec<Block>> {
-    let base = p.base_url.clone().filter(|b| !b.is_empty()).unwrap_or_else(|| "https://api.anthropic.com".into());
+    let base = p
+        .base_url
+        .clone()
+        .filter(|b| !b.is_empty())
+        .unwrap_or_else(|| "https://api.anthropic.com".into());
     let msgs: Vec<Value> = messages
         .iter()
         .map(|m| {
@@ -132,10 +161,16 @@ async fn anthropic(
             let idx = ev["index"].as_u64().unwrap_or(0) as usize;
             let cb = &ev["content_block"];
             while blocks.len() <= idx {
-                blocks.push(Block::Text { text: String::new() });
+                blocks.push(Block::Text {
+                    text: String::new(),
+                });
             }
             if cb["type"] == "tool_use" {
-                blocks[idx] = Block::ToolUse { id: cb["id"].as_str().unwrap_or("").into(), name: cb["name"].as_str().unwrap_or("").into(), input: json!({}) };
+                blocks[idx] = Block::ToolUse {
+                    id: cb["id"].as_str().unwrap_or("").into(),
+                    name: cb["name"].as_str().unwrap_or("").into(),
+                    input: json!({}),
+                };
                 json_bufs.insert(idx, String::new());
             } else if let Some(t) = cb["text"].as_str() {
                 blocks[idx] = Block::Text { text: t.into() };
@@ -151,7 +186,10 @@ async fn anthropic(
                 }
                 ctx.emit(session_id, &AgentEvent::TextDelta { text: t.into() });
             } else if d["type"] == "input_json_delta" {
-                json_bufs.entry(idx).or_default().push_str(d["partial_json"].as_str().unwrap_or(""));
+                json_bufs
+                    .entry(idx)
+                    .or_default()
+                    .push_str(d["partial_json"].as_str().unwrap_or(""));
             }
         }
         "content_block_stop" => {
@@ -161,7 +199,14 @@ async fn anthropic(
             }
         }
         "message_stop" => completed = true,
-        "error" => error = Some(ev["error"]["message"].as_str().unwrap_or("stream error").to_string()),
+        "error" => {
+            error = Some(
+                ev["error"]["message"]
+                    .as_str()
+                    .unwrap_or("stream error")
+                    .to_string(),
+            )
+        }
         _ => {}
     })
     .await?;
@@ -169,7 +214,9 @@ async fn anthropic(
         return Err(AppError::Msg(e));
     }
     if !completed {
-        return Err(AppError::Msg("the response stream ended before completion; please retry".into()));
+        return Err(AppError::Msg(
+            "the response stream ended before completion; please retry".into(),
+        ));
     }
     for (idx, raw) in raw_args {
         if let Some(Block::ToolUse { input, .. }) = blocks.get_mut(idx) {
@@ -182,6 +229,7 @@ async fn anthropic(
 
 // ----------------------------------------------------------------- OpenAI-compatible
 
+#[allow(clippy::too_many_arguments)]
 async fn openai(
     ctx: &Ctx,
     client: &reqwest::Client,
@@ -192,7 +240,11 @@ async fn openai(
     messages: &[Message],
     tools: &[ToolDef],
 ) -> Result<Vec<Block>> {
-    let base = p.base_url.clone().filter(|b| !b.is_empty()).unwrap_or_else(|| "https://api.openai.com/v1".into());
+    let base = p
+        .base_url
+        .clone()
+        .filter(|b| !b.is_empty())
+        .unwrap_or_else(|| "https://api.openai.com/v1".into());
     let mut msgs: Vec<Value> = vec![json!({"role": "system", "content": system})];
     for m in messages {
         if m.role == "assistant" {
@@ -217,9 +269,13 @@ async fn openai(
             for b in &m.blocks {
                 match b {
                     Block::Text { text } => texts.push(text.clone()),
-                    Block::ToolResult { tool_use_id, content, .. } => {
-                        msgs.push(json!({"role": "tool", "tool_call_id": tool_use_id, "content": content}))
-                    }
+                    Block::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => msgs.push(
+                        json!({"role": "tool", "tool_call_id": tool_use_id, "content": content}),
+                    ),
                     _ => {}
                 }
             }
@@ -240,7 +296,9 @@ async fn openai(
     if !tool_defs.is_empty() {
         body["tools"] = Value::Array(tool_defs);
     }
-    let mut req = client.post(format!("{}/chat/completions", base.trim_end_matches('/'))).header("content-type", "application/json");
+    let mut req = client
+        .post(format!("{}/chat/completions", base.trim_end_matches('/')))
+        .header("content-type", "application/json");
     if !api_key.is_empty() {
         req = req.bearer_auth(api_key);
     }
@@ -258,15 +316,21 @@ async fn openai(
             error = Some(e["message"].as_str().unwrap_or("stream error").to_string());
             return;
         }
-        if ev.pointer("/choices/0/finish_reason").is_some_and(|f| !f.is_null()) {
+        if ev
+            .pointer("/choices/0/finish_reason")
+            .is_some_and(|f| !f.is_null())
+        {
             finished = true;
         }
-        let Some(delta) = ev.pointer("/choices/0/delta") else { return };
+        let Some(delta) = ev.pointer("/choices/0/delta") else {
+            return;
+        };
         if let Some(t) = delta["content"].as_str()
-            && !t.is_empty() {
-                text.push_str(t);
-                ctx.emit(session_id, &AgentEvent::TextDelta { text: t.into() });
-            }
+            && !t.is_empty()
+        {
+            text.push_str(t);
+            ctx.emit(session_id, &AgentEvent::TextDelta { text: t.into() });
+        }
         if let Some(tcs) = delta["tool_calls"].as_array() {
             for tc in tcs {
                 let idx = tc["index"].as_u64().unwrap_or(calls.len() as u64) as usize;
@@ -290,15 +354,25 @@ async fn openai(
         return Err(AppError::Msg(e));
     }
     if !finished && !done {
-        return Err(AppError::Msg("the response stream ended before completion; please retry".into()));
+        return Err(AppError::Msg(
+            "the response stream ended before completion; please retry".into(),
+        ));
     }
     let mut blocks = vec![];
     if !text.is_empty() {
         blocks.push(Block::Text { text });
     }
     for (id, name, args) in calls {
-        let id = if id.is_empty() { format!("call_{}", uuid::Uuid::new_v4().simple()) } else { id };
-        blocks.push(Block::ToolUse { id, name, input: parse_tool_args(&args)? });
+        let id = if id.is_empty() {
+            format!("call_{}", uuid::Uuid::new_v4().simple())
+        } else {
+            id
+        };
+        blocks.push(Block::ToolUse {
+            id,
+            name,
+            input: parse_tool_args(&args)?,
+        });
     }
     Ok(blocks)
 }
@@ -306,13 +380,21 @@ async fn openai(
 // ----------------------------------------------------------------- CLI providers
 
 fn mcp_url(ctx: &Ctx, session_id: &str) -> Result<String> {
-    let port = ctx.agent.mcp_port.get().ok_or_else(|| AppError::Msg("MCP endpoint not running".into()))?;
+    let port = ctx
+        .agent
+        .mcp_port
+        .get()
+        .ok_or_else(|| AppError::Msg("MCP endpoint not running".into()))?;
     Ok(format!("http://127.0.0.1:{port}/mcp/{session_id}"))
 }
 
 pub fn which(cmd: &str) -> Option<String> {
     let path = std::env::var_os("PATH")?;
-    let exts: Vec<&str> = if cfg!(windows) { vec![".exe", ".cmd", ".bat", ""] } else { vec![""] };
+    let exts: Vec<&str> = if cfg!(windows) {
+        vec![".exe", ".cmd", ".bat", ""]
+    } else {
+        vec![""]
+    };
     for dir in std::env::split_paths(&path) {
         for ext in &exts {
             let p = dir.join(format!("{cmd}{ext}"));
@@ -324,24 +406,45 @@ pub fn which(cmd: &str) -> Option<String> {
     None
 }
 
-pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, system: &str, user_text: &str) -> Result<Vec<Block>> {
+pub async fn run_cli(
+    ctx: &Ctx,
+    p: &LlmProvider,
+    session: &mut ChatSession,
+    system: &str,
+    user_text: &str,
+) -> Result<Vec<Block>> {
     let url = mcp_url(ctx, &session.id)?;
     let token = ctx.agent.mcp_token.clone();
     let first_turn = session.cli_session_id.is_none();
     // CLIs own their conversation; we only give them the schema context once.
-    let prompt = if first_turn { format!("<context>\n{system}\n</context>\n\n{user_text}") } else { user_text.to_string() };
+    let prompt = if first_turn {
+        format!("<context>\n{system}\n</context>\n\n{user_text}")
+    } else {
+        user_text.to_string()
+    };
     let workdir = ctx.store.dir().join("agent-workdir");
     std::fs::create_dir_all(&workdir).ok();
 
     let mut cmd = match p.kind.as_str() {
         "claude_cli" => {
-            let bin = p.command.clone().filter(|c| !c.is_empty()).or_else(|| which("claude")).ok_or_else(|| AppError::Msg("claude CLI not found on PATH".into()))?;
+            let bin = p
+                .command
+                .clone()
+                .filter(|c| !c.is_empty())
+                .or_else(|| which("claude"))
+                .ok_or_else(|| AppError::Msg("claude CLI not found on PATH".into()))?;
             let mcp = json!({"mcpServers": {"agentql": {"type": "http", "url": url, "headers": {"Authorization": format!("Bearer {token}")}}}});
             let mut c = tokio::process::Command::new(bin);
-            c.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"])
-                .args(["--mcp-config", &mcp.to_string(), "--strict-mcp-config"])
-                .args(["--allowedTools", "mcp__agentql__*", "--tools", ""])
-                .args(["--permission-mode", "default"]);
+            c.args([
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+            ])
+            .args(["--mcp-config", &mcp.to_string(), "--strict-mcp-config"])
+            .args(["--allowedTools", "mcp__agentql__*", "--tools", ""])
+            .args(["--permission-mode", "default"]);
             if !p.model.is_empty() {
                 c.args(["--model", &p.model]);
             }
@@ -352,7 +455,12 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
             c
         }
         _ => {
-            let bin = p.command.clone().filter(|c| !c.is_empty()).or_else(|| which("codex")).ok_or_else(|| AppError::Msg("codex CLI not found on PATH".into()))?;
+            let bin = p
+                .command
+                .clone()
+                .filter(|c| !c.is_empty())
+                .or_else(|| which("codex"))
+                .ok_or_else(|| AppError::Msg("codex CLI not found on PATH".into()))?;
             let mut c = tokio::process::Command::new(bin);
             c.arg("exec");
             if let Some(id) = &session.cli_session_id {
@@ -360,7 +468,10 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
             }
             c.args(["--json", "--skip-git-repo-check", "--sandbox", "read-only"])
                 .args(["-c", &format!("mcp_servers.agentql.url=\"{url}\"")])
-                .args(["-c", "mcp_servers.agentql.bearer_token_env_var=\"AGENTQL_MCP_TOKEN\""])
+                .args([
+                    "-c",
+                    "mcp_servers.agentql.bearer_token_env_var=\"AGENTQL_MCP_TOKEN\"",
+                ])
                 .env("AGENTQL_MCP_TOKEN", &token);
             if !p.model.is_empty() {
                 c.args(["-m", &p.model]);
@@ -369,8 +480,14 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
             c
         }
     };
-    cmd.current_dir(&workdir).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    let mut child = cmd.spawn().map_err(|e| AppError::Msg(format!("failed to start {}: {e}", p.kind)))?;
+    cmd.current_dir(&workdir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| AppError::Msg(format!("failed to start {}: {e}", p.kind)))?;
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
     let stderr_task = tokio::spawn(async move {
@@ -390,7 +507,9 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
     let mut cli_id = session.cli_session_id.clone();
     let is_claude = p.kind == "claude_cli";
     while let Ok(Some(line)) = lines.next_line().await {
-        let Ok(ev) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(ev) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         if is_claude {
             match ev["type"].as_str().unwrap_or("") {
                 "system" => {
@@ -400,7 +519,10 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
                 }
                 "stream_event" => {
                     if ev.pointer("/event/delta/type") == Some(&json!("text_delta")) {
-                        let t = ev.pointer("/event/delta/text").and_then(|t| t.as_str()).unwrap_or("");
+                        let t = ev
+                            .pointer("/event/delta/text")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("");
                         got_delta = true;
                         text.push_str(t);
                         ctx.emit(&session.id, &AgentEvent::TextDelta { text: t.into() });
@@ -408,15 +530,22 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
                 }
                 "assistant" => {
                     if !got_delta
-                        && let Some(content) = ev.pointer("/message/content").and_then(|c| c.as_array()) {
-                            for b in content {
-                                if let Some(t) = b["text"].as_str() {
-                                    text.push_str(t);
-                                    text.push_str("\n\n");
-                                    ctx.emit(&session.id, &AgentEvent::TextDelta { text: format!("{t}\n\n") });
-                                }
+                        && let Some(content) =
+                            ev.pointer("/message/content").and_then(|c| c.as_array())
+                    {
+                        for b in content {
+                            if let Some(t) = b["text"].as_str() {
+                                text.push_str(t);
+                                text.push_str("\n\n");
+                                ctx.emit(
+                                    &session.id,
+                                    &AgentEvent::TextDelta {
+                                        text: format!("{t}\n\n"),
+                                    },
+                                );
                             }
                         }
+                    }
                     got_delta = false;
                 }
                 "result" => {
@@ -424,7 +553,8 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
                         cli_id = Some(id.into());
                     }
                     if ev["is_error"].as_bool().unwrap_or(false) {
-                        failure = Some(ev["result"].as_str().unwrap_or("claude failed").to_string());
+                        failure =
+                            Some(ev["result"].as_str().unwrap_or("claude failed").to_string());
                     }
                 }
                 _ => {}
@@ -443,18 +573,34 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
                             let t = item["text"].as_str().unwrap_or("");
                             text.push_str(t);
                             text.push_str("\n\n");
-                            ctx.emit(&session.id, &AgentEvent::TextDelta { text: format!("{t}\n\n") });
+                            ctx.emit(
+                                &session.id,
+                                &AgentEvent::TextDelta {
+                                    text: format!("{t}\n\n"),
+                                },
+                            );
                         }
                         "reasoning" => {
                             if let Some(t) = item["text"].as_str() {
-                                ctx.emit(&session.id, &AgentEvent::Status { text: super::tools::truncate(t, 200) });
+                                ctx.emit(
+                                    &session.id,
+                                    &AgentEvent::Status {
+                                        text: super::tools::truncate(t, 200),
+                                    },
+                                );
                             }
                         }
                         _ => {}
                     }
                 }
                 "error" | "turn.failed" => {
-                    failure = Some(ev["message"].as_str().or(ev.pointer("/error/message").and_then(|m| m.as_str())).unwrap_or("codex failed").to_string());
+                    failure = Some(
+                        ev["message"]
+                            .as_str()
+                            .or(ev.pointer("/error/message").and_then(|m| m.as_str()))
+                            .unwrap_or("codex failed")
+                            .to_string(),
+                    );
                 }
                 _ => {}
             }
@@ -467,11 +613,18 @@ pub async fn run_cli(ctx: &Ctx, p: &LlmProvider, session: &mut ChatSession, syst
         return Err(AppError::Msg(f));
     }
     if !status.success() {
-        return Err(AppError::Msg(format!("{} exited with {}: {}", p.kind, status, super::tools::truncate(stderr_text.trim(), 800))));
+        return Err(AppError::Msg(format!(
+            "{} exited with {}: {}",
+            p.kind,
+            status,
+            super::tools::truncate(stderr_text.trim(), 800)
+        )));
     }
     // Tool calls made through MCP were already persisted by execute_for_mcp; reload them.
     if let Ok(fresh) = ctx.load_session(&session.id) {
         session.messages = fresh.messages;
     }
-    Ok(vec![Block::Text { text: text.trim_end().to_string() }])
+    Ok(vec![Block::Text {
+        text: text.trim_end().to_string(),
+    }])
 }

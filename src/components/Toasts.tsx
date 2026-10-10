@@ -13,11 +13,19 @@ export function Toasts() {
           role={t.kind === "error" ? "alert" : "status"}
           className={clsx(
             "pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-[var(--shadow)] selectable",
-            t.kind === "error" ? "border-danger/40 bg-danger-soft text-fg" : t.kind === "success" ? "border-success/40 bg-elev" : "border-border bg-elev",
+            t.kind === "error"
+              ? "border-danger/40 bg-danger-soft text-fg"
+              : t.kind === "success"
+                ? "border-success/40 bg-elev"
+                : "border-border bg-elev",
           )}
         >
           <span className="flex-1 break-words">{t.text}</span>
-          <button onClick={() => dismiss(t.id)} className="rounded p-1.5 -m-1 text-muted hover:text-fg" aria-label="Dismiss">
+          <button
+            onClick={() => dismiss(t.id)}
+            className="rounded p-1.5 -m-1 text-muted hover:text-fg"
+            aria-label="Dismiss"
+          >
             <X size={13} />
           </button>
         </div>

@@ -29,7 +29,18 @@ interface Props {
 const ROW_H = 26;
 const MIN_W = 60;
 
-export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDeleteRows, sort, onSort, className, primaryKeys = [] }: Props) {
+export function ResultGrid({
+  result,
+  editable,
+  edits,
+  deletedRows,
+  onEdit,
+  onDeleteRows,
+  sort,
+  onSort,
+  className,
+  primaryKeys = [],
+}: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
   const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null);
@@ -51,7 +62,10 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
       const vb = result.rows[b][column];
       if (va === null) return 1;
       if (vb === null) return -1;
-      const r = typeof va === "number" && typeof vb === "number" ? va - vb : String(cellText(va)).localeCompare(String(cellText(vb)), undefined, { numeric: true });
+      const r =
+        typeof va === "number" && typeof vb === "number"
+          ? va - vb
+          : String(cellText(va)).localeCompare(String(cellText(vb)), undefined, { numeric: true });
       return desc ? -r : r;
     });
     return idx;
@@ -116,15 +130,29 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
       const r2 = Math.max(sel.r, anchor?.r ?? sel.r);
       const c1 = Math.min(sel.c, anchor?.c ?? sel.c);
       const c2 = Math.max(sel.c, anchor?.c ?? sel.c);
-      const withEdits = (ri: number) => result.rows[ri].map((v, ci) => (edits?.has(`${ri}:${cols[ci].name}`) ? edits.get(`${ri}:${cols[ci].name}`)! : v));
+      const withEdits = (ri: number) =>
+        result.rows[ri].map((v, ci) =>
+          edits?.has(`${ri}:${cols[ci].name}`) ? edits.get(`${ri}:${cols[ci].name}`)! : v,
+        );
       const rows = order.slice(r1, r2 + 1).map(withEdits);
       let text: string;
       if (asJson) {
-        text = JSON.stringify(rows.map((row) => Object.fromEntries(cols.slice(c1, c2 + 1).map((c, i) => [c.name, row[c1 + i]]))), null, 2);
+        text = JSON.stringify(
+          rows.map((row) => Object.fromEntries(cols.slice(c1, c2 + 1).map((c, i) => [c.name, row[c1 + i]]))),
+          null,
+          2,
+        );
       } else if (r1 === r2 && c1 === c2) {
         text = cellFull(rows[0][c1]);
       } else {
-        text = rows.map((row) => row.slice(c1, c2 + 1).map(cellText).join("\t")).join("\n");
+        text = rows
+          .map((row) =>
+            row
+              .slice(c1, c2 + 1)
+              .map(cellText)
+              .join("\t"),
+          )
+          .join("\n");
       }
       void navigator.clipboard.writeText(text);
     },
@@ -175,7 +203,9 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
   const inSelection = (r: number, c: number) => {
     if (!sel) return false;
     const a = anchor ?? sel;
-    return r >= Math.min(sel.r, a.r) && r <= Math.max(sel.r, a.r) && c >= Math.min(sel.c, a.c) && c <= Math.max(sel.c, a.c);
+    return (
+      r >= Math.min(sel.r, a.r) && r <= Math.max(sel.r, a.r) && c >= Math.min(sel.c, a.c) && c <= Math.max(sel.c, a.c)
+    );
   };
 
   const resizing = useRef<{ c: number; x: number; w: number } | null>(null);
@@ -198,7 +228,10 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
 
   const headerSort = (ci: number) => {
     if (onSort) onSort(cols[ci].name);
-    else setClientSort((s) => (s?.column === ci ? (s.desc ? null : { column: ci, desc: true }) : { column: ci, desc: false }));
+    else
+      setClientSort((s) =>
+        s?.column === ci ? (s.desc ? null : { column: ci, desc: true }) : { column: ci, desc: false },
+      );
   };
   const sortState = (ci: number): "asc" | "desc" | null => {
     if (onSort) return sort?.column === cols[ci].name ? (sort.desc ? "desc" : "asc") : null;
@@ -206,17 +239,28 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
   };
 
   const menuItems = (() => {
-    if (!menuCell || menuCell.r >= order.length || menuCell.c >= cols.length) return [{ label: "No cell selected", disabled: true }];
+    if (!menuCell || menuCell.r >= order.length || menuCell.c >= cols.length)
+      return [{ label: "No cell selected", disabled: true }];
     const rowIdx = order[menuCell.r];
     const row = result.rows[rowIdx];
     const c = cols[menuCell.c];
     const key = `${rowIdx}:${c.name}`;
     const v = edits?.has(key) ? edits.get(key)! : row[menuCell.c];
-    const cellOf = (cc: Column, i: number) => (edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`)! : row[i]);
+    const cellOf = (cc: Column, i: number) =>
+      edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`)! : row[i];
     return [
       { label: "Copy value", onSelect: () => void navigator.clipboard.writeText(cellFull(v)) },
-      { label: "Copy row as JSON", onSelect: () => void navigator.clipboard.writeText(JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, cellOf(cc, i)])), null, 2)) },
-      { label: "Copy row as TSV", onSelect: () => void navigator.clipboard.writeText(cols.map((cc, i) => cellText(cellOf(cc, i))).join("\t")) },
+      {
+        label: "Copy row as JSON",
+        onSelect: () =>
+          void navigator.clipboard.writeText(
+            JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, cellOf(cc, i)])), null, 2),
+          ),
+      },
+      {
+        label: "Copy row as TSV",
+        onSelect: () => void navigator.clipboard.writeText(cols.map((cc, i) => cellText(cellOf(cc, i))).join("\t")),
+      },
       { label: "View value", onSelect: () => setInspect(menuCell) },
       ...(editable
         ? [
@@ -238,72 +282,101 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
   return (
     <div className={clsx("flex h-full min-h-0", className)}>
       <ContextMenu items={menuItems}>
-      <div
-        ref={parentRef}
-        className="flex-1 overflow-auto scroll bg-elev font-mono text-xs"
-        tabIndex={0}
-        role="grid"
-        aria-rowcount={order.length}
-        aria-colcount={cols.length}
-        aria-activedescendant={sel ? `${gridId}-${sel.r}-${sel.c}` : undefined}
-        onFocus={() => {
-          if (!sel && order.length && cols.length) {
-            setSel({ r: 0, c: 0 });
-            setAnchor({ r: 0, c: 0 });
-          }
-        }}
-        onKeyDown={onKeyDown}
-      >
-        <div style={{ width: totalW, position: "relative" }}>
-          {/* header */}
-          <div className="sticky top-0 z-10 flex h-7 border-b border-border bg-sunken" role="row">
-            <div className="sticky left-0 z-20 w-12 shrink-0 border-r border-border bg-sunken" role="columnheader" aria-label="Row number" />
-            {cols.map((c, ci) => {
-              const s = sortState(ci);
-              return (
-                <div
-                  key={ci}
-                  role="columnheader"
-                  aria-sort={s === "asc" ? "ascending" : s === "desc" ? "descending" : "none"}
-                  style={{ width: widths[ci] }}
-                  className="relative flex shrink-0 items-center gap-1 border-r border-border select-none hover:bg-hover"
-                  title={`${c.name} · ${c.type_name}`}
-                >
-                  <button type="button" onClick={() => headerSort(ci)} aria-label={`Sort by ${c.name}`} className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left">
-                    <span className={clsx("truncate font-semibold", primaryKeys.includes(c.name) && "text-accent")}>{c.name}</span>
-                    <span className="shrink-0 truncate text-[10px] font-normal text-faint">{c.type_name.toLowerCase()}</span>
-                    {s && <span className="ml-auto text-accent">{s === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />}</span>}
-                  </button>
-                  <div onMouseDown={(e) => onResizeStart(ci, e)} onClick={(e) => e.stopPropagation()} className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-accent/50" aria-hidden />
-                </div>
-              );
-            })}
-          </div>
-          {/* rows */}
-          <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
-            {rowVirtualizer.getVirtualItems().map((vi) => {
-              const rowIdx = order[vi.index];
-              const row = result.rows[rowIdx];
-              const deleted = deletedRows?.has(rowIdx);
-              return (
-                <div
-                  key={vi.key}
-                  role="row"
-                  aria-rowindex={vi.index + 1}
-                  className={clsx("absolute left-0 flex", vi.index % 2 ? "bg-elev" : "bg-bg/40", deleted && "line-through opacity-50")}
-                  style={{ top: vi.start, height: ROW_H, width: totalW }}
-                >
-                  <div className="sticky left-0 z-[5] flex w-12 shrink-0 items-center justify-end border-b border-r border-border bg-sunken px-1.5 text-[10px] text-faint tabular-nums" role="rowheader">
-                    {rowIdx + 1}
+        <div
+          ref={parentRef}
+          className="flex-1 overflow-auto scroll bg-elev font-mono text-xs"
+          tabIndex={0}
+          role="grid"
+          aria-rowcount={order.length}
+          aria-colcount={cols.length}
+          aria-activedescendant={sel ? `${gridId}-${sel.r}-${sel.c}` : undefined}
+          onFocus={() => {
+            if (!sel && order.length && cols.length) {
+              setSel({ r: 0, c: 0 });
+              setAnchor({ r: 0, c: 0 });
+            }
+          }}
+          onKeyDown={onKeyDown}
+        >
+          <div style={{ width: totalW, position: "relative" }}>
+            {/* header */}
+            <div className="sticky top-0 z-10 flex h-7 border-b border-border bg-sunken" role="row">
+              <div
+                className="sticky left-0 z-20 w-12 shrink-0 border-r border-border bg-sunken"
+                role="columnheader"
+                aria-label="Row number"
+              />
+              {cols.map((c, ci) => {
+                const s = sortState(ci);
+                return (
+                  <div
+                    key={ci}
+                    role="columnheader"
+                    aria-sort={s === "asc" ? "ascending" : s === "desc" ? "descending" : "none"}
+                    style={{ width: widths[ci] }}
+                    className="relative flex shrink-0 items-center gap-1 border-r border-border select-none hover:bg-hover"
+                    title={`${c.name} · ${c.type_name}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => headerSort(ci)}
+                      aria-label={`Sort by ${c.name}`}
+                      className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left"
+                    >
+                      <span className={clsx("truncate font-semibold", primaryKeys.includes(c.name) && "text-accent")}>
+                        {c.name}
+                      </span>
+                      <span className="shrink-0 truncate text-[10px] font-normal text-faint">
+                        {c.type_name.toLowerCase()}
+                      </span>
+                      {s && (
+                        <span className="ml-auto text-accent">
+                          {s === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />}
+                        </span>
+                      )}
+                    </button>
+                    <div
+                      onMouseDown={(e) => onResizeStart(ci, e)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-accent/50"
+                      aria-hidden
+                    />
                   </div>
-                  {cols.map((c, ci) => {
-                    const key = `${rowIdx}:${c.name}`;
-                    const edited = edits?.has(key);
-                    const v = edited ? edits!.get(key)! : row[ci];
-                    const isEditing = editing && editing.r === vi.index && editing.c === ci;
-                    const selected = inSelection(vi.index, ci);
-                    const focused = sel?.r === vi.index && sel?.c === ci;
-                    return (
+                );
+              })}
+            </div>
+            {/* rows */}
+            <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
+              {rowVirtualizer.getVirtualItems().map((vi) => {
+                const rowIdx = order[vi.index];
+                const row = result.rows[rowIdx];
+                const deleted = deletedRows?.has(rowIdx);
+                return (
+                  <div
+                    key={vi.key}
+                    role="row"
+                    aria-rowindex={vi.index + 1}
+                    className={clsx(
+                      "absolute left-0 flex",
+                      vi.index % 2 ? "bg-elev" : "bg-bg/40",
+                      deleted && "line-through opacity-50",
+                    )}
+                    style={{ top: vi.start, height: ROW_H, width: totalW }}
+                  >
+                    <div
+                      className="sticky left-0 z-[5] flex w-12 shrink-0 items-center justify-end border-b border-r border-border bg-sunken px-1.5 text-[10px] text-faint tabular-nums"
+                      role="rowheader"
+                    >
+                      {rowIdx + 1}
+                    </div>
+                    {cols.map((c, ci) => {
+                      const key = `${rowIdx}:${c.name}`;
+                      const edited = edits?.has(key);
+                      const v = edited ? edits!.get(key)! : row[ci];
+                      const isEditing = editing && editing.r === vi.index && editing.c === ci;
+                      const selected = inSelection(vi.index, ci);
+                      const focused = sel?.r === vi.index && sel?.c === ci;
+                      return (
                         <div
                           key={ci}
                           role="gridcell"
@@ -326,7 +399,9 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                             if (!e.shiftKey) setAnchor({ r: vi.index, c: ci });
                             setInspect((i) => (i ? { r: vi.index, c: ci } : i));
                           }}
-                          onDoubleClick={() => (editable ? startEdit(vi.index, ci) : setInspect({ r: vi.index, c: ci }))}
+                          onDoubleClick={() =>
+                            editable ? startEdit(vi.index, ci) : setInspect({ r: vi.index, c: ci })
+                          }
                         >
                           {isEditing ? (
                             <input
@@ -339,8 +414,7 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                                 else if (e.key === "Escape") {
                                   setEditing(null);
                                   parentRef.current?.focus();
-                                }
-                                else if (e.key === "Tab") {
+                                } else if (e.key === "Tab") {
                                   e.preventDefault();
                                   commitEdit();
                                   const c2 = Math.max(0, Math.min(cols.length - 1, ci + (e.shiftKey ? -1 : 1)));
@@ -355,18 +429,26 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
                           ) : v === null ? (
                             <span className="italic text-[var(--null)]">NULL</span>
                           ) : (
-                            <span className={clsx("truncate", typeof v === "number" && "ml-auto tabular-nums", typeof v === "boolean" && "text-accent")}>{cellText(v)}</span>
+                            <span
+                              className={clsx(
+                                "truncate",
+                                typeof v === "number" && "ml-auto tabular-nums",
+                                typeof v === "boolean" && "text-accent",
+                              )}
+                            >
+                              {cellText(v)}
+                            </span>
                           )}
                         </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+            {order.length === 0 && <div className="p-6 text-center text-xs text-muted font-sans">No rows</div>}
           </div>
-          {order.length === 0 && <div className="p-6 text-center text-xs text-muted font-sans">No rows</div>}
         </div>
-      </div>
       </ContextMenu>
       {inspect && inspectValue !== undefined && (
         <aside className="flex w-80 shrink-0 flex-col border-l border-border bg-elev" aria-label="Cell inspector">
@@ -385,8 +467,14 @@ export function ResultGrid({ result, editable, edits, deletedRows, onEdit, onDel
             aria-label="Cell value"
           />
           <div className="flex gap-1 border-t border-border p-1.5">
-            <Button size="sm" onClick={() => void navigator.clipboard.writeText(cellFull(inspectValue))}>Copy</Button>
-            {editable && <Button size="sm" onClick={() => startEdit(inspect.r, inspect.c)}>Edit</Button>}
+            <Button size="sm" onClick={() => void navigator.clipboard.writeText(cellFull(inspectValue))}>
+              Copy
+            </Button>
+            {editable && (
+              <Button size="sm" onClick={() => startEdit(inspect.r, inspect.c)}>
+                Edit
+              </Button>
+            )}
           </div>
         </aside>
       )}

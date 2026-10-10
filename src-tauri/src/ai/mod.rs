@@ -16,8 +16,14 @@ use tokio::sync::oneshot;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Block {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: Value },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
     ToolResult {
         tool_use_id: String,
         content: String,
@@ -37,7 +43,11 @@ pub struct Message {
 
 impl Message {
     pub fn new(role: &str, blocks: Vec<Block>) -> Self {
-        Message { role: role.into(), blocks, ts: chrono::Utc::now().to_rfc3339() }
+        Message {
+            role: role.into(),
+            blocks,
+            ts: chrono::Utc::now().to_rfc3339(),
+        }
     }
     pub fn text(&self) -> String {
         self.blocks
@@ -75,13 +85,34 @@ pub struct ToolDef {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
-    TextDelta { text: String },
-    ToolCall { id: String, name: String, input: Value },
-    ToolResult { id: String, content: String, is_error: bool, display: Option<Value> },
-    ApprovalRequest { id: String, description: String, statement: String },
-    Status { text: String },
-    Done { session: ChatSession },
-    Error { message: String },
+    TextDelta {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        id: String,
+        content: String,
+        is_error: bool,
+        display: Option<Value>,
+    },
+    ApprovalRequest {
+        id: String,
+        description: String,
+        statement: String,
+    },
+    Status {
+        text: String,
+    },
+    Done {
+        session: ChatSession,
+    },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Serialize, Clone)]
@@ -101,7 +132,11 @@ pub struct Agent {
 impl Default for Agent {
     fn default() -> Self {
         use rand::Rng;
-        let token: String = rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(40).map(char::from).collect();
+        let token: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(40)
+            .map(char::from)
+            .collect();
         Agent {
             pending_approvals: Mutex::new(HashMap::new()),
             running: Mutex::new(HashMap::new()),
@@ -121,12 +156,15 @@ pub struct Ctx {
 
 impl Ctx {
     pub fn emit(&self, session_id: &str, event: &AgentEvent) {
-        let _ = self.app.emit("ai:event", EventEnvelope { session_id, event });
+        let _ = self
+            .app
+            .emit("ai:event", EventEnvelope { session_id, event });
     }
 
     pub fn load_session(&self, id: &str) -> Result<ChatSession> {
         let path = self.store.dir().join("chats").join(format!("{id}.json"));
-        let data = std::fs::read(&path).map_err(|_| AppError::Msg(format!("chat session {id} not found")))?;
+        let data = std::fs::read(&path)
+            .map_err(|_| AppError::Msg(format!("chat session {id} not found")))?;
         Ok(serde_json::from_slice(&data)?)
     }
 
@@ -150,13 +188,26 @@ impl Ctx {
     }
 
     /// Ask the UI to approve a write; resolves via `ai_resolve_approval`.
-    pub async fn request_approval(&self, session_id: &str, description: &str, statement: &str) -> bool {
+    pub async fn request_approval(
+        &self,
+        session_id: &str,
+        description: &str,
+        statement: &str,
+    ) -> bool {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
-        self.agent.pending_approvals.lock().unwrap().insert(id.clone(), tx);
+        self.agent
+            .pending_approvals
+            .lock()
+            .unwrap()
+            .insert(id.clone(), tx);
         self.emit(
             session_id,
-            &AgentEvent::ApprovalRequest { id: id.clone(), description: description.into(), statement: statement.into() },
+            &AgentEvent::ApprovalRequest {
+                id: id.clone(),
+                description: description.into(),
+                statement: statement.into(),
+            },
         );
         let approved = tokio::time::timeout(std::time::Duration::from_secs(600), rx).await;
         self.agent.pending_approvals.lock().unwrap().remove(&id);
@@ -171,7 +222,9 @@ fn provider_for(ctx: &Ctx, id: &str) -> Result<LlmProvider> {
         .iter()
         .find(|p| p.id == id)
         .cloned()
-        .ok_or_else(|| AppError::Msg("LLM provider not configured. Open Settings → AI providers.".into()))
+        .ok_or_else(|| {
+            AppError::Msg("LLM provider not configured. Open Settings → AI providers.".into())
+        })
 }
 
 /// One user turn: append message, run the model with tools until it stops, persist.
@@ -184,7 +237,12 @@ pub async fn run_turn(ctx: Ctx, session_id: String, user_text: String) -> Result
             Ok(())
         }
         Err(e) => {
-            ctx.emit(&session_id, &AgentEvent::Error { message: e.to_string() });
+            ctx.emit(
+                &session_id,
+                &AgentEvent::Error {
+                    message: e.to_string(),
+                },
+            );
             if let Ok(session) = ctx.load_session(&session_id) {
                 ctx.emit(&session_id, &AgentEvent::Done { session });
             }
@@ -197,9 +255,19 @@ async fn run_turn_inner(ctx: &Ctx, session_id: &str, user_text: String) -> Resul
     let mut session = ctx.load_session(session_id)?;
     let provider = provider_for(ctx, &session.provider_id)?;
     if session.messages.is_empty() {
-        session.title = user_text.chars().take(60).collect::<String>().trim().to_string();
+        session.title = user_text
+            .chars()
+            .take(60)
+            .collect::<String>()
+            .trim()
+            .to_string();
     }
-    session.messages.push(Message::new("user", vec![Block::Text { text: user_text.clone() }]));
+    session.messages.push(Message::new(
+        "user",
+        vec![Block::Text {
+            text: user_text.clone(),
+        }],
+    ));
     ctx.save_session(&mut session)?;
 
     let system = tools::system_prompt(ctx, &session).await;
@@ -215,14 +283,28 @@ async fn run_turn_inner(ctx: &Ctx, session_id: &str, user_text: String) -> Resul
     let api_key = ctx.store.provider_api_key(&provider.id).unwrap_or_default();
     let conn = ctx.manager.get(&session.connection_id).await?;
     let defs = tools::definitions(conn.config.driver);
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(600)).build()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()?;
 
     for _round in 0..25 {
-        let blocks = providers::stream_api(ctx, &client, &provider, &api_key, session_id, &system, &session.messages, &defs).await?;
+        let blocks = providers::stream_api(
+            ctx,
+            &client,
+            &provider,
+            &api_key,
+            session_id,
+            &system,
+            &session.messages,
+            &defs,
+        )
+        .await?;
         let calls: Vec<(String, String, Value)> = blocks
             .iter()
             .filter_map(|b| match b {
-                Block::ToolUse { id, name, input } => Some((id.clone(), name.clone(), input.clone())),
+                Block::ToolUse { id, name, input } => {
+                    Some((id.clone(), name.clone(), input.clone()))
+                }
                 _ => None,
             })
             .collect();
@@ -233,13 +315,30 @@ async fn run_turn_inner(ctx: &Ctx, session_id: &str, user_text: String) -> Resul
         }
         let mut results = vec![];
         for (id, name, input) in calls {
-            ctx.emit(session_id, &AgentEvent::ToolCall { id: id.clone(), name: name.clone(), input: input.clone() });
+            ctx.emit(
+                session_id,
+                &AgentEvent::ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    input: input.clone(),
+                },
+            );
             let out = tools::execute(ctx, &session, &name, &input).await;
             ctx.emit(
                 session_id,
-                &AgentEvent::ToolResult { id: id.clone(), content: out.content.clone(), is_error: out.is_error, display: out.display.clone() },
+                &AgentEvent::ToolResult {
+                    id: id.clone(),
+                    content: out.content.clone(),
+                    is_error: out.is_error,
+                    display: out.display.clone(),
+                },
             );
-            results.push(Block::ToolResult { tool_use_id: id, content: out.content, is_error: out.is_error, display: out.display });
+            results.push(Block::ToolResult {
+                tool_use_id: id,
+                content: out.content,
+                is_error: out.is_error,
+                display: out.display,
+            });
         }
         session.messages.push(Message::new("user", results));
         ctx.save_session(&mut session)?;

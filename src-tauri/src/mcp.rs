@@ -36,13 +36,25 @@ fn rpc_error(id: Value, code: i64, msg: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": msg}})
 }
 
-async fn handle(State(ctx): State<Ctx>, Path(session_id): Path<String>, headers: HeaderMap, body: String) -> Response {
-    let auth = headers.get("authorization").and_then(|h| h.to_str().ok()).unwrap_or("");
+async fn handle(
+    State(ctx): State<Ctx>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    let auth = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
     if auth != format!("Bearer {}", ctx.agent.mcp_token) {
         return (StatusCode::UNAUTHORIZED, "bad token").into_response();
     }
     let Ok(req) = serde_json::from_str::<Value>(&body) else {
-        return (StatusCode::BAD_REQUEST, rpc_error(Value::Null, -32700, "parse error").to_string()).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            rpc_error(Value::Null, -32700, "parse error").to_string(),
+        )
+            .into_response();
     };
     let was_batch = req.is_array();
     let reqs: Vec<Value> = match req {
@@ -58,13 +70,21 @@ async fn handle(State(ctx): State<Ctx>, Path(session_id): Path<String>, headers:
     if responses.is_empty() {
         return StatusCode::ACCEPTED.into_response();
     }
-    let payload = if was_batch { Value::Array(responses) } else { responses.remove(0) };
+    let payload = if was_batch {
+        Value::Array(responses)
+    } else {
+        responses.remove(0)
+    };
     ([("content-type", "application/json")], payload.to_string()).into_response()
 }
 
 async fn dispatch(ctx: &Ctx, session_id: &str, req: Value) -> Option<Value> {
     let Some(method) = req["method"].as_str() else {
-        return Some(rpc_error(req.get("id").cloned().unwrap_or(Value::Null), -32600, "invalid request"));
+        return Some(rpc_error(
+            req.get("id").cloned().unwrap_or(Value::Null),
+            -32600,
+            "invalid request",
+        ));
     };
     // Notifications (no id) never get a response.
     let id = match req.get("id") {
@@ -96,10 +116,19 @@ async fn dispatch(ctx: &Ctx, session_id: &str, req: Value) -> Option<Value> {
             rpc_result(id, json!({"tools": tools}))
         }
         "tools/call" => {
-            let name = req.pointer("/params/name").and_then(|n| n.as_str()).unwrap_or("");
-            let args = req.pointer("/params/arguments").cloned().unwrap_or(json!({}));
+            let name = req
+                .pointer("/params/name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+            let args = req
+                .pointer("/params/arguments")
+                .cloned()
+                .unwrap_or(json!({}));
             let out = tools::execute_for_mcp(ctx, session_id, name, &args).await;
-            rpc_result(id, json!({"content": [{"type": "text", "text": out.content}], "isError": out.is_error}))
+            rpc_result(
+                id,
+                json!({"content": [{"type": "text", "text": out.content}], "isError": out.is_error}),
+            )
         }
         _ => rpc_error(id, -32601, "method not found"),
     })

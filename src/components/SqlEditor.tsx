@@ -1,6 +1,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, placeholder as cmPlaceholder } from "@codemirror/view";
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  drawSelection,
+  placeholder as cmPlaceholder,
+} from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { sql, PostgreSQL, MySQL, SQLite, type SQLNamespace } from "@codemirror/lang-sql";
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
@@ -29,7 +37,10 @@ interface Props {
   readOnly?: boolean;
 }
 
-export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({ value, onChange, driver, schema, onRun, onRunAll, placeholder, readOnly }, ref) {
+export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
+  { value, onChange, driver, schema, onRun, onRunAll, placeholder, readOnly },
+  ref,
+) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const langComp = useRef(new Compartment());
@@ -115,7 +126,10 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
       const v = view.current;
       if (!v) return;
       const sel = v.state.selection.main;
-      v.dispatch({ changes: { from: sel.from, to: sel.to, insert: text }, selection: { anchor: sel.from + text.length } });
+      v.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: text },
+        selection: { anchor: sel.from + text.length },
+      });
       v.focus();
     },
     focus: () => view.current?.focus(),
@@ -123,4 +137,3 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
 
   return <div ref={host} className="h-full w-full overflow-hidden selectable" />;
 });
-

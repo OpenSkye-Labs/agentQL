@@ -1,14 +1,23 @@
 import { clsx } from "clsx";
 import { Dialog as RDialog, DropdownMenu as RMenu, Tooltip as RTooltip, ContextMenu as RContext } from "radix-ui";
 import { X } from "lucide-react";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import type {
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  ReactNode,
+  SelectHTMLAttributes,
+  TextareaHTMLAttributes,
+} from "react";
 
 export function Button({
   variant = "default",
   size = "md",
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "primary" | "ghost" | "danger"; size?: "sm" | "md" | "icon" }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "default" | "primary" | "ghost" | "danger";
+  size?: "sm" | "md" | "icon";
+}) {
   return (
     <button
       type="button"
@@ -18,7 +27,8 @@ export function Button({
         size === "md" && "h-8 px-3 text-[13px]",
         size === "icon" && "h-7 w-7 p-0",
         variant === "default" && "border-border bg-elev hover:bg-hover active:bg-active",
-        variant === "primary" && "border-transparent bg-accent text-accent-fg hover:brightness-110 active:brightness-95",
+        variant === "primary" &&
+          "border-transparent bg-accent text-accent-fg hover:brightness-110 active:brightness-95",
         variant === "ghost" && "border-transparent hover:bg-hover active:bg-active",
         variant === "danger" && "border-transparent bg-danger text-white hover:brightness-110",
         className,
@@ -55,7 +65,10 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
 export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
-      className={clsx("h-8 rounded-md border border-border bg-elev px-2 text-[13px] focus:border-accent disabled:opacity-50", className)}
+      className={clsx(
+        "h-8 rounded-md border border-border bg-elev px-2 text-[13px] focus:border-accent disabled:opacity-50",
+        className,
+      )}
       {...props}
     >
       {children}
@@ -63,7 +76,17 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
   );
 }
 
-export function Field({ label, children, hint, className }: { label: string; children: ReactNode; hint?: string; className?: string }) {
+export function Field({
+  label,
+  children,
+  hint,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: string;
+  className?: string;
+}) {
   return (
     <label className={clsx("flex flex-col gap-1 text-xs text-muted", className)}>
       <span className="font-medium">{label}</span>
@@ -73,7 +96,17 @@ export function Field({ label, children, hint, className }: { label: string; chi
   );
 }
 
-export function Switch({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description?: string }) {
+export function Switch({
+  checked,
+  onChange,
+  label,
+  description,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  description?: string;
+}) {
   return (
     <label className="flex items-start gap-3 cursor-pointer">
       <button
@@ -81,9 +114,17 @@ export function Switch({ checked, onChange, label, description }: { checked: boo
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={clsx("mt-0.5 relative h-5 w-9 shrink-0 rounded-full border transition-colors", checked ? "bg-accent border-accent" : "bg-sunken border-border-strong")}
+        className={clsx(
+          "mt-0.5 relative h-5 w-9 shrink-0 rounded-full border transition-colors",
+          checked ? "bg-accent border-accent" : "bg-sunken border-border-strong",
+        )}
       >
-        <span className={clsx("absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow transition-transform", checked ? "translate-x-[18px]" : "translate-x-0.5")} />
+        <span
+          className={clsx(
+            "absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow transition-transform",
+            checked ? "translate-x-[18px]" : "translate-x-0.5",
+          )}
+        />
       </button>
       <span className="flex flex-col">
         <span className="text-[13px]">{label}</span>
@@ -136,14 +177,24 @@ export function Dialog({
             </RDialog.Close>
           </div>
           <div className="px-5 py-4 overflow-auto scroll flex-1">{children}</div>
-          {footer && <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">{footer}</div>}
+          {footer && (
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">{footer}</div>
+          )}
         </RDialog.Content>
       </RDialog.Portal>
     </RDialog.Root>
   );
 }
 
-export function Tooltip({ label, children, side = "bottom" }: { label: string; children: ReactNode; side?: "top" | "bottom" | "left" | "right" }) {
+export function Tooltip({
+  label,
+  children,
+  side = "bottom",
+}: {
+  label: string;
+  children: ReactNode;
+  side?: "top" | "bottom" | "left" | "right";
+}) {
   return (
     <RTooltip.Root delayDuration={400}>
       <RTooltip.Trigger asChild>{children}</RTooltip.Trigger>
@@ -180,7 +231,15 @@ const menuItemCls = (danger?: boolean) =>
     danger && "text-danger",
   );
 
-export function Menu({ trigger, items, align = "end" }: { trigger: ReactNode; items: MenuItem[]; align?: "start" | "end" }) {
+export function Menu({
+  trigger,
+  items,
+  align = "end",
+}: {
+  trigger: ReactNode;
+  items: MenuItem[];
+  align?: "start" | "end";
+}) {
   return (
     <RMenu.Root>
       <RMenu.Trigger asChild>{trigger}</RMenu.Trigger>
@@ -231,16 +290,31 @@ export function Spinner({ className }: { className?: string }) {
     <span
       role="status"
       aria-label="Loading"
-      className={clsx("inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-border-strong border-t-accent", className)}
+      className={clsx(
+        "inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-border-strong border-t-accent",
+        className,
+      )}
     />
   );
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-border bg-sunken px-1 py-px text-[10px] font-mono text-muted">{children}</kbd>;
+  return (
+    <kbd className="rounded border border-border bg-sunken px-1 py-px text-[10px] font-mono text-muted">{children}</kbd>
+  );
 }
 
-export function Empty({ icon, title, hint, action }: { icon?: ReactNode; title: string; hint?: string; action?: ReactNode }) {
+export function Empty({
+  icon,
+  title,
+  hint,
+  action,
+}: {
+  icon?: ReactNode;
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center text-muted">
       {icon && <div className="text-faint">{icon}</div>}

@@ -27,7 +27,11 @@ export function parseCell(text: string, typeName: string, original: Cell): Cell 
   const t = typeName.toUpperCase();
   if (text === "") return typeof original === "string" ? "" : null;
   if (/INT|SERIAL|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER|MONEY/.test(t) && /^-?\d+(\.\d+)?$/.test(text)) {
-    return /INT|SERIAL/.test(t) && Number.isSafeInteger(Number(text)) ? Number(text) : text.includes(".") || !Number.isSafeInteger(Number(text)) ? text : Number(text);
+    return /INT|SERIAL/.test(t) && Number.isSafeInteger(Number(text))
+      ? Number(text)
+      : text.includes(".") || !Number.isSafeInteger(Number(text))
+        ? text
+        : Number(text);
   }
   if (/BOOL/.test(t)) {
     if (/^(true|t|1|yes)$/i.test(text)) return true;

@@ -3,6 +3,7 @@
 Append-only record of shipped behaviour. Newest at the bottom.
 
 ## 2026-10-10
+
 - Project scaffolded: Tauri 2, React 19, TS, Tailwind v4, Vite 7. Rust 2024 edition.
 - Connection model supports six drivers (postgres, mysql, mariadb, sqlite, redis, mongodb), discrete fields or URL,
   SSL modes with CA/cert/key paths, SSH tunnel (agent / password / key file), read-only flag, colour, group.
@@ -31,3 +32,18 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - Public repo at github.com/OpenSkye-Labs/agentQL. GitHub Actions: `ci.yml` runs typecheck + cargo check/test on every push and PR;
   `release.yml` builds macOS (arm64 + x64), Linux (.deb/.AppImage/.rpm) and Windows (.msi/.exe) via tauri-action on any `v*` tag and
   publishes them as a draft GitHub Release. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z`, then publish the draft.
+- Open-source workflow: `main` is protected by a ruleset (PR + code-owner review + `ci-ok` status, squash-only, admins bypass).
+  CI runs oxfmt/oxlint/tsc/build for frontend changes and rustfmt/clippy/test for Rust changes, filtered by touched paths,
+  plus a version-consistency check (`pnpm version:check`). CONTRIBUTING.md, PR template, CODEOWNERS, Dependabot for actions,
+  and all actions pinned to commit SHAs. Codebase formatted once with `cargo fmt` and `oxfmt`.
+- Automated versioning with release-please: conventional-commit PR titles drive the bump; on every merge to `main` a release PR
+  bumps package.json / tauri.conf.json / Cargo.toml and CHANGELOG.md; merging it tags `vX.Y.Z`, creates the GitHub Release and
+  dispatches the installer build. `dev` -> `main` PRs use a merge commit so individual commit titles survive.
+- Updater signing keys generated (`~/.tauri/agentql.key` + `.password` on the maintainer machine, backed up out of band).
+  Private key and password live in the repo secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
+  the public key and `createUpdaterArtifacts` are in `src-tauri/tauri.release.conf.json`, merged only by the release workflow
+  so local builds need no key. Release assets include `.sig` files and `latest.json` for the updater plugin.
+- In-app updater (`tauri-plugin-updater`): the status bar checks `releases/latest/download/latest.json` once at startup and shows
+  an "Update to vX.Y.Z" button that downloads, verifies the minisign signature against the pubkey in tauri.conf.json, installs and restarts.
+- Licensed under MIT (LICENSE, package.json, Cargo.toml). README gained the SignPath-required "Code signing policy" and
+  "Privacy policy" sections plus a License section; SECURITY.md documents private vulnerability reporting.

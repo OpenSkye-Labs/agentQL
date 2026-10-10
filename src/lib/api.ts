@@ -1,7 +1,19 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  Cell, ChatSession, ConnectionConfig, ConnectionSecrets, MongoFind, MongoPage, QueryResult, RowChange, ScanResult,
-  Settings, TableDetails, TableInfo, TablePage, TableQuery,
+  Cell,
+  ChatSession,
+  ConnectionConfig,
+  ConnectionSecrets,
+  MongoFind,
+  MongoPage,
+  QueryResult,
+  RowChange,
+  ScanResult,
+  Settings,
+  TableDetails,
+  TableInfo,
+  TablePage,
+  TableQuery,
 } from "./types";
 
 export interface ConnectResult {
@@ -27,17 +39,29 @@ export const api = {
 
   // sql
   runQuery: (id: string, sqlText: string, limit?: number) => invoke<QueryResult[]>("run_query", { id, sqlText, limit }),
-  explainQuery: (id: string, sqlText: string, analyze: boolean) => invoke<QueryResult>("explain_query", { id, sqlText, analyze }),
+  explainQuery: (id: string, sqlText: string, analyze: boolean) =>
+    invoke<QueryResult>("explain_query", { id, sqlText, analyze }),
   listDatabases: (id: string) => invoke<string[]>("list_databases", { id }),
   listSchemas: (id: string) => invoke<string[]>("list_schemas", { id }),
   listTables: (id: string, schema: string) => invoke<TableInfo[]>("list_tables", { id, schema }),
-  tableDetails: (id: string, schema: string, table: string) => invoke<TableDetails>("table_details", { id, schema, table }),
+  tableDetails: (id: string, schema: string, table: string) =>
+    invoke<TableDetails>("table_details", { id, schema, table }),
   fetchTable: (id: string, query: TableQuery) => invoke<TablePage>("fetch_table", { id, query }),
   countTable: (id: string, query: TableQuery) => invoke<number>("count_table", { id, query }),
-  previewChanges: (id: string, schema: string | null, table: string, changes: RowChange[], types?: Record<string, string>) =>
-    invoke<string[]>("preview_changes", { id, schema, table, changes, types }),
-  applyChanges: (id: string, schema: string | null, table: string, changes: RowChange[], types?: Record<string, string>) =>
-    invoke<number>("apply_changes", { id, schema, table, changes, types }),
+  previewChanges: (
+    id: string,
+    schema: string | null,
+    table: string,
+    changes: RowChange[],
+    types?: Record<string, string>,
+  ) => invoke<string[]>("preview_changes", { id, schema, table, changes, types }),
+  applyChanges: (
+    id: string,
+    schema: string | null,
+    table: string,
+    changes: RowChange[],
+    types?: Record<string, string>,
+  ) => invoke<number>("apply_changes", { id, schema, table, changes, types }),
   sshForgetHost: (host: string, port: number) => invoke<void>("ssh_forget_host", { host, port }),
   exportRows: (path: string, format: "csv" | "json" | "sql", columns: string[], rows: Cell[][]) =>
     invoke<number>("export_rows", { path, format, columns, rows }),
@@ -51,7 +75,8 @@ export const api = {
   redisInfo: (id: string) => invoke<Record<string, string>>("redis_info", { id }),
 
   // mongo
-  mongoCollections: (id: string, db: string) => invoke<{ name: string; count: number | null }[]>("mongo_collections", { id, db }),
+  mongoCollections: (id: string, db: string) =>
+    invoke<{ name: string; count: number | null }[]>("mongo_collections", { id, db }),
   mongoFind: (id: string, query: MongoFind) => invoke<MongoPage>("mongo_find", { id, query }),
   mongoAggregate: (id: string, db: string, collection: string, pipeline: unknown, limit?: number) =>
     invoke<Record<string, unknown>[]>("mongo_aggregate", { id, db, collection, pipeline, limit }),
@@ -62,11 +87,17 @@ export const api = {
   mongoDelete: (id: string, db: string, collection: string, docId: unknown) =>
     invoke<number>("mongo_delete", { id, db, collection, docId }),
   mongoCollectionInfo: (id: string, db: string, collection: string) =>
-    invoke<{ stats: unknown; indexes: unknown[]; fields: Record<string, string> }>("mongo_collection_info", { id, db, collection }),
+    invoke<{ stats: unknown; indexes: unknown[]; fields: Record<string, string> }>("mongo_collection_info", {
+      id,
+      db,
+      collection,
+    }),
 
   // settings / kv
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
+  checkUpdate: () => invoke<{ version: string; notes: string | null } | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
   setProviderKey: (providerId: string, key: string | null) => invoke<void>("set_provider_key", { providerId, key }),
   hasProviderKey: (providerId: string) => invoke<boolean>("has_provider_key", { providerId }),
   detectClis: () => invoke<{ claude: string | null; codex: string | null }>("detect_clis"),
@@ -83,8 +114,10 @@ export const api = {
   aiSend: (sessionId: string, text: string) => invoke<void>("ai_send", { sessionId, text }),
   aiCancel: (sessionId: string) => invoke<void>("ai_cancel", { sessionId }),
   aiResolveApproval: (id: string, approved: boolean) => invoke<void>("ai_resolve_approval", { id, approved }),
-  runChart: (connectionId: string, source: unknown) => invoke<QueryResult>("run_chart", { req: { connection_id: connectionId, source } }),
-  appInfo: () => invoke<{ version: string; data_dir: string; mcp_port: number | null; secret_storage: string }>("app_info"),
+  runChart: (connectionId: string, source: unknown) =>
+    invoke<QueryResult>("run_chart", { req: { connection_id: connectionId, source } }),
+  appInfo: () =>
+    invoke<{ version: string; data_dir: string; mcp_port: number | null; secret_storage: string }>("app_info"),
 };
 
 export interface RedisValue {

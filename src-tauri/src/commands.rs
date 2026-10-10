@@ -1,21 +1,26 @@
 //! Tauri command surface. Thin wrappers that delegate to the modules.
 
+use crate::AppState;
 use crate::ai::{self, AgentEvent, ChatSession, Ctx};
 use crate::config::{ConnectionConfig, ConnectionSecrets, Settings};
 use crate::db::mongo::MongoFind;
 use crate::db::redis::ScanResult;
 use crate::db::{Live, QueryResult, RowChange, TableDetails, TableInfo, TableQuery};
 use crate::error::{AppError, Result};
-use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{AppHandle, State};
 
 fn ctx(app: &AppHandle, st: &AppState) -> Ctx {
-    Ctx { app: app.clone(), manager: st.manager.clone(), store: st.store.clone(), agent: st.agent.clone() }
+    Ctx {
+        app: app.clone(),
+        manager: st.manager.clone(),
+        store: st.store.clone(),
+        agent: st.agent.clone(),
+    }
 }
 
-async fn sql<'a>(s: &'a crate::db::Session) -> Result<&'a crate::db::sql::SqlConn> {
+async fn sql(s: &crate::db::Session) -> Result<&crate::db::sql::SqlConn> {
     match &s.live {
         Live::Sql(c) => Ok(c),
         _ => Err(AppError::Msg("not a SQL connection".into())),
@@ -42,7 +47,11 @@ pub fn list_connections(st: State<'_, AppState>) -> Vec<ConnectionConfig> {
 }
 
 #[tauri::command]
-pub fn save_connection(st: State<'_, AppState>, mut config: ConnectionConfig, secrets: Option<ConnectionSecrets>) -> Result<ConnectionConfig> {
+pub fn save_connection(
+    st: State<'_, AppState>,
+    mut config: ConnectionConfig,
+    secrets: Option<ConnectionSecrets>,
+) -> Result<ConnectionConfig> {
     let mut list = st.store.connections();
     let now = chrono::Utc::now().to_rfc3339();
     if config.id.is_empty() {
@@ -80,7 +89,12 @@ pub fn save_connection(st: State<'_, AppState>, mut config: ConnectionConfig, se
 #[tauri::command]
 pub async fn delete_connection(st: State<'_, AppState>, id: String) -> Result<()> {
     st.manager.disconnect(&id).await;
-    let list: Vec<_> = st.store.connections().into_iter().filter(|c| c.id != id).collect();
+    let list: Vec<_> = st
+        .store
+        .connections()
+        .into_iter()
+        .filter(|c| c.id != id)
+        .collect();
     st.store.save_connections(&list)?;
     st.store.delete_connection_secrets(&id)
 }
@@ -104,7 +118,11 @@ pub struct ConnectResult {
 }
 
 #[tauri::command]
-pub async fn test_connection(st: State<'_, AppState>, config: ConnectionConfig, secrets: Option<ConnectionSecrets>) -> Result<String> {
+pub async fn test_connection(
+    st: State<'_, AppState>,
+    config: ConnectionConfig,
+    secrets: Option<ConnectionSecrets>,
+) -> Result<String> {
     let m = crate::db::Manager::new(st.store.dir());
     let mut cfg = config;
     cfg.id = format!("test-{}", uuid::Uuid::new_v4());
@@ -122,9 +140,18 @@ async fn server_version(s: &crate::db::Session) -> Option<String> {
                 crate::config::Driver::Postgres => "SHOW server_version",
                 _ => "SELECT VERSION() AS v",
             };
-            c.run_one(q, 1).await.ok().and_then(|r| r.rows.first().and_then(|row| row.first()).and_then(|v| v.as_str().map(str::to_string)))
+            c.run_one(q, 1).await.ok().and_then(|r| {
+                r.rows
+                    .first()
+                    .and_then(|row| row.first())
+                    .and_then(|v| v.as_str().map(str::to_string))
+            })
         }
-        Live::Redis(r) => r.info().await.ok().and_then(|i| i["redis_version"].as_str().map(|v| format!("Redis {v}"))),
+        Live::Redis(r) => r
+            .info()
+            .await
+            .ok()
+            .and_then(|i| i["redis_version"].as_str().map(|v| format!("Redis {v}"))),
         Live::Mongo(m) => m
             .run_command("admin", &json!({"buildInfo": 1}))
             .await
@@ -134,7 +161,11 @@ async fn server_version(s: &crate::db::Session) -> Option<String> {
 }
 
 #[tauri::command]
-pub async fn connect(st: State<'_, AppState>, id: String, database: Option<String>) -> Result<ConnectResult> {
+pub async fn connect(
+    st: State<'_, AppState>,
+    id: String,
+    database: Option<String>,
+) -> Result<ConnectResult> {
     let mut cfg = st
         .store
         .connections()
@@ -144,15 +175,21 @@ pub async fn connect(st: State<'_, AppState>, id: String, database: Option<Strin
     if let Some(db) = database.filter(|d| !d.is_empty()) {
         cfg.database = db.clone();
         if let Some(url) = &cfg.url
-            && let Ok(mut u) = url::Url::parse(url) {
-                u.set_path(&format!("/{db}"));
-                cfg.url = Some(u.to_string());
-            }
+            && let Ok(mut u) = url::Url::parse(url)
+        {
+            u.set_path(&format!("/{db}"));
+            cfg.url = Some(u.to_string());
+        }
     }
     let secrets = st.store.connection_secrets(&id);
     st.manager.disconnect(&id).await;
     let s = st.manager.connect(cfg, &secrets).await?;
-    Ok(ConnectResult { id: s.config.id.clone(), driver: s.config.driver, database: s.config.database.clone(), server_version: server_version(&s).await })
+    Ok(ConnectResult {
+        id: s.config.id.clone(),
+        driver: s.config.driver,
+        database: s.config.database.clone(),
+        server_version: server_version(&s).await,
+    })
 }
 
 #[tauri::command]
@@ -169,7 +206,12 @@ pub async fn connected_connections(st: State<'_, AppState>) -> Result<Vec<String
 // ----------------------------------------------------------------- sql
 
 #[tauri::command]
-pub async fn run_query(st: State<'_, AppState>, id: String, sql_text: String, limit: Option<u32>) -> Result<Vec<QueryResult>> {
+pub async fn run_query(
+    st: State<'_, AppState>,
+    id: String,
+    sql_text: String,
+    limit: Option<u32>,
+) -> Result<Vec<QueryResult>> {
     let s = st.manager.get(&id).await?;
     let c = sql(&s).await?;
     if s.config.read_only && !crate::db::sql::is_read_only(s.config.driver, &sql_text) {
@@ -183,14 +225,25 @@ pub async fn run_query(st: State<'_, AppState>, id: String, sql_text: String, li
 }
 
 #[tauri::command]
-pub async fn explain_query(st: State<'_, AppState>, id: String, sql_text: String, analyze: bool) -> Result<QueryResult> {
+pub async fn explain_query(
+    st: State<'_, AppState>,
+    id: String,
+    sql_text: String,
+    analyze: bool,
+) -> Result<QueryResult> {
     let s = st.manager.get(&id).await?;
     let c = sql(&s).await?;
     if analyze && !crate::db::sql::is_read_only(s.config.driver, &sql_text) {
-        return Err(AppError::Msg("EXPLAIN ANALYZE executes the statement; refusing to analyze a write.".into()));
+        return Err(AppError::Msg(
+            "EXPLAIN ANALYZE executes the statement; refusing to analyze a write.".into(),
+        ));
     }
-    let stmt = crate::db::sql::split_statements(&sql_text).into_iter().next().unwrap_or_default();
-    c.run_one_read_only(&c.explain_sql(&stmt, analyze), 10_000).await
+    let stmt = crate::db::sql::split_statements(&sql_text)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    c.run_one_read_only(&c.explain_sql(&stmt, analyze), 10_000)
+        .await
 }
 
 #[tauri::command]
@@ -210,13 +263,22 @@ pub async fn list_schemas(st: State<'_, AppState>, id: String) -> Result<Vec<Str
 }
 
 #[tauri::command]
-pub async fn list_tables(st: State<'_, AppState>, id: String, schema: String) -> Result<Vec<TableInfo>> {
+pub async fn list_tables(
+    st: State<'_, AppState>,
+    id: String,
+    schema: String,
+) -> Result<Vec<TableInfo>> {
     let s = st.manager.get(&id).await?;
     sql(&s).await?.tables(&schema).await
 }
 
 #[tauri::command]
-pub async fn table_details(st: State<'_, AppState>, id: String, schema: String, table: String) -> Result<TableDetails> {
+pub async fn table_details(
+    st: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+) -> Result<TableDetails> {
     let s = st.manager.get(&id).await?;
     sql(&s).await?.table_details(&schema, &table).await
 }
@@ -229,14 +291,22 @@ pub struct TablePage {
 }
 
 #[tauri::command]
-pub async fn fetch_table(st: State<'_, AppState>, id: String, query: TableQuery) -> Result<TablePage> {
+pub async fn fetch_table(
+    st: State<'_, AppState>,
+    id: String,
+    query: TableQuery,
+) -> Result<TablePage> {
     let s = st.manager.get(&id).await?;
     let c = sql(&s).await?;
     crate::db::sql::SqlConn::validate_filter(query.filter.as_deref())?;
     let sql_text = c.select_sql(&query);
     let result = c.run_one_read_only(&sql_text, query.limit.max(1)).await?;
     // The exact count is fetched separately (`count_table`) so big tables render immediately.
-    Ok(TablePage { result, total: None, sql_text })
+    Ok(TablePage {
+        result,
+        total: None,
+        sql_text,
+    })
 }
 
 #[tauri::command]
@@ -248,19 +318,43 @@ pub async fn count_table(st: State<'_, AppState>, id: String, query: TableQuery)
 }
 
 #[tauri::command]
-pub async fn preview_changes(st: State<'_, AppState>, id: String, schema: Option<String>, table: String, changes: Vec<RowChange>, types: Option<std::collections::HashMap<String, String>>) -> Result<Vec<String>> {
+pub async fn preview_changes(
+    st: State<'_, AppState>,
+    id: String,
+    schema: Option<String>,
+    table: String,
+    changes: Vec<RowChange>,
+    types: Option<std::collections::HashMap<String, String>>,
+) -> Result<Vec<String>> {
     let s = st.manager.get(&id).await?;
-    Ok(sql(&s).await?.change_sql(schema.as_deref(), &table, &changes, &types.unwrap_or_default()))
+    Ok(sql(&s).await?.change_sql(
+        schema.as_deref(),
+        &table,
+        &changes,
+        &types.unwrap_or_default(),
+    ))
 }
 
 #[tauri::command]
-pub async fn apply_changes(st: State<'_, AppState>, id: String, schema: Option<String>, table: String, changes: Vec<RowChange>, types: Option<std::collections::HashMap<String, String>>) -> Result<u64> {
+pub async fn apply_changes(
+    st: State<'_, AppState>,
+    id: String,
+    schema: Option<String>,
+    table: String,
+    changes: Vec<RowChange>,
+    types: Option<std::collections::HashMap<String, String>>,
+) -> Result<u64> {
     let s = st.manager.get(&id).await?;
     if s.config.read_only {
         return Err(AppError::Msg("connection is read-only".into()));
     }
     let c = sql(&s).await?;
-    let stmts = c.change_sql(schema.as_deref(), &table, &changes, &types.unwrap_or_default());
+    let stmts = c.change_sql(
+        schema.as_deref(),
+        &table,
+        &changes,
+        &types.unwrap_or_default(),
+    );
     c.execute_batch(&stmts).await
 }
 
@@ -270,7 +364,12 @@ pub fn ssh_forget_host(st: State<'_, AppState>, host: String, port: u16) -> Resu
 }
 
 #[tauri::command]
-pub async fn export_rows(path: String, format: String, columns: Vec<String>, rows: Vec<Vec<Value>>) -> Result<usize> {
+pub async fn export_rows(
+    path: String,
+    format: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<Value>>,
+) -> Result<usize> {
     let cell = |v: &Value| match v {
         Value::Null => String::new(),
         Value::String(s) => s.clone(),
@@ -285,7 +384,10 @@ pub async fn export_rows(path: String, format: String, columns: Vec<String>, row
             std::fs::write(&path, serde_json::to_vec_pretty(&objs)?)?;
         }
         "sql" => {
-            let table = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or("export".into());
+            let table = std::path::Path::new(&path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or("export".into());
             let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
             let mut out = String::new();
             for r in &rows {
@@ -298,15 +400,22 @@ pub async fn export_rows(path: String, format: String, columns: Vec<String>, row
                         o => format!("'{}'", cell(o).replace('\'', "''")),
                     })
                     .collect();
-                out.push_str(&format!("INSERT INTO {} ({}) VALUES ({});\n", q(&table), columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", "), vals.join(", ")));
+                out.push_str(&format!(
+                    "INSERT INTO {} ({}) VALUES ({});\n",
+                    q(&table),
+                    columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", "),
+                    vals.join(", ")
+                ));
             }
             std::fs::write(&path, out)?;
         }
         _ => {
             let mut w = csv::Writer::from_path(&path).map_err(|e| AppError::Msg(e.to_string()))?;
-            w.write_record(&columns).map_err(|e| AppError::Msg(e.to_string()))?;
+            w.write_record(&columns)
+                .map_err(|e| AppError::Msg(e.to_string()))?;
             for r in &rows {
-                w.write_record(r.iter().map(cell)).map_err(|e| AppError::Msg(e.to_string()))?;
+                w.write_record(r.iter().map(cell))
+                    .map_err(|e| AppError::Msg(e.to_string()))?;
             }
             w.flush()?;
         }
@@ -317,9 +426,17 @@ pub async fn export_rows(path: String, format: String, columns: Vec<String>, row
 // ----------------------------------------------------------------- redis
 
 #[tauri::command]
-pub async fn redis_scan(st: State<'_, AppState>, id: String, cursor: String, pattern: String, count: u32) -> Result<ScanResult> {
+pub async fn redis_scan(
+    st: State<'_, AppState>,
+    id: String,
+    cursor: String,
+    pattern: String,
+    count: u32,
+) -> Result<ScanResult> {
     let s = st.manager.get(&id).await?;
-    redis(&s)?.scan(&cursor, &pattern, count.clamp(10, 1000)).await
+    redis(&s)?
+        .scan(&cursor, &pattern, count.clamp(10, 1000))
+        .await
 }
 
 #[tauri::command]
@@ -355,28 +472,53 @@ pub async fn redis_info(st: State<'_, AppState>, id: String) -> Result<Value> {
 // ----------------------------------------------------------------- mongo
 
 #[tauri::command]
-pub async fn mongo_collections(st: State<'_, AppState>, id: String, db: String) -> Result<Vec<Value>> {
+pub async fn mongo_collections(
+    st: State<'_, AppState>,
+    id: String,
+    db: String,
+) -> Result<Vec<Value>> {
     let s = st.manager.get(&id).await?;
     mongo(&s)?.collections(&db).await
 }
 
 #[tauri::command]
-pub async fn mongo_find(st: State<'_, AppState>, id: String, query: MongoFind) -> Result<crate::db::mongo::MongoPage> {
+pub async fn mongo_find(
+    st: State<'_, AppState>,
+    id: String,
+    query: MongoFind,
+) -> Result<crate::db::mongo::MongoPage> {
     let s = st.manager.get(&id).await?;
     mongo(&s)?.find(&query).await
 }
 
 #[tauri::command]
-pub async fn mongo_aggregate(st: State<'_, AppState>, id: String, db: String, collection: String, pipeline: Value, limit: Option<usize>) -> Result<Vec<Value>> {
+pub async fn mongo_aggregate(
+    st: State<'_, AppState>,
+    id: String,
+    db: String,
+    collection: String,
+    pipeline: Value,
+    limit: Option<usize>,
+) -> Result<Vec<Value>> {
     let s = st.manager.get(&id).await?;
     if s.config.read_only && crate::db::mongo::pipeline_writes(&pipeline) {
-        return Err(AppError::Msg("connection is read-only ($out/$merge not allowed)".into()));
+        return Err(AppError::Msg(
+            "connection is read-only ($out/$merge not allowed)".into(),
+        ));
     }
-    mongo(&s)?.aggregate(&db, &collection, &pipeline, limit.unwrap_or(500)).await
+    mongo(&s)?
+        .aggregate(&db, &collection, &pipeline, limit.unwrap_or(500))
+        .await
 }
 
 #[tauri::command]
-pub async fn mongo_insert(st: State<'_, AppState>, id: String, db: String, collection: String, document: Value) -> Result<Value> {
+pub async fn mongo_insert(
+    st: State<'_, AppState>,
+    id: String,
+    db: String,
+    collection: String,
+    document: Value,
+) -> Result<Value> {
     let s = st.manager.get(&id).await?;
     if s.config.read_only {
         return Err(AppError::Msg("connection is read-only".into()));
@@ -385,16 +527,31 @@ pub async fn mongo_insert(st: State<'_, AppState>, id: String, db: String, colle
 }
 
 #[tauri::command]
-pub async fn mongo_replace(st: State<'_, AppState>, id: String, db: String, collection: String, doc_id: Value, document: Value) -> Result<u64> {
+pub async fn mongo_replace(
+    st: State<'_, AppState>,
+    id: String,
+    db: String,
+    collection: String,
+    doc_id: Value,
+    document: Value,
+) -> Result<u64> {
     let s = st.manager.get(&id).await?;
     if s.config.read_only {
         return Err(AppError::Msg("connection is read-only".into()));
     }
-    mongo(&s)?.replace(&db, &collection, &doc_id, &document).await
+    mongo(&s)?
+        .replace(&db, &collection, &doc_id, &document)
+        .await
 }
 
 #[tauri::command]
-pub async fn mongo_delete(st: State<'_, AppState>, id: String, db: String, collection: String, doc_id: Value) -> Result<u64> {
+pub async fn mongo_delete(
+    st: State<'_, AppState>,
+    id: String,
+    db: String,
+    collection: String,
+    doc_id: Value,
+) -> Result<u64> {
     let s = st.manager.get(&id).await?;
     if s.config.read_only {
         return Err(AppError::Msg("connection is read-only".into()));
@@ -403,16 +560,28 @@ pub async fn mongo_delete(st: State<'_, AppState>, id: String, db: String, colle
 }
 
 #[tauri::command]
-pub async fn mongo_collection_info(st: State<'_, AppState>, id: String, db: String, collection: String) -> Result<Value> {
+pub async fn mongo_collection_info(
+    st: State<'_, AppState>,
+    id: String,
+    db: String,
+    collection: String,
+) -> Result<Value> {
     let s = st.manager.get(&id).await?;
     mongo(&s)?.collection_info(&db, &collection).await
 }
 
 #[tauri::command]
-pub async fn mongo_command(st: State<'_, AppState>, id: String, db: String, command: Value) -> Result<Value> {
+pub async fn mongo_command(
+    st: State<'_, AppState>,
+    id: String,
+    db: String,
+    command: Value,
+) -> Result<Value> {
     let s = st.manager.get(&id).await?;
     if s.config.read_only && !crate::db::mongo::is_read_only_command(&command) {
-        return Err(AppError::Msg("connection is read-only; only read commands are allowed".into()));
+        return Err(AppError::Msg(
+            "connection is read-only; only read commands are allowed".into(),
+        ));
     }
     mongo(&s)?.run_command(&db, &command).await
 }
@@ -430,13 +599,20 @@ pub fn save_settings(st: State<'_, AppState>, settings: Settings) -> Result<()> 
 }
 
 #[tauri::command]
-pub fn set_provider_key(st: State<'_, AppState>, provider_id: String, key: Option<String>) -> Result<()> {
-    st.store.set_provider_api_key(&provider_id, key.as_deref().filter(|k| !k.is_empty()))
+pub fn set_provider_key(
+    st: State<'_, AppState>,
+    provider_id: String,
+    key: Option<String>,
+) -> Result<()> {
+    st.store
+        .set_provider_api_key(&provider_id, key.as_deref().filter(|k| !k.is_empty()))
 }
 
 #[tauri::command]
 pub fn has_provider_key(st: State<'_, AppState>, provider_id: String) -> bool {
-    st.store.provider_api_key(&provider_id).is_some_and(|k| !k.is_empty())
+    st.store
+        .provider_api_key(&provider_id)
+        .is_some_and(|k| !k.is_empty())
 }
 
 #[tauri::command]
@@ -447,7 +623,10 @@ pub fn detect_clis() -> Value {
 /// Generic JSON document storage for UI-owned data (dashboards, saved queries, history).
 #[tauri::command]
 pub fn kv_get(st: State<'_, AppState>, name: String) -> Value {
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return Value::Null;
     }
     st.store.read::<Value>(&format!("{name}.json"))
@@ -455,7 +634,10 @@ pub fn kv_get(st: State<'_, AppState>, name: String) -> Value {
 
 #[tauri::command]
 pub fn kv_set(st: State<'_, AppState>, name: String, value: Value) -> Result<()> {
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return Err(AppError::Msg("invalid store name".into()));
     }
     st.store.write(&format!("{name}.json"), &value)
@@ -464,7 +646,11 @@ pub fn kv_set(st: State<'_, AppState>, name: String, value: Value) -> Result<()>
 // ----------------------------------------------------------------- ai
 
 #[tauri::command]
-pub fn ai_list_sessions(app: AppHandle, st: State<'_, AppState>, connection_id: Option<String>) -> Vec<ChatSession> {
+pub fn ai_list_sessions(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    connection_id: Option<String>,
+) -> Vec<ChatSession> {
     ctx(&app, &st)
         .list_sessions()
         .into_iter()
@@ -482,7 +668,12 @@ pub fn ai_get_session(app: AppHandle, st: State<'_, AppState>, id: String) -> Re
 }
 
 #[tauri::command]
-pub fn ai_create_session(app: AppHandle, st: State<'_, AppState>, connection_id: String, provider_id: String) -> Result<ChatSession> {
+pub fn ai_create_session(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    connection_id: String,
+    provider_id: String,
+) -> Result<ChatSession> {
     let now = chrono::Utc::now().to_rfc3339();
     let mut s = ChatSession {
         id: uuid::Uuid::new_v4().to_string(),
@@ -505,7 +696,12 @@ pub fn ai_delete_session(st: State<'_, AppState>, id: String) -> Result<()> {
 }
 
 #[tauri::command]
-pub fn ai_set_session_provider(app: AppHandle, st: State<'_, AppState>, id: String, provider_id: String) -> Result<()> {
+pub fn ai_set_session_provider(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    id: String,
+    provider_id: String,
+) -> Result<()> {
     let c = ctx(&app, &st);
     let mut s = c.load_session(&id)?;
     if s.provider_id != provider_id {
@@ -516,16 +712,27 @@ pub fn ai_set_session_provider(app: AppHandle, st: State<'_, AppState>, id: Stri
 }
 
 #[tauri::command]
-pub async fn ai_send(app: AppHandle, st: State<'_, AppState>, session_id: String, text: String) -> Result<()> {
+pub async fn ai_send(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    session_id: String,
+    text: String,
+) -> Result<()> {
     let c = ctx(&app, &st);
     if c.agent.running.lock().unwrap().contains_key(&session_id) {
-        return Err(AppError::Msg("the agent is still working on the previous message".into()));
+        return Err(AppError::Msg(
+            "the agent is still working on the previous message".into(),
+        ));
     }
     let sid = session_id.clone();
     let handle = tokio::spawn(async move {
         let _ = ai::run_turn(c, sid, text).await;
     });
-    st.agent.running.lock().unwrap().insert(session_id, handle.abort_handle());
+    st.agent
+        .running
+        .lock()
+        .unwrap()
+        .insert(session_id, handle.abort_handle());
     Ok(())
 }
 
@@ -535,7 +742,12 @@ pub fn ai_cancel(app: AppHandle, st: State<'_, AppState>, session_id: String) ->
         h.abort();
     }
     let c = ctx(&app, &st);
-    c.emit(&session_id, &AgentEvent::Error { message: "cancelled".into() });
+    c.emit(
+        &session_id,
+        &AgentEvent::Error {
+            message: "cancelled".into(),
+        },
+    );
     if let Ok(s) = c.load_session(&session_id) {
         c.emit(&session_id, &AgentEvent::Done { session: s });
     }
@@ -557,7 +769,11 @@ pub struct ChartRequest {
 }
 
 #[tauri::command]
-pub async fn run_chart(app: AppHandle, st: State<'_, AppState>, req: ChartRequest) -> Result<QueryResult> {
+pub async fn run_chart(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    req: ChartRequest,
+) -> Result<QueryResult> {
     let c = ctx(&app, &st);
     ai::tools::run_chart_source(&c, &req.connection_id, &req.source).await
 }
@@ -570,4 +786,46 @@ pub fn app_info(st: State<'_, AppState>) -> Value {
         "mcp_port": st.agent.mcp_port.get(),
         "secret_storage": st.store.secret_storage(),
     })
+}
+
+// ----------------------------------------------------------------- Updater
+
+#[derive(Serialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: Option<String>,
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>> {
+    use tauri_plugin_updater::UpdaterExt as _;
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateInfo {
+        version: u.version,
+        notes: u.body,
+    }))
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<()> {
+    use tauri_plugin_updater::UpdaterExt as _;
+    let Some(update) = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(());
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
 }
