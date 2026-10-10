@@ -53,7 +53,9 @@ least two tables linked by a foreign key (the demo containers above, or `?mock=1
       typing `topn` offers it; accepting it selects `table`, Tab moves to `col`, then `10`.
 - [ ] Loading that query from the Saved menu does the same placeholder walk; a saved query without `${}` loads as is.
 - [ ] Settings → "Vim keymap" on: `Esc`, `dd`, `ciw` work; `Mod+Enter` still runs; off again restores normal editing.
-- [ ] `Mod+/` and the keyboard button in the query toolbar open the shortcut reference.
+- [ ] `Mod+Shift+/` and the keyboard button in the query toolbar open the shortcut reference; `Mod+/` still
+      toggles a line comment.
+- [ ] SQLite: `customer_id INTEGER REFERENCES customers` (no column list) still yields `customers c ON c.id = …`.
 - [ ] Disconnect/reconnect or `refresh schema` after `CREATE TABLE` makes the new table's columns complete.
 
 ## Findings from the first live run (2026-10-10)

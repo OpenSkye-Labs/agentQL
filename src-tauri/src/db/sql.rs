@@ -896,6 +896,30 @@ impl SqlConn {
                     .ok()
                     .and_then(|r| r.into_iter().next())
                     .and_then(|mut r| opt_str(&mut r, "sql"));
+                // `REFERENCES parent` without a column list reports `to` as NULL: the target is the
+                // parent's primary key.
+                for fk in fk_map.values_mut() {
+                    if !fk.ref_columns.iter().any(String::is_empty) {
+                        continue;
+                    }
+                    let info = self
+                        .rows(&format!(
+                            "PRAGMA {pfx}table_info({})",
+                            self.quote_ident(&fk.ref_table)
+                        ))
+                        .await?;
+                    let mut pk: Vec<(i64, String)> = info
+                        .into_iter()
+                        .filter_map(|mut r| {
+                            let n = take_i64(&mut r, "pk");
+                            (n > 0).then(|| (n, take_str(&mut r, "name")))
+                        })
+                        .collect();
+                    pk.sort();
+                    if pk.len() == fk.ref_columns.len() {
+                        fk.ref_columns = pk.into_iter().map(|(_, n)| n).collect();
+                    }
+                }
                 let mut fks: Vec<_> = fk_map.into_values().collect();
                 fks.sort_by(|a, b| a.name.cmp(&b.name));
                 Ok(TableDetails {

@@ -3,7 +3,7 @@ import { mod } from "../lib/format";
 import { useStore } from "../lib/store";
 import { Dialog, Kbd } from "./ui";
 
-/** Open from anywhere: `window.dispatchEvent(new Event("agentql:shortcuts"))` or Mod+/. */
+/** Open from anywhere: `window.dispatchEvent(new Event("agentql:shortcuts"))` or Mod+Shift+/. */
 export const SHORTCUTS_EVENT = "agentql:shortcuts";
 
 const GROUPS: { title: string; items: [string, string][] }[] = [
@@ -16,7 +16,8 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       ["Ctrl+Space", "Open completion (tables, alias columns, JOINs, keywords, snippets)"],
       ["Tab / Shift+Tab", "Next / previous snippet placeholder; otherwise indent"],
       [`${mod}+Z / ${mod}+Shift+Z`, "Undo / redo"],
-      [`${mod}+/`, "This dialog"],
+      [`${mod}+/`, "Toggle line comment"],
+      [`${mod}+Shift+/`, "This dialog"],
     ],
   },
   {

@@ -326,3 +326,43 @@ async fn mongo() {
         .await
         .unwrap();
 }
+
+/// Needs no container: SQLite resolves `REFERENCES parent` (no column list) to the parent's primary key
+/// in both `table_details` and the schema-wide catalog used by editor completion.
+#[tokio::test]
+async fn sqlite_catalog_implicit_fk_target() {
+    let path = std::env::temp_dir().join("agentql-catalog.sqlite");
+    let _ = std::fs::remove_file(&path);
+    let mut c = cfg(Driver::Sqlite, 0, "", "");
+    c.file_path = Some(path.to_string_lossy().into_owned());
+    let m = Manager::new(std::env::temp_dir().as_path());
+    let sess = m.connect(c, &ConnectionSecrets::default()).await.unwrap();
+    let Live::Sql(db) = &sess.live else { panic!() };
+    db.run(
+        "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT); \
+         CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER REFERENCES customers, \
+         other_id INTEGER REFERENCES customers(id))",
+        10,
+    )
+    .await
+    .unwrap();
+    let cat = db.schema_catalog("main").await.unwrap();
+    let mut targets: Vec<(String, String)> = cat
+        .foreign_keys
+        .iter()
+        .map(|f| (f.columns.join(","), f.ref_columns.join(",")))
+        .collect();
+    targets.sort();
+    assert_eq!(
+        targets,
+        vec![
+            ("customer_id".to_string(), "id".to_string()),
+            ("other_id".to_string(), "id".to_string())
+        ]
+    );
+    assert_eq!(
+        cat.columns.iter().filter(|c| c.table == "orders").count(),
+        3
+    );
+    let _ = std::fs::remove_file(&path);
+}

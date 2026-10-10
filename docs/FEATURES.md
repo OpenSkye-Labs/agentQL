@@ -61,7 +61,7 @@ Append-only record of shipped behaviour. Newest at the bottom.
   current clause, and saved-query snippets offered by trigger word; checklist in docs/TESTING.md, self-check in
   `pnpm check`.
 - Vim keymap toggle (`@replit/codemirror-vim`) in Settings → General, persisted as `editor_vim`; keyboard shortcut
-  reference dialog on `Mod+/` and from the query toolbar.
+  reference dialog on `Mod+Shift+/` (Mod+/ stays CodeMirror's comment toggle) and from the query toolbar.
 - Snippets: saved queries may contain CodeMirror placeholders (`${1:table}`); loading one from the Saved menu or
   accepting its trigger in completion walks the placeholders with Tab. The save dialog replaces `window.prompt` and
   takes an optional trigger word. Key rebinding stays out (roadmap "Out").

@@ -99,4 +99,11 @@ Round 2: 3 findings (all P2), all fixed with self-checks:
 | 5   | P2  | `FROM audit.orders o JOIN` suggested a bare `customers` although the user is outside the search path      | Join targets stay schema-qualified whenever the source reference was qualified or schemas differ |
 | 6   | P2  | The alias regex consumed `JOIN` as a (rejected) alias, so `FROM orders JOIN customers c` lost `customers` | Alias group refuses clause keywords with a negative lookahead; scan resumes at the keyword       |
 
+Round 3: 2 findings (P2), both fixed:
+
+| #   | Sev | Finding                                                                                         | Resolution                                                                                                                  |
+| --- | --- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 7   | P2  | `Mod+/` is CodeMirror's comment toggle, so opening the shortcut dialog also commented the query | Dialog moved to `Mod+Shift+/`; the reference lists both                                                                     |
+| 8   | P2  | SQLite `REFERENCES parent` without a column list yields an empty target column → `c."" = o.x`   | `table_details` resolves the parent's primary key (shared by TableTab and the catalog); non-ignored test in `tests/live.rs` |
+
 Skipped: none.

@@ -63,7 +63,8 @@ export default function App() {
       } else if (e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
-      } else if (e.key === "/") {
+      } else if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+        // Mod+/ alone is CodeMirror's comment toggle, so the reference lives on Mod+Shift+/.
         e.preventDefault();
         window.dispatchEvent(new Event(SHORTCUTS_EVENT));
       } else if (/^[1-9]$/.test(e.key)) {

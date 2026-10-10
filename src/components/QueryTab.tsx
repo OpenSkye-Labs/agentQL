@@ -238,7 +238,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
             <Bot size={13} />
           </Button>
         </Tooltip>
-        <Tooltip label={`Keyboard shortcuts (${mod}+/)`}>
+        <Tooltip label={`Keyboard shortcuts (${mod}+Shift+/)`}>
           <Button
             size="sm"
             variant="ghost"
