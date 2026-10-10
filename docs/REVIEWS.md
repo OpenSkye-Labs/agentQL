@@ -128,3 +128,8 @@ Round 6: 2 findings (P2), both fixed:
 
 Round 7: clean ("No actionable regressions were identified"). Live Postgres/MySQL checks of the catalog SQL still to
 be done against the docs/TESTING.md containers (no Docker on the authoring machine).
+
+CodeRabbit on PR #8 (3 minor), all fixed: MySQL FK catalog no longer uses `GROUP_CONCAT` (one row per key column,
+folded in Rust → no `group_concat_max_len` truncation); `submitSave` toasts on failure and closes only after the
+save succeeds; catalog responses carry a per-connection/schema sequence so a slow older response cannot overwrite a
+newer one after `refreshSchema` or reconnect. Codex follow-up: a pending guard disables Save/Enter while the write is in flight.

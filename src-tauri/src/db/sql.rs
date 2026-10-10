@@ -950,7 +950,7 @@ impl SqlConn {
     /// tens of thousands of columns ever shows up.
     pub async fn schema_catalog(&self, schema: &str) -> Result<SchemaCatalog> {
         let s = self.literal(&Value::String(schema.into()));
-        let (cols, fks) = match self.driver {
+        let (cols, foreign_keys) = match self.driver {
             Driver::Postgres => (
                 self.rows(&format!(
                     "SELECT c.relname AS tbl, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS data_type \
@@ -968,7 +968,16 @@ impl SqlConn {
                      JOIN pg_class rc ON rc.oid = con.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace \
                      WHERE con.contype = 'f' AND n.nspname = {s} ORDER BY c.relname, con.conname"
                 ))
-                .await?,
+                .await?
+                .into_iter()
+                .map(|mut r| CatalogForeignKey {
+                    table: take_str(&mut r, "tbl"),
+                    columns: take_names(&mut r, "cols"),
+                    ref_schema: opt_str(&mut r, "ref_schema"),
+                    ref_table: take_str(&mut r, "ref_table"),
+                    ref_columns: take_names(&mut r, "ref_cols"),
+                })
+                .collect(),
             ),
             Driver::Mysql | Driver::Mariadb => (
                 self.rows(&format!(
@@ -976,14 +985,42 @@ impl SqlConn {
                      FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = {s} ORDER BY TABLE_NAME, ORDINAL_POSITION"
                 ))
                 .await?,
+                // One row per key column, folded here: no GROUP_CONCAT, so no group_concat_max_len
+                // truncation and no separator that could appear in a name.
                 self.rows(&format!(
-                    "SELECT TABLE_NAME AS tbl, GROUP_CONCAT(COLUMN_NAME ORDER BY ORDINAL_POSITION SEPARATOR '{US}') AS cols, \
-                     REFERENCED_TABLE_SCHEMA AS ref_schema, REFERENCED_TABLE_NAME AS ref_table, \
-                     GROUP_CONCAT(REFERENCED_COLUMN_NAME ORDER BY ORDINAL_POSITION SEPARATOR '{US}') AS ref_cols \
+                    "SELECT TABLE_NAME AS tbl, CONSTRAINT_NAME AS name, COLUMN_NAME AS col, \
+                     REFERENCED_TABLE_SCHEMA AS ref_schema, REFERENCED_TABLE_NAME AS ref_table, REFERENCED_COLUMN_NAME AS ref_col \
                      FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = {s} AND REFERENCED_TABLE_NAME IS NOT NULL \
-                     GROUP BY TABLE_NAME, CONSTRAINT_NAME, REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME ORDER BY TABLE_NAME, CONSTRAINT_NAME"
+                     ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION"
                 ))
-                .await?,
+                .await?
+                .into_iter()
+                .fold(Vec::<(String, CatalogForeignKey)>::new(), |mut acc, mut r| {
+                    let table = take_str(&mut r, "tbl");
+                    let name = take_str(&mut r, "name");
+                    let col = take_str(&mut r, "col");
+                    let ref_col = take_str(&mut r, "ref_col");
+                    match acc.last_mut() {
+                        Some((n, fk)) if *n == name && fk.table == table => {
+                            fk.columns.push(col);
+                            fk.ref_columns.push(ref_col);
+                        }
+                        _ => acc.push((
+                            name,
+                            CatalogForeignKey {
+                                table,
+                                columns: vec![col],
+                                ref_schema: opt_str(&mut r, "ref_schema"),
+                                ref_table: take_str(&mut r, "ref_table"),
+                                ref_columns: vec![ref_col],
+                            },
+                        )),
+                    }
+                    acc
+                })
+                .into_iter()
+                .map(|(_, fk)| fk)
+                .collect(),
             ),
             Driver::Sqlite => {
                 // ponytail: one pragma pair per table (local file, cheap); no bulk catalog in SQLite.
@@ -1017,16 +1054,7 @@ impl SqlConn {
                     data_type: take_str(&mut r, "data_type"),
                 })
                 .collect(),
-            foreign_keys: fks
-                .into_iter()
-                .map(|mut r| CatalogForeignKey {
-                    table: take_str(&mut r, "tbl"),
-                    columns: take_names(&mut r, "cols"),
-                    ref_schema: opt_str(&mut r, "ref_schema"),
-                    ref_table: take_str(&mut r, "ref_table"),
-                    ref_columns: take_names(&mut r, "ref_cols"),
-                })
-                .collect(),
+            foreign_keys,
         })
     }
 
@@ -1172,18 +1200,10 @@ fn take_bool(r: &mut HashMap<String, Value>, k: &str) -> bool {
         None => false,
     }
 }
-/// ASCII unit separator: joins identifier lists on MySQL, where a comma could be part of a name.
-const US: char = '\u{1f}';
-
-/// Identifier list as a Postgres array (JSON array) or a `US`-joined string (MySQL).
+/// Identifier list returned as a Postgres array (decoded to a JSON array).
 fn take_names(r: &mut HashMap<String, Value>, k: &str) -> Vec<String> {
     match r.remove(k) {
         Some(Value::Array(a)) => a.into_iter().filter_map(json_str).collect(),
-        Some(Value::String(s)) => s
-            .split(US)
-            .filter(|p| !p.is_empty())
-            .map(str::to_string)
-            .collect(),
         _ => vec![],
     }
 }

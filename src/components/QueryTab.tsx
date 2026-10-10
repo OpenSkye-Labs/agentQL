@@ -38,6 +38,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const vim = useStore((s) => !!s.settings.editor_vim);
   const editor = useRef<SqlEditorHandle>(null);
   const [saveForm, setSaveForm] = useState<{ name: string; trigger: string } | null>(null);
+  const [saving, setSaving] = useState(false);
   const [results, setResults] = useState<QueryResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -169,16 +170,19 @@ export function QueryTab({ tab }: { tab: QTab }) {
 
   const submitSave = () => {
     const sql = editor.current?.getValue() ?? "";
-    if (!saveForm || !conn || !saveForm.name.trim() || !sql.trim()) return;
-    void saveQuery({
+    if (saving || !saveForm || !conn || !saveForm.name.trim() || !sql.trim()) return;
+    setSaving(true);
+    saveQuery({
       id: crypto.randomUUID(),
       connection_id: conn.id,
       name: saveForm.name.trim(),
       sql,
       trigger: saveForm.trigger.trim() || null,
       created_at: new Date().toISOString(),
-    });
-    setSaveForm(null);
+    })
+      .then(() => setSaveForm(null))
+      .catch((e) => toast(errMsg(e), "error"))
+      .finally(() => setSaving(false));
   };
 
   if (!conn) return <Empty title="Connection removed" />;
@@ -431,7 +435,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
         footer={
           <>
             <Button onClick={() => setSaveForm(null)}>Cancel</Button>
-            <Button variant="primary" disabled={!saveForm?.name.trim()} onClick={submitSave}>
+            <Button variant="primary" disabled={saving || !saveForm?.name.trim()} onClick={submitSave}>
               Save
             </Button>
           </>

@@ -89,6 +89,8 @@ interface State {
 
 let tabSeq = 1;
 let toastSeq = 1;
+/** Latest catalog request per connection+schema, so a slow older response cannot overwrite a newer one. */
+const catalogSeq = new Map<string, number>();
 const uid = () => `${Date.now().toString(36)}-${(tabSeq++).toString(36)}`;
 
 const DEFAULT_SETTINGS: Settings = { providers: [], row_limit: 1000, agent_allow_writes: false, theme: "system" };
@@ -191,12 +193,16 @@ export const useStore = create<State>((set, get) => ({
         return { live: { ...s.live, [connId]: { ...l, tables: { ...l.tables, [schema]: tables } } } };
       });
       // Completion catalog is best-effort and must neither delay nor break the sidebar.
+      const key = `${connId}/${schema}`;
+      const seq = (catalogSeq.get(key) ?? 0) + 1;
+      catalogSeq.set(key, seq);
       void api
         .schemaCatalog(connId, schema)
         .then((catalog) =>
           set((s) => {
             const l = s.live[connId];
-            return l ? { live: { ...s.live, [connId]: { ...l, catalog: { ...l.catalog, [schema]: catalog } } } } : {};
+            if (!l || catalogSeq.get(key) !== seq) return {};
+            return { live: { ...s.live, [connId]: { ...l, catalog: { ...l.catalog, [schema]: catalog } } } };
           }),
         )
         .catch((e) => console.warn("schema catalog", errMsg(e)));
