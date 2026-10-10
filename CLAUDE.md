@@ -53,8 +53,9 @@ docs/             PLAN.md, ARCHITECTURE.md, TASKS.md, FEATURES.md, REVIEWS.md
 
 ## Workflow
 
-- `main` is protected: no direct pushes, squash-merge only, needs a green `ci-ok` check and a code-owner review.
-  Work on a branch (`feat/...`, `fix/...`, or the maintainer's `dev`), push, open a PR. See CONTRIBUTING.md.
+- `dev` is the default/integration branch; `main` is the release branch and only moves by PR from `dev`.
+  Both are protected: no direct pushes, squash-merge only, green `ci-ok` check and a code-owner review.
+  Work on a branch off `dev` (`feat/...`, `fix/...`), push, open a PR against `dev`. See CONTRIBUTING.md.
 - Frontend quality gates: `pnpm format:check` (oxfmt), `pnpm lint` (oxlint), `pnpm typecheck`, `pnpm check`, `pnpm build`.
   Rust: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. CI runs only the stack you touched.
 - Version lives in package.json, tauri.conf.json and Cargo.toml; change it with `pnpm version:set X.Y.Z`.

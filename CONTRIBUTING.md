@@ -14,9 +14,10 @@ pnpm dev                # browser-only UI with sample data: open http://localhos
 
 ## Branches and pull requests
 
-- `main` is protected. Nobody pushes to it directly; every change lands through a pull request with a passing CI run and a maintainer approval.
-- Branch from `main`: `feat/<topic>`, `fix/<topic>`, `chore/<topic>`. Fork the repo if you don't have write access.
-- Keep PRs focused on one change. Squash-merge is the only merge method, so the PR title becomes the commit message on `main`. Write it as `type: short imperative summary` (`feat: redis TTL column`, `fix: grid scroll jump on sort`).
+- `dev` is the default branch and where day-to-day work lands. `main` is the release branch and only moves by a pull request from `dev`.
+- Both branches are protected. Nobody pushes to them directly; every change lands through a pull request with a passing CI run and a maintainer approval.
+- Branch from `dev`: `feat/<topic>`, `fix/<topic>`, `chore/<topic>`, and open your PR against `dev`. Fork the repo if you don't have write access.
+- Keep PRs focused on one change. Squash-merge is the only merge method, so the PR title becomes the commit message. Write it as `type: short imperative summary` (`feat: redis TTL column`, `fix: grid scroll jump on sort`).
 - Fill in the PR template. Say what changed and how you verified it, and attach a screenshot for UI changes.
 - Record notable behaviour in `docs/FEATURES.md` as part of the same PR.
 
@@ -55,8 +56,9 @@ AgentQL uses [semantic versioning](https://semver.org) with `v`-prefixed tags. M
 
 ```bash
 pnpm version:set 0.2.0                 # updates package.json, tauri.conf.json, Cargo.toml, Cargo.lock
-git commit -am "chore: release v0.2.0" # open a PR, merge it
-git tag v0.2.0 && git push origin v0.2.0
+git commit -am "chore: release v0.2.0" # PR into dev, merge it
+# open a PR from dev into main, merge it, then tag main:
+git checkout main && git pull && git tag v0.2.0 && git push origin v0.2.0
 ```
 
 Pushing the tag builds installers for macOS (Apple Silicon and Intel), Linux and Windows and attaches them to a draft GitHub Release with auto-generated notes. A maintainer reviews the draft and publishes it.
