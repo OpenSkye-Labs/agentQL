@@ -3,8 +3,9 @@ import { clsx } from "clsx";
 import { ChevronLeft, ChevronRight, Filter, Plus, RefreshCw, Save, Trash2, Undo2, Copy, Bot } from "lucide-react";
 import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
-import type { Cell, QueryResult, RowChange, TableDetails } from "../lib/types";
+import type { Cell, ForeignKeyInfo, QueryResult, RowChange, TableDetails } from "../lib/types";
 import { fmtCount, fmtDuration } from "../lib/format";
+import { keyFilter } from "../lib/sql";
 import { ResultGrid, type GridEdit } from "./ResultGrid";
 import { Button, Dialog, Input, Select, Spinner, Tooltip, Empty } from "./ui";
 
@@ -15,12 +16,15 @@ export function TableTab({ tab }: { tab: TTab }) {
   const conn = useConnection(tab.connectionId);
   const toast = useStore((s) => s.toast);
   const openTab = useStore((s) => s.openTab);
+  const updateTab = useStore((s) => s.updateTab);
   const askAssistant = useStore((s) => s.askAssistant);
   const [view, setView] = useState<"data" | "structure">("data");
   const [details, setDetails] = useState<TableDetails | null>(null);
   const [page, setPage] = useState<{ result: QueryResult; total: number | null; sql: string } | null>(null);
-  const [filter, setFilter] = useState("");
-  const [filterDraft, setFilterDraft] = useState("");
+  // The filter lives on the tab so an FK jump can re-target an already open table.
+  const filter = tab.filter ?? "";
+  const setFilter = (f: string) => updateTab(tab.id, { filter: f });
+  const [filterDraft, setFilterDraft] = useState(filter);
   const [sort, setSort] = useState<{ column: string; desc: boolean } | null>(null);
   const [limit, setLimit] = useState(250);
   const [offset, setOffset] = useState(0);
@@ -77,6 +81,11 @@ export function TableTab({ tab }: { tab: TTab }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setFilterDraft(filter);
+    setOffset(0);
+  }, [filter]);
 
   useEffect(() => {
     if (!conn) return;
@@ -148,6 +157,34 @@ export function TableTab({ tab }: { tab: TTab }) {
     }
   };
 
+  // Publish dirtiness so FK jumps into this tab can ask before load() discards the edits.
+  const dirty = changes.length > 0;
+  useEffect(() => {
+    if (!!tab.dirty !== dirty) updateTab(tab.id, { dirty });
+  }, [dirty, tab.dirty, tab.id, updateTab]);
+
+  const followFk = (fk: ForeignKeyInfo, key: Record<string, Cell>) => {
+    if (!conn) return;
+    const f = keyFilter(conn.driver, key);
+    if (!f) return;
+    const schema = fk.ref_schema ?? tab.schema;
+    const st = useStore.getState();
+    const target = st.tabs.find(
+      (t) => t.kind === "table" && t.connectionId === conn.id && t.schema === schema && t.table === fk.ref_table,
+    );
+    if (target?.kind === "table" && target.dirty && !confirm(`Discard pending changes in ${fk.ref_table}?`)) return;
+    const info = st.live[conn.id]?.tables[schema]?.find((t) => t.name === fk.ref_table);
+    openTab({
+      kind: "table",
+      connectionId: conn.id,
+      title: fk.ref_table,
+      schema,
+      table: fk.ref_table,
+      tableKind: info?.kind ?? "table",
+      filter: f,
+    });
+  };
+
   const apply = async () => {
     if (!conn) return;
     setApplying(true);
@@ -200,6 +237,7 @@ export function TableTab({ tab }: { tab: TTab }) {
               className="ml-2 flex flex-1 items-center gap-1"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (dirty && !confirm(`Discard pending changes in ${tab.table}?`)) return;
                 setOffset(0);
                 setFilter(filterDraft.trim());
               }}
@@ -303,6 +341,8 @@ export function TableTab({ tab }: { tab: TTab }) {
                   );
                 }}
                 primaryKeys={pks}
+                foreignKeys={details?.foreign_keys}
+                onFollowFk={followFk}
               />
             ) : (
               <div className="flex h-full items-center justify-center gap-2 text-xs text-muted">

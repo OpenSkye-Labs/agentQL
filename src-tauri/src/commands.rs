@@ -5,7 +5,7 @@ use crate::ai::{self, AgentEvent, ChatSession, Ctx};
 use crate::config::{ConnectionConfig, ConnectionSecrets, Settings};
 use crate::db::mongo::MongoFind;
 use crate::db::redis::ScanResult;
-use crate::db::{Live, QueryResult, RowChange, TableDetails, TableInfo, TableQuery};
+use crate::db::{Live, QueryResult, RowChange, SchemaObject, TableDetails, TableInfo, TableQuery};
 use crate::error::{AppError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -281,6 +281,27 @@ pub async fn table_details(
 ) -> Result<TableDetails> {
     let s = st.manager.get(&id).await?;
     sql(&s).await?.table_details(&schema, &table).await
+}
+
+#[tauri::command]
+pub async fn schema_objects(
+    st: State<'_, AppState>,
+    id: String,
+    schema: String,
+) -> Result<Vec<SchemaObject>> {
+    let s = st.manager.get(&id).await?;
+    sql(&s).await?.schema_objects(&schema).await
+}
+
+/// Write base64-encoded bytes to a path the user picked in a save dialog (SVG/PNG exports).
+#[tauri::command]
+pub async fn save_file(path: String, data: String) -> Result<()> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| AppError::Msg(e.to_string()))?;
+    std::fs::write(&path, bytes)?;
+    Ok(())
 }
 
 #[derive(Serialize)]

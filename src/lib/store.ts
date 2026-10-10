@@ -4,7 +4,19 @@ import type { ChatSession, ConnectionConfig, Dashboard, HistoryEntry, SavedQuery
 
 export type Tab =
   | { id: string; kind: "query"; connectionId: string; title: string; sql: string; pinned?: boolean }
-  | { id: string; kind: "table"; connectionId: string; title: string; schema: string; table: string; tableKind: string }
+  | {
+      id: string;
+      kind: "table";
+      connectionId: string;
+      title: string;
+      schema: string;
+      table: string;
+      tableKind: string;
+      /** WHERE clause body applied to the grid (set by FK jumps, kept in sync by the tab). */
+      filter?: string;
+      /** Unapplied grid edits exist (published by TableTab so a jump can ask before discarding them). */
+      dirty?: boolean;
+    }
   | { id: string; kind: "chat"; connectionId: string; title: string; sessionId: string }
   | { id: string; kind: "dashboard"; connectionId: string; title: string; dashboardId: string }
   | { id: string; kind: "redis"; connectionId: string; title: string }
@@ -223,7 +235,12 @@ export const useStore = create<State>((set, get) => ({
       }
     });
     if (existing) {
-      set({ activeTab: existing.id });
+      // Re-opening a table with a filter (FK jump) re-targets the already open tab.
+      const patch = tab.kind === "table" && tab.filter !== undefined ? { filter: tab.filter } : {};
+      set((s) => ({
+        activeTab: existing.id,
+        tabs: s.tabs.map((t) => (t.id === existing.id ? ({ ...t, ...patch } as Tab) : t)),
+      }));
       return existing.id;
     }
     const id = tab.id ?? uid();

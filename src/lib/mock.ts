@@ -67,8 +67,8 @@ const tables: TableInfo[] = [
 ].map(([name, n]) => ({ schema: "public", name: String(name), kind: "table", row_estimate: Number(n) }));
 tables.push({ schema: "public", name: "v_recent_claims", kind: "view", row_estimate: null });
 
-const columns = ["id", "name", "email", "status", "score", "tags", "createdAt", "meta"];
-const types = ["uuid", "text", "text", "text", "numeric", "text[]", "timestamptz", "jsonb"];
+const columns = ["id", "name", "email", "status", "score", "tags", "createdAt", "meta", "personId"];
+const types = ["uuid", "text", "text", "text", "numeric", "text[]", "timestamptz", "jsonb", "uuid"];
 const names = [
   "Ada Lovelace",
   "Grace Hopper",
@@ -92,6 +92,9 @@ function rows(n: number) {
       .replace("T", " ")
       .replace("Z", "+00"),
     { source: ["import", "api", "manual"][i % 3], attempts: i % 7 },
+    i % 9 === 0
+      ? null
+      : `8c2d${(2000 + (i % 40)).toString(16)}-1b3e-4c5d-8e9f-${(200000000000 + (i % 40) * 104729).toString().slice(0, 12)}`,
   ]);
 }
 const result = (n: number, stmt = 'SELECT * FROM "Candidate"'): QueryResult => ({

@@ -3,8 +3,8 @@
 
 use super::value::{mysql_value, pg_value, sqlite_value};
 use super::{
-    Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult, RowChange, TableDetails, TableInfo,
-    TableQuery,
+    Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult, RowChange, SchemaObject,
+    TableDetails, TableInfo, TableQuery,
 };
 use crate::config::{ConnectionConfig, ConnectionSecrets, Driver};
 use crate::error::{AppError, Result};
@@ -898,6 +898,26 @@ impl SqlConn {
                     .and_then(|mut r| opt_str(&mut r, "sql"));
                 let mut fks: Vec<_> = fk_map.into_values().collect();
                 fks.sort_by(|a, b| a.name.cmp(&b.name));
+                // `REFERENCES parent` without a column list reports `to` as NULL: resolve it to parent's PK.
+                for fk in fks
+                    .iter_mut()
+                    .filter(|fk| fk.ref_columns.iter().any(String::is_empty))
+                {
+                    let mut pk: Vec<(i64, String)> = self
+                        .rows(&format!(
+                            "PRAGMA {pfx}table_info({})",
+                            self.quote_ident(&fk.ref_table)
+                        ))
+                        .await?
+                        .into_iter()
+                        .filter_map(|mut r| {
+                            let n = take_i64(&mut r, "pk");
+                            (n > 0).then(|| (n, take_str(&mut r, "name")))
+                        })
+                        .collect();
+                    pk.sort();
+                    fk.ref_columns = pk.into_iter().map(|(_, n)| n).collect();
+                }
                 Ok(TableDetails {
                     columns: cols
                         .into_iter()
@@ -919,6 +939,18 @@ impl SqlConn {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Every table/view in `schema` with columns, indexes, FKs and DDL.
+    // ponytail: N+1 introspection (a few queries per table); switch to bulk information_schema
+    // queries if schemas with hundreds of tables feel slow.
+    pub async fn schema_objects(&self, schema: &str) -> Result<Vec<SchemaObject>> {
+        let mut out = vec![];
+        for table in self.tables(schema).await? {
+            let details = self.table_details(schema, &table.name).await?;
+            out.push(SchemaObject { table, details });
+        }
+        Ok(out)
     }
 
     fn synth_ddl(

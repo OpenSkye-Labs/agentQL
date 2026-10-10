@@ -78,7 +78,7 @@ M3 Data dictionary (M)
 
 M4 Schema tools (M)
 
-- [ ] Foreign-key click-through in the grid
+- [x] Foreign-key click-through in the grid
 - [ ] ER diagram per schema (auto-layout, pan/zoom, export SVG/PNG)
 - [ ] Schema diff between two connections/databases, copy as migration
 

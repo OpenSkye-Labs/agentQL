@@ -28,6 +28,7 @@ import { api, errMsg } from "../lib/api";
 import { driverLabel, isSql, type ConnectionConfig, type TableInfo } from "../lib/types";
 import { Button, ContextMenu, Menu, Spinner, Tooltip } from "./ui";
 import { fmtCount } from "../lib/format";
+import { quoteIdent } from "../lib/sql";
 
 type Items = React.ComponentProps<typeof ContextMenu>["items"];
 /** One Radix context menu for the whole tree; rows just publish their items on right-click. */
@@ -383,7 +384,7 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
   const openTab = useStore((s) => s.openTab);
   const askAssistant = useStore((s) => s.askAssistant);
   const f = filter.trim().toLowerCase();
-  const q = (name: string) => (conn.driver === "mysql" || conn.driver === "mariadb" ? `\`${name}\`` : `"${name}"`);
+  const q = (name: string) => quoteIdent(conn.driver, name);
   const qualified = (t: TableInfo) =>
     conn.driver === "sqlite" && t.schema === "main" ? q(t.name) : `${q(t.schema)}.${q(t.name)}`;
 

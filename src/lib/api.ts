@@ -9,6 +9,7 @@ import type {
   QueryResult,
   RowChange,
   ScanResult,
+  SchemaObject,
   Settings,
   TableDetails,
   TableInfo,
@@ -65,6 +66,9 @@ export const api = {
   sshForgetHost: (host: string, port: number) => invoke<void>("ssh_forget_host", { host, port }),
   exportRows: (path: string, format: "csv" | "json" | "sql", columns: string[], rows: Cell[][]) =>
     invoke<number>("export_rows", { path, format, columns, rows }),
+  schemaObjects: (id: string, schema: string) => invoke<SchemaObject[]>("schema_objects", { id, schema }),
+  /** `data` is base64. */
+  saveFile: (path: string, data: string) => invoke<void>("save_file", { path, data }),
 
   // redis
   redisScan: (id: string, cursor: string, pattern: string, count = 200) =>

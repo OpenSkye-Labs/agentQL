@@ -80,3 +80,12 @@ pie charts cap at 7 slices + Other. Added per-tab error boundaries.
 `keyring` (async-secret-service via zbus) blocks on its own runtime; calling it inside an async Tauri command panicked the
 tokio worker (“Cannot start a runtime from within a runtime”), so `connect` never returned. All keychain calls now run on a
 plain thread (`off_runtime` in config.rs). Added an ignored latency test (`cargo test --lib keyring_latency -- --ignored`).
+
+## 2026-10-11 — M4 FK click-through (Codex, `codex exec review --uncommitted`, 2 rounds)
+
+| #   | Sev | Finding                                                                                  | Resolution                                                                                                   |
+| --- | --- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 1   | P1  | FK jump into an already open table re-targeted its filter and `load()` dropped pending edits | Table tabs publish `dirty`; the jump (and the filter form) asks before discarding                          |
+| 2   | P2  | SQLite `REFERENCES parent` without a column list yields an empty `ref_columns` entry       | Backend resolves omitted targets to the parent's primary key (`PRAGMA table_info`); grid skips malformed FKs |
+| 3   | P2  | Binary key cells (`{ "$bytes": … }`) were quoted as JSON text                                | `sqlLiteral` renders `decode(…,'base64')` / `FROM_BASE64` / `X'…'` like the backend; self-checks added      |
+| 4   | P2  | Postgres array-valued keys serialised as JSON                                              | Skipped: FKs cannot reference array columns in practice; noted with a `ponytail:` comment                   |

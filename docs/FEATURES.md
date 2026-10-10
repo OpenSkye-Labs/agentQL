@@ -51,3 +51,7 @@ Append-only record of shipped behaviour. Newest at the bottom.
   Later / Update now; after an update installs, "What's new in vX.Y.Z" shows that version's section of the bundled CHANGELOG.md once.
 - Windows build fix: ssh-agent auth uses the OpenSSH agent named pipe on Windows (russh `connect_named_pipe`); CI now runs
   `cargo check` on Windows and macOS for Rust changes so cross-platform compile errors fail the PR, not the release build.
+- Foreign-key click-through (M4): in a table tab, cells of FK columns show a jump arrow on hover (and an "Open referenced
+  row in …" context-menu item) that opens the referenced table filtered to that key (`"id" = …`). The filter now lives on
+  the tab, so jumping into an already open table re-targets it; tabs with pending edits ask before discarding them.
+  SQLite FKs declared without a target column list resolve to the parent's primary key.
