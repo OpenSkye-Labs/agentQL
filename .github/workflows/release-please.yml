@@ -3,6 +3,7 @@ name: Release Please
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,6 +20,8 @@ jobs:
           # Optional: a fine-grained PAT (contents + pull-requests: write) lets CI run on the release PR.
           # With the default token, GitHub does not trigger workflows on bot-created PRs.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # Defaults to the repo's default branch (dev); releases are cut from main.
+          target-branch: main
 
       # Tags created by the workflow token do not trigger other workflows, so start the build explicitly.
       - if: steps.rp.outputs.release_created == 'true'
