@@ -51,3 +51,17 @@ Append-only record of shipped behaviour. Newest at the bottom.
   Later / Update now; after an update installs, "What's new in vX.Y.Z" shows that version's section of the bundled CHANGELOG.md once.
 - Windows build fix: ssh-agent auth uses the OpenSSH agent named pipe on Windows (russh `connect_named_pipe`); CI now runs
   `cargo check` on Windows and macOS for Rust changes so cross-platform compile errors fail the PR, not the release build.
+
+## 2026-10-11
+
+- Editor ergonomics (M7): a `schema_catalog` command fetches every column and foreign key of a schema in one round
+  trip (per-table pragmas on SQLite), loaded next to the sidebar's table list. With columns in the namespace,
+  `@codemirror/lang-sql` resolves `FROM orders o` so `o.` lists the `orders` columns. `src/lib/completion.ts` adds JOIN
+  suggestions from forward and reverse foreign keys (`customers c ON c.id = o.customer_id`), keywords ranked by the
+  current clause, and saved-query snippets offered by trigger word; checklist in docs/TESTING.md, self-check in
+  `pnpm check`.
+- Vim keymap toggle (`@replit/codemirror-vim`) in Settings → General, persisted as `editor_vim`; keyboard shortcut
+  reference dialog on `Mod+/` and from the query toolbar.
+- Snippets: saved queries may contain CodeMirror placeholders (`${1:table}`); loading one from the Saved menu or
+  accepting its trigger in completion walks the placeholders with Tab. The save dialog replaces `window.prompt` and
+  takes an optional trigger word. Key rebinding stays out (roadmap "Out").
