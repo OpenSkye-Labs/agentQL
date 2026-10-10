@@ -121,11 +121,17 @@ export function QueryTab({ tab }: { tab: QTab }) {
       const n = countStatements(sqlText);
       if (n > 1) lines.push(`Run ${opts.all ? "all " : ""}${n} statements?`);
       if (conn.environment === "production" && opts.explain !== "plain") {
+        const docBefore = editor.current?.getValue();
         let writes: WriteInfo[];
         try {
           writes = await api.classifySql(conn.driver, sqlText);
         } catch (e) {
           toast(`Could not classify statements, not running on production: ${errMsg(e)}`, "error");
+          return;
+        }
+        // The editor stayed editable during the IPC round trip: never prompt for, or run, SQL the user no longer sees.
+        if (editor.current?.getValue() !== docBefore || useStore.getState().activeTab !== tab.id) {
+          toast("Editor changed while checking the statements; run again.", "warning");
           return;
         }
         if (writes.length)
@@ -138,7 +144,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
       if (lines.length && !confirm(lines.join("\n"))) return;
       run(sqlText, opts.explain);
     },
-    [conn, run, toast],
+    [conn, run, toast, tab.id],
   );
 
   // M1 safety: confirm "run all" when the script has several statements, and every write on a production connection.
