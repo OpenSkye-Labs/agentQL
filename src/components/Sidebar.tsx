@@ -1,8 +1,27 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import {
-  Bot, ChevronDown, ChevronRight, Database, Eye, FolderOpen, KeySquare, Braces, MoreHorizontal, Pencil, Plug, PlugZap, Plus, RefreshCw, Search,
-  Settings, Table2, Trash2, FileCode2, Layers, LayoutDashboard,
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  Eye,
+  FolderOpen,
+  KeySquare,
+  Braces,
+  MoreHorizontal,
+  Pencil,
+  Plug,
+  PlugZap,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  Table2,
+  Trash2,
+  FileCode2,
+  Layers,
+  LayoutDashboard,
 } from "lucide-react";
 import { useStore, type LiveConn } from "../lib/store";
 import { api, errMsg } from "../lib/api";
@@ -70,46 +89,53 @@ export function Sidebar({
         </div>
       </div>
       <MenuCtx.Provider value={setMenuItems}>
-      <ContextMenu items={menuItems.length ? menuItems : [{ label: "No actions here", disabled: true }]}>
-      <div
-        className="flex-1 overflow-auto scroll pb-4"
-        role="tree"
-        aria-label="Database objects"
-        onKeyDown={(e) => {
-          if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-          const items = [...e.currentTarget.querySelectorAll<HTMLElement>("[role=treeitem]")];
-          const i = items.indexOf(document.activeElement as HTMLElement);
-          const next = items[e.key === "ArrowDown" ? i + 1 : i - 1];
-          if (next) {
-            e.preventDefault();
-            next.focus();
-          }
-        }}
-      >
-        {connections.length === 0 && (
-          <div className="px-3 py-6 text-center text-xs text-muted">
-            No connections yet.
-            <div className="mt-2">
-              <Button size="sm" variant="primary" onClick={onNewConnection}>
-                <Plus size={13} /> Add connection
-              </Button>
-            </div>
-          </div>
-        )}
-        {groups.map(([group, list]) => (
-          <div key={group || "_"}>
-            {group && (
-              <div className="mt-2 flex items-center gap-1 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                <FolderOpen size={12} /> {group}
+        <ContextMenu items={menuItems.length ? menuItems : [{ label: "No actions here", disabled: true }]}>
+          <div
+            className="flex-1 overflow-auto scroll pb-4"
+            role="tree"
+            aria-label="Database objects"
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+              const items = [...e.currentTarget.querySelectorAll<HTMLElement>("[role=treeitem]")];
+              const i = items.indexOf(document.activeElement as HTMLElement);
+              const next = items[e.key === "ArrowDown" ? i + 1 : i - 1];
+              if (next) {
+                e.preventDefault();
+                next.focus();
+              }
+            }}
+          >
+            {connections.length === 0 && (
+              <div className="px-3 py-6 text-center text-xs text-muted">
+                No connections yet.
+                <div className="mt-2">
+                  <Button size="sm" variant="primary" onClick={onNewConnection}>
+                    <Plus size={13} /> Add connection
+                  </Button>
+                </div>
               </div>
             )}
-            {list.map((c) => (
-              <ConnectionNode key={c.id} conn={c} live={live[c.id]} filter={filter} onEdit={() => onEditConnection(c)} dashboards={dashboards.filter((d) => d.connection_id === c.id)} />
+            {groups.map(([group, list]) => (
+              <div key={group || "_"}>
+                {group && (
+                  <div className="mt-2 flex items-center gap-1 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    <FolderOpen size={12} /> {group}
+                  </div>
+                )}
+                {list.map((c) => (
+                  <ConnectionNode
+                    key={c.id}
+                    conn={c}
+                    live={live[c.id]}
+                    filter={filter}
+                    onEdit={() => onEditConnection(c)}
+                    dashboards={dashboards.filter((d) => d.connection_id === c.id)}
+                  />
+                ))}
+              </div>
             ))}
           </div>
-        ))}
-      </div>
-      </ContextMenu>
+        </ContextMenu>
       </MenuCtx.Provider>
     </aside>
   );
@@ -154,9 +180,24 @@ function ConnectionNode({
     connected
       ? { label: "Disconnect", icon: <PlugZap size={13} />, onSelect: () => void disconnect(conn.id) }
       : { label: "Connect", icon: <Plug size={13} />, onSelect: () => void connect(conn.id) },
-    { label: "New query", icon: <FileCode2 size={13} />, disabled: !connected, onSelect: () => openTab({ kind: "query", connectionId: conn.id, title: "Query", sql: "" }) },
-    { label: "Ask the assistant", icon: <Bot size={13} />, disabled: !connected, onSelect: () => askAssistant(`Give me an overview of the ${conn.name} database.`) },
-    { label: "Refresh", icon: <RefreshCw size={13} />, disabled: !connected, onSelect: () => void refreshSchema(conn.id) },
+    {
+      label: "New query",
+      icon: <FileCode2 size={13} />,
+      disabled: !connected,
+      onSelect: () => openTab({ kind: "query", connectionId: conn.id, title: "Query", sql: "" }),
+    },
+    {
+      label: "Ask the assistant",
+      icon: <Bot size={13} />,
+      disabled: !connected,
+      onSelect: () => askAssistant(`Give me an overview of the ${conn.name} database.`),
+    },
+    {
+      label: "Refresh",
+      icon: <RefreshCw size={13} />,
+      disabled: !connected,
+      onSelect: () => void refreshSchema(conn.id),
+    },
     ...(connected && live && live.databases.length > 1 && conn.driver !== "mongodb"
       ? [
           { separator: true, label: "" },
@@ -164,7 +205,11 @@ function ConnectionNode({
           ...live.databases
             .filter((d) => d !== live.database)
             .slice(0, 25)
-            .map((d) => ({ label: `Switch to ${d}`, icon: <Database size={13} />, onSelect: () => void connect(conn.id, d) })),
+            .map((d) => ({
+              label: `Switch to ${d}`,
+              icon: <Database size={13} />,
+              onSelect: () => void connect(conn.id, d),
+            })),
         ]
       : []),
     { separator: true, label: "" },
@@ -198,42 +243,72 @@ function ConnectionNode({
   const publish = useContext(MenuCtx);
   return (
     <div>
-        <div
-          onContextMenu={() => publish(menu)}
-          role="treeitem"
-          aria-expanded={connected ? open : undefined}
-          aria-label={`${conn.name}, ${driverLabel(conn.driver)}, ${connected ? "connected" : loading ? "connecting" : "disconnected"}`}
-          className={clsx("group flex h-7 items-center gap-1.5 pr-1 pl-2 text-[13px] cursor-default hover:bg-hover", connected && "font-medium")}
-          onClick={toggle}
-          onDoubleClick={() => connected && openTab({ kind: "query", connectionId: conn.id, title: "Query", sql: "" })}
-          tabIndex={0}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && void toggle()}
-        >
-          <span className="w-3.5 text-faint">{connected ? (open ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}</span>
-          <span className="relative flex h-3 w-3 items-center justify-center">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: conn.color ?? "var(--accent)", opacity: connected ? 1 : 0.4 }} />
-            {connected && <span className="absolute -right-0.5 -bottom-0.5 h-1.5 w-1.5 rounded-full bg-success ring-1 ring-sunken" />}
-          </span>
-          <span className="truncate flex-1">{conn.name}</span>
-          {loading && <Spinner />}
-          {conn.read_only && <span className="rounded bg-warning/15 px-1 text-[10px] text-warning" title="Read-only connection">ro</span>}
-          <Menu
-            trigger={
-              <button className="rounded p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-active" aria-label={`Actions for ${conn.name}`} onClick={(e) => e.stopPropagation()}>
-                <MoreHorizontal size={14} />
-              </button>
-            }
-            items={menu}
+      <div
+        onContextMenu={() => publish(menu)}
+        role="treeitem"
+        aria-expanded={connected ? open : undefined}
+        aria-label={`${conn.name}, ${driverLabel(conn.driver)}, ${connected ? "connected" : loading ? "connecting" : "disconnected"}`}
+        className={clsx(
+          "group flex h-7 items-center gap-1.5 pr-1 pl-2 text-[13px] cursor-default hover:bg-hover",
+          connected && "font-medium",
+        )}
+        onClick={toggle}
+        onDoubleClick={() => connected && openTab({ kind: "query", connectionId: conn.id, title: "Query", sql: "" })}
+        tabIndex={0}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && void toggle()}
+      >
+        <span className="w-3.5 text-faint">
+          {connected ? open ? <ChevronDown size={13} /> : <ChevronRight size={13} /> : null}
+        </span>
+        <span className="relative flex h-3 w-3 items-center justify-center">
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ background: conn.color ?? "var(--accent)", opacity: connected ? 1 : 0.4 }}
           />
-        </div>
+          {connected && (
+            <span className="absolute -right-0.5 -bottom-0.5 h-1.5 w-1.5 rounded-full bg-success ring-1 ring-sunken" />
+          )}
+        </span>
+        <span className="truncate flex-1">{conn.name}</span>
+        {loading && <Spinner />}
+        {conn.read_only && (
+          <span className="rounded bg-warning/15 px-1 text-[10px] text-warning" title="Read-only connection">
+            ro
+          </span>
+        )}
+        <Menu
+          trigger={
+            <button
+              className="rounded p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-active"
+              aria-label={`Actions for ${conn.name}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          }
+          items={menu}
+        />
+      </div>
       {connected && open && live && (
         <div role="group">
           {dashboards.map((d) => (
-            <Row key={d.id} depth={1} icon={<LayoutDashboard size={13} className="text-accent" />} label={d.title} meta="dashboard" onOpen={() => openTab({ kind: "dashboard", connectionId: conn.id, title: d.title, dashboardId: d.id })} />
+            <Row
+              key={d.id}
+              depth={1}
+              icon={<LayoutDashboard size={13} className="text-accent" />}
+              label={d.title}
+              meta="dashboard"
+              onOpen={() => openTab({ kind: "dashboard", connectionId: conn.id, title: d.title, dashboardId: d.id })}
+            />
           ))}
           {isSql(conn.driver) && <SqlTree conn={conn} live={live} filter={filter} />}
           {conn.driver === "redis" && (
-            <Row depth={1} icon={<KeySquare size={13} className="text-warning" />} label={`Keys (db ${live.database || "0"})`} onOpen={() => openTab({ kind: "redis", connectionId: conn.id, title: `Keys · ${conn.name}` })} />
+            <Row
+              depth={1}
+              icon={<KeySquare size={13} className="text-warning" />}
+              label={`Keys (db ${live.database || "0"})`}
+              onOpen={() => openTab({ kind: "redis", connectionId: conn.id, title: `Keys · ${conn.name}` })}
+            />
           )}
           {conn.driver === "mongodb" && <MongoTree conn={conn} live={live} filter={filter} />}
         </div>
@@ -242,7 +317,17 @@ function ConnectionNode({
   );
 }
 
-function Row({ depth, icon, label, meta, onOpen, onToggle, expanded, menu, active }: {
+function Row({
+  depth,
+  icon,
+  label,
+  meta,
+  onOpen,
+  onToggle,
+  expanded,
+  menu,
+  active,
+}: {
   depth: number;
   icon: React.ReactNode;
   label: string;
@@ -260,7 +345,10 @@ function Row({ depth, icon, label, meta, onOpen, onToggle, expanded, menu, activ
       aria-expanded={onToggle ? expanded : undefined}
       tabIndex={0}
       onContextMenu={() => publish(menu ?? [])}
-      className={clsx("flex h-6 items-center gap-1.5 pr-2 text-xs cursor-default hover:bg-hover", active && "bg-active")}
+      className={clsx(
+        "flex h-6 items-center gap-1.5 pr-2 text-xs cursor-default hover:bg-hover",
+        active && "bg-active",
+      )}
       style={{ paddingLeft: 8 + depth * 14 }}
       onClick={() => (onToggle ? onToggle() : onOpen?.())}
       onDoubleClick={() => onToggle && onOpen?.()}
@@ -272,7 +360,11 @@ function Row({ depth, icon, label, meta, onOpen, onToggle, expanded, menu, activ
         }
       }}
     >
-      {onToggle ? <span className="w-3.5 text-faint">{expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span> : <span className="w-3.5" />}
+      {onToggle ? (
+        <span className="w-3.5 text-faint">{expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+      ) : (
+        <span className="w-3.5" />
+      )}
       <span className="shrink-0">{icon}</span>
       <span className="truncate flex-1">{label}</span>
       {meta && <span className="text-[10px] text-faint tabular-nums">{meta}</span>}
@@ -292,7 +384,8 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
   const askAssistant = useStore((s) => s.askAssistant);
   const f = filter.trim().toLowerCase();
   const q = (name: string) => (conn.driver === "mysql" || conn.driver === "mariadb" ? `\`${name}\`` : `"${name}"`);
-  const qualified = (t: TableInfo) => (conn.driver === "sqlite" && t.schema === "main" ? q(t.name) : `${q(t.schema)}.${q(t.name)}`);
+  const qualified = (t: TableInfo) =>
+    conn.driver === "sqlite" && t.schema === "main" ? q(t.name) : `${q(t.schema)}.${q(t.name)}`;
 
   return (
     <>
@@ -303,7 +396,14 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
         if (f && tables && visible.length === 0) return null;
         return (
           <div key={schema}>
-            <Row depth={1} icon={<Database size={13} className="text-muted" />} label={schema} meta={tables ? String(tables.length) : undefined} expanded={expanded} onToggle={() => toggleSchema(conn.id, schema)} />
+            <Row
+              depth={1}
+              icon={<Database size={13} className="text-muted" />}
+              label={schema}
+              meta={tables ? String(tables.length) : undefined}
+              expanded={expanded}
+              onToggle={() => toggleSchema(conn.id, schema)}
+            />
             {expanded && (
               <div role="group">
                 {!tables && (
@@ -318,18 +418,54 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
                     icon={tableIcon(t.kind)}
                     label={t.name}
                     meta={t.row_estimate != null ? fmtCount(t.row_estimate) : undefined}
-                    onOpen={() => openTab({ kind: "table", connectionId: conn.id, title: t.name, schema: t.schema, table: t.name, tableKind: t.kind })}
+                    onOpen={() =>
+                      openTab({
+                        kind: "table",
+                        connectionId: conn.id,
+                        title: t.name,
+                        schema: t.schema,
+                        table: t.name,
+                        tableKind: t.kind,
+                      })
+                    }
                     menu={[
-                      { label: "Open", icon: <Table2 size={13} />, onSelect: () => openTab({ kind: "table", connectionId: conn.id, title: t.name, schema: t.schema, table: t.name, tableKind: t.kind }) },
+                      {
+                        label: "Open",
+                        icon: <Table2 size={13} />,
+                        onSelect: () =>
+                          openTab({
+                            kind: "table",
+                            connectionId: conn.id,
+                            title: t.name,
+                            schema: t.schema,
+                            table: t.name,
+                            tableKind: t.kind,
+                          }),
+                      },
                       {
                         label: "SELECT in new query",
                         icon: <FileCode2 size={13} />,
-                        onSelect: () => openTab({ kind: "query", connectionId: conn.id, title: `${t.name} query`, sql: `SELECT *\nFROM ${qualified(t)}\nLIMIT 100;` }),
+                        onSelect: () =>
+                          openTab({
+                            kind: "query",
+                            connectionId: conn.id,
+                            title: `${t.name} query`,
+                            sql: `SELECT *\nFROM ${qualified(t)}\nLIMIT 100;`,
+                          }),
                       },
-                      { label: "Ask the assistant about this table", icon: <Bot size={13} />, onSelect: () => { askAssistant(`Describe the table ${t.schema}.${t.name} and show me a few example rows.`); } },
+                      {
+                        label: "Ask the assistant about this table",
+                        icon: <Bot size={13} />,
+                        onSelect: () => {
+                          askAssistant(`Describe the table ${t.schema}.${t.name} and show me a few example rows.`);
+                        },
+                      },
                       { separator: true, label: "" },
                       { label: "Copy name", onSelect: () => void navigator.clipboard.writeText(t.name) },
-                      { label: "Copy qualified name", onSelect: () => void navigator.clipboard.writeText(qualified(t)) },
+                      {
+                        label: "Copy qualified name",
+                        onSelect: () => void navigator.clipboard.writeText(qualified(t)),
+                      },
                     ]}
                   />
                 ))}
@@ -345,7 +481,9 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
 
 function MongoTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveConn; filter: string }) {
   const openTab = useStore((s) => s.openTab);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => (live.database ? { [live.database]: true } : {}));
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() =>
+    live.database ? { [live.database]: true } : {},
+  );
   const [cols, setCols] = useState<Record<string, { name: string; count: number | null }[] | null | undefined>>({});
   const toast = useStore((s) => s.toast);
   const f = filter.trim().toLowerCase();
@@ -370,7 +508,14 @@ function MongoTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveC
         const list = (cols[db] ?? []).filter((c) => !f || c.name.toLowerCase().includes(f));
         return (
           <div key={db}>
-            <Row depth={1} icon={<Database size={13} className="text-muted" />} label={db} expanded={isOpen} onToggle={() => setExpanded((e) => ({ ...e, [db]: !e[db] }))} meta={cols[db] ? String(cols[db]!.length) : undefined} />
+            <Row
+              depth={1}
+              icon={<Database size={13} className="text-muted" />}
+              label={db}
+              expanded={isOpen}
+              onToggle={() => setExpanded((e) => ({ ...e, [db]: !e[db] }))}
+              meta={cols[db] ? String(cols[db]!.length) : undefined}
+            />
             {isOpen && (
               <div role="group">
                 {!cols[db] && (
@@ -385,7 +530,9 @@ function MongoTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveC
                     icon={<Braces size={13} className="text-success" />}
                     label={c.name}
                     meta={c.count != null ? fmtCount(c.count) : undefined}
-                    onOpen={() => openTab({ kind: "mongo", connectionId: conn.id, title: c.name, db, collection: c.name })}
+                    onOpen={() =>
+                      openTab({ kind: "mongo", connectionId: conn.id, title: c.name, db, collection: c.name })
+                    }
                     menu={[{ label: "Copy name", onSelect: () => void navigator.clipboard.writeText(c.name) }]}
                   />
                 ))}

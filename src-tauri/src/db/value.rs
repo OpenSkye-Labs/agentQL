@@ -7,12 +7,16 @@ use sqlx::{Row, TypeInfo, ValueRef};
 pub fn bytes_value(b: &[u8]) -> Value {
     match std::str::from_utf8(b) {
         Ok(s) if !s.contains('\0') => Value::String(s.to_string()),
-        _ => json!({ "$bytes": base64::engine::general_purpose::STANDARD.encode(b), "len": b.len() }),
+        _ => {
+            json!({ "$bytes": base64::engine::general_purpose::STANDARD.encode(b), "len": b.len() })
+        }
     }
 }
 
 fn num_f64(v: f64) -> Value {
-    serde_json::Number::from_f64(v).map(Value::Number).unwrap_or_else(|| Value::String(v.to_string()))
+    serde_json::Number::from_f64(v)
+        .map(Value::Number)
+        .unwrap_or_else(|| Value::String(v.to_string()))
 }
 
 // ---------------- Postgres ----------------
@@ -38,9 +42,13 @@ pub fn pg_value(row: &sqlx::postgres::PgRow, i: usize) -> Value {
     }
     macro_rules! vec {
         ($t:ty, $f:expr) => {
-            row.try_get::<Vec<Option<$t>>, usize>(i)
-                .ok()
-                .map(|v| Value::Array(v.into_iter().map(|e| e.map($f).unwrap_or(Value::Null)).collect()))
+            row.try_get::<Vec<Option<$t>>, usize>(i).ok().map(|v| {
+                Value::Array(
+                    v.into_iter()
+                        .map(|e| e.map($f).unwrap_or(Value::Null))
+                        .collect(),
+                )
+            })
         };
     }
 
@@ -53,35 +61,54 @@ pub fn pg_value(row: &sqlx::postgres::PgRow, i: usize) -> Value {
         "FLOAT4" => get!(f32, |v| num_f64(v as f64)),
         "FLOAT8" => get!(f64, num_f64),
         "NUMERIC" => get!(BigDecimal, |v| Value::String(v.normalized().to_string())),
-        "MONEY" => get!(PgMoney, |v| Value::String(format!("{}{}.{:02}", if v.0 < 0 { "-" } else { "" }, (v.0 / 100).abs(), (v.0 % 100).abs()))),
-        "TEXT" | "VARCHAR" | "CHAR" | "BPCHAR" | "NAME" | "\"CHAR\"" | "CITEXT" | "XML" | "UNKNOWN" => {
+        "MONEY" => get!(PgMoney, |v| Value::String(format!(
+            "{}{}.{:02}",
+            if v.0 < 0 { "-" } else { "" },
+            (v.0 / 100).abs(),
+            (v.0 % 100).abs()
+        ))),
+        "TEXT" | "VARCHAR" | "CHAR" | "BPCHAR" | "NAME" | "\"CHAR\"" | "CITEXT" | "XML"
+        | "UNKNOWN" => {
             get!(String, Value::String)
         }
         "UUID" => get!(Uuid, |v| Value::String(v.to_string())),
-        "TIMESTAMP" => get!(NaiveDateTime, |v| Value::String(v.format("%Y-%m-%d %H:%M:%S%.f").to_string())),
-        "TIMESTAMPTZ" => get!(DateTime<Utc>, |v| Value::String(v.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true))),
+        "TIMESTAMP" => get!(NaiveDateTime, |v| Value::String(
+            v.format("%Y-%m-%d %H:%M:%S%.f").to_string()
+        )),
+        "TIMESTAMPTZ" => get!(DateTime<Utc>, |v| Value::String(
+            v.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+        )),
         "DATE" => get!(NaiveDate, |v| Value::String(v.to_string())),
         "TIME" => get!(NaiveTime, |v| Value::String(v.to_string())),
-        "TIMETZ" => get!(PgTimeTz, |v| Value::String(format!("{}{}", v.time, v.offset))),
-        "INTERVAL" => get!(PgInterval, |v| Value::String(format_interval(v.months, v.days, v.microseconds))),
+        "TIMETZ" => get!(PgTimeTz, |v| Value::String(format!(
+            "{}{}",
+            v.time, v.offset
+        ))),
+        "INTERVAL" => get!(PgInterval, |v| Value::String(format_interval(
+            v.months,
+            v.days,
+            v.microseconds
+        ))),
         "JSON" | "JSONB" => get!(Value, |v| v),
         "BYTEA" => get!(Vec<u8>, |v| bytes_value(&v)),
         "INET" | "CIDR" => get!(IpNetwork, |v| Value::String(v.to_string())),
         "MACADDR" => get!(MacAddress, |v| Value::String(v.to_string())),
-        "BIT" | "VARBIT" => get!(BitVec, |v| Value::String(v.iter().map(|b| if b { '1' } else { '0' }).collect())),
-        "BOOL[]" => vec!(bool, Value::Bool),
-        "INT2[]" => vec!(i16, |v| json!(v)),
-        "INT4[]" => vec!(i32, |v| json!(v)),
-        "INT8[]" => vec!(i64, |v| json!(v)),
-        "FLOAT4[]" => vec!(f32, |v| num_f64(v as f64)),
-        "FLOAT8[]" => vec!(f64, num_f64),
-        "NUMERIC[]" => vec!(BigDecimal, |v| Value::String(v.normalized().to_string())),
-        "TEXT[]" | "VARCHAR[]" | "CHAR[]" | "BPCHAR[]" | "NAME[]" => vec!(String, Value::String),
-        "UUID[]" => vec!(Uuid, |v| Value::String(v.to_string())),
-        "JSON[]" | "JSONB[]" => vec!(Value, |v| v),
-        "DATE[]" => vec!(NaiveDate, |v| Value::String(v.to_string())),
-        "TIMESTAMP[]" => vec!(NaiveDateTime, |v| Value::String(v.to_string())),
-        "TIMESTAMPTZ[]" => vec!(DateTime<Utc>, |v| Value::String(v.to_rfc3339())),
+        "BIT" | "VARBIT" => get!(BitVec, |v| Value::String(
+            v.iter().map(|b| if b { '1' } else { '0' }).collect()
+        )),
+        "BOOL[]" => vec![bool, Value::Bool],
+        "INT2[]" => vec![i16, |v| json!(v)],
+        "INT4[]" => vec![i32, |v| json!(v)],
+        "INT8[]" => vec![i64, |v| json!(v)],
+        "FLOAT4[]" => vec![f32, |v| num_f64(v as f64)],
+        "FLOAT8[]" => vec![f64, num_f64],
+        "NUMERIC[]" => vec![BigDecimal, |v| Value::String(v.normalized().to_string())],
+        "TEXT[]" | "VARCHAR[]" | "CHAR[]" | "BPCHAR[]" | "NAME[]" => vec![String, Value::String],
+        "UUID[]" => vec![Uuid, |v| Value::String(v.to_string())],
+        "JSON[]" | "JSONB[]" => vec![Value, |v| v],
+        "DATE[]" => vec![NaiveDate, |v| Value::String(v.to_string())],
+        "TIMESTAMP[]" => vec![NaiveDateTime, |v| Value::String(v.to_string())],
+        "TIMESTAMPTZ[]" => vec![DateTime<Utc>, |v| Value::String(v.to_rfc3339())],
         _ => None,
     };
     v.unwrap_or_else(|| {
@@ -106,7 +133,10 @@ fn format_interval(months: i32, days: i32, micros: i64) -> String {
         }
     }
     if days != 0 {
-        parts.push(format!("{days} day{}", if days.abs() == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{days} day{}",
+            if days.abs() == 1 { "" } else { "s" }
+        ));
     }
     if micros != 0 || parts.is_empty() {
         let neg = micros < 0;
@@ -160,9 +190,15 @@ pub fn mysql_value(row: &sqlx::mysql::MySqlRow, i: usize) -> Value {
             get!(String, Value::String)
         }
         "DATE" => get!(NaiveDate, |v| Value::String(v.to_string())),
-        "TIME" => get!(sqlx::mysql::types::MySqlTime, |v| Value::String(v.to_string())),
-        "DATETIME" => get!(NaiveDateTime, |v| Value::String(v.format("%Y-%m-%d %H:%M:%S%.f").to_string())),
-        "TIMESTAMP" => get!(DateTime<Utc>, |v| Value::String(v.format("%Y-%m-%d %H:%M:%S%.f").to_string())),
+        "TIME" => get!(sqlx::mysql::types::MySqlTime, |v| Value::String(
+            v.to_string()
+        )),
+        "DATETIME" => get!(NaiveDateTime, |v| Value::String(
+            v.format("%Y-%m-%d %H:%M:%S%.f").to_string()
+        )),
+        "TIMESTAMP" => get!(DateTime<Utc>, |v| Value::String(
+            v.format("%Y-%m-%d %H:%M:%S%.f").to_string()
+        )),
         "JSON" => get!(Value, |v| v),
         "TINYBLOB" | "BLOB" | "MEDIUMBLOB" | "LONGBLOB" | "BINARY" | "VARBINARY" | "GEOMETRY" => {
             get!(Vec<u8>, |v| bytes_value(&v))
@@ -170,7 +206,11 @@ pub fn mysql_value(row: &sqlx::mysql::MySqlRow, i: usize) -> Value {
         _ => None,
     };
     v.or_else(|| row.try_get::<String, usize>(i).ok().map(Value::String))
-        .or_else(|| row.try_get::<Vec<u8>, usize>(i).ok().map(|b| bytes_value(&b)))
+        .or_else(|| {
+            row.try_get::<Vec<u8>, usize>(i)
+                .ok()
+                .map(|b| bytes_value(&b))
+        })
         .unwrap_or(Value::Null)
 }
 
@@ -186,14 +226,23 @@ pub fn sqlite_value(row: &sqlx::sqlite::SqliteRow, i: usize) -> Value {
     }
     let name = raw.type_info().name().to_uppercase();
     let v: Option<Value> = match name.as_str() {
-        "INTEGER" | "INT" | "BIGINT" | "BOOLEAN" => row.try_get::<i64, usize>(i).ok().map(|v| json!(v)),
+        "INTEGER" | "INT" | "BIGINT" | "BOOLEAN" => {
+            row.try_get::<i64, usize>(i).ok().map(|v| json!(v))
+        }
         "REAL" | "FLOAT" | "DOUBLE" | "NUMERIC" => row.try_get::<f64, usize>(i).ok().map(num_f64),
-        "BLOB" => row.try_get::<Vec<u8>, usize>(i).ok().map(|b| bytes_value(&b)),
+        "BLOB" => row
+            .try_get::<Vec<u8>, usize>(i)
+            .ok()
+            .map(|b| bytes_value(&b)),
         _ => None,
     };
     v.or_else(|| row.try_get::<String, usize>(i).ok().map(Value::String))
         .or_else(|| row.try_get::<i64, usize>(i).ok().map(|v| json!(v)))
         .or_else(|| row.try_get::<f64, usize>(i).ok().map(num_f64))
-        .or_else(|| row.try_get::<Vec<u8>, usize>(i).ok().map(|b| bytes_value(&b)))
+        .or_else(|| {
+            row.try_get::<Vec<u8>, usize>(i)
+                .ok()
+                .map(|b| bytes_value(&b))
+        })
         .unwrap_or(Value::Null)
 }

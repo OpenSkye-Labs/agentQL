@@ -24,17 +24,25 @@ impl client::Handler for Handler {
         key: &russh::keys::PublicKeyOrCertificate,
     ) -> std::result::Result<bool, Self::Error> {
         let fp = match key {
-            russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } => key.fingerprint(Default::default()).to_string(),
-            russh::keys::PublicKeyOrCertificate::Certificate(c) => c.public_key().fingerprint(Default::default()).to_string(),
+            russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } => {
+                key.fingerprint(Default::default()).to_string()
+            }
+            russh::keys::PublicKeyOrCertificate::Certificate(c) => {
+                c.public_key().fingerprint(Default::default()).to_string()
+            }
         };
-        let mut known: std::collections::HashMap<String, String> = std::fs::read(&self.known_hosts_path)
-            .ok()
-            .and_then(|d| serde_json::from_slice(&d).ok())
-            .unwrap_or_default();
+        let mut known: std::collections::HashMap<String, String> =
+            std::fs::read(&self.known_hosts_path)
+                .ok()
+                .and_then(|d| serde_json::from_slice(&d).ok())
+                .unwrap_or_default();
         match known.get(&self.host_id) {
             Some(stored) if stored == &fp => Ok(true),
             Some(stored) => {
-                eprintln!("ssh host key changed for {}: stored {stored}, got {fp}", self.host_id);
+                eprintln!(
+                    "ssh host key changed for {}: stored {stored}, got {fp}",
+                    self.host_id
+                );
                 Ok(false)
             }
             None => {
@@ -49,8 +57,10 @@ impl client::Handler for Handler {
 }
 
 pub fn forget_host(known_hosts_path: &std::path::Path, host: &str, port: u16) -> Result<()> {
-    let mut known: std::collections::HashMap<String, String> =
-        std::fs::read(known_hosts_path).ok().and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default();
+    let mut known: std::collections::HashMap<String, String> = std::fs::read(known_hosts_path)
+        .ok()
+        .and_then(|d| serde_json::from_slice(&d).ok())
+        .unwrap_or_default();
     known.remove(&format!("{host}:{port}"));
     std::fs::write(known_hosts_path, serde_json::to_vec_pretty(&known)?)?;
     Ok(())
@@ -81,7 +91,10 @@ impl Tunnel {
             keepalive_interval: Some(std::time::Duration::from_secs(30)),
             ..Default::default()
         });
-        let handler = Handler { host_id: format!("{}:{}", cfg.host, cfg.port), known_hosts_path };
+        let handler = Handler {
+            host_id: format!("{}:{}", cfg.host, cfg.port),
+            known_hosts_path,
+        };
         let mut session = client::connect(config, (cfg.host.as_str(), cfg.port), handler).await.map_err(|e| {
             let hint = if matches!(e, russh::Error::UnknownKey) {
                 " (host key changed since it was first trusted; use 'Forget SSH host key' on the connection if this is expected)"
@@ -109,7 +122,10 @@ impl Tunnel {
                     .map_err(|e| AppError::Msg(e.to_string()))?
                     .flatten();
                 session
-                    .authenticate_publickey(cfg.user.clone(), PrivateKeyWithHashAlg::new(Arc::new(key), hash))
+                    .authenticate_publickey(
+                        cfg.user.clone(),
+                        PrivateKeyWithHashAlg::new(Arc::new(key), hash),
+                    )
                     .await
                     .map_err(|e| AppError::Msg(format!("ssh auth failed: {e}")))?
             }
@@ -127,12 +143,19 @@ impl Tunnel {
 
         let task = tokio::spawn(async move {
             loop {
-                let Ok((mut socket, peer)) = listener.accept().await else { break };
+                let Ok((mut socket, peer)) = listener.accept().await else {
+                    break;
+                };
                 let session = session.clone();
                 let remote_host = remote_host.clone();
                 tokio::spawn(async move {
                     match session
-                        .channel_open_direct_tcpip(remote_host, remote_port as u32, peer.ip().to_string(), peer.port() as u32)
+                        .channel_open_direct_tcpip(
+                            remote_host,
+                            remote_port as u32,
+                            peer.ip().to_string(),
+                            peer.port() as u32,
+                        )
                         .await
                     {
                         Ok(channel) => {
@@ -145,7 +168,10 @@ impl Tunnel {
             }
         });
 
-        Ok(Tunnel { local_port, abort: task.abort_handle() })
+        Ok(Tunnel {
+            local_port,
+            abort: task.abort_handle(),
+        })
     }
 }
 
@@ -179,13 +205,16 @@ async fn authenticate_with_agent(
             return Ok(result);
         }
     }
-    Err(AppError::Msg("ssh-agent: no key was accepted by the server".into()))
+    Err(AppError::Msg(
+        "ssh-agent: no key was accepted by the server".into(),
+    ))
 }
 
 fn shellexpand_home(p: &str) -> String {
     if let Some(rest) = p.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-            return format!("{}/{}", home.to_string_lossy(), rest);
-        }
+        && let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+    {
+        return format!("{}/{}", home.to_string_lossy(), rest);
+    }
     p.to_string()
 }

@@ -61,19 +61,46 @@ export function DashboardTab({ tab }: { tab: DTab }) {
       <div className="flex h-9 items-center gap-2 border-b border-border bg-elev px-3" role="toolbar">
         <h1 className="text-[13px] font-semibold truncate">{dashboard.title}</h1>
         {dashboard.description && <span className="truncate text-xs text-muted">{dashboard.description}</span>}
-        <Tooltip label="Rename"><Button size="icon" variant="ghost" onClick={rename} aria-label="Rename dashboard"><Pencil size={13} /></Button></Tooltip>
+        <Tooltip label="Rename">
+          <Button size="icon" variant="ghost" onClick={rename} aria-label="Rename dashboard">
+            <Pencil size={13} />
+          </Button>
+        </Tooltip>
         <span className="flex-1" />
-        <Button size="sm" onClick={() => { askAssistant(`Add a chart to my dashboard "${dashboard.title}" showing `); }}>
+        <Button
+          size="sm"
+          onClick={() => {
+            askAssistant(`Add a chart to my dashboard "${dashboard.title}" showing `);
+          }}
+        >
           <Bot size={13} /> Add chart with assistant
         </Button>
-        <Select value={interval} onChange={(e) => setIntervalSec(Number(e.target.value))} className="h-7 text-xs" aria-label="Auto refresh">
+        <Select
+          value={interval}
+          onChange={(e) => setIntervalSec(Number(e.target.value))}
+          className="h-7 text-xs"
+          aria-label="Auto refresh"
+        >
           <option value={0}>Manual refresh</option>
           <option value={30}>Every 30s</option>
           <option value={60}>Every minute</option>
           <option value={300}>Every 5 min</option>
         </Select>
-        <Tooltip label="Refresh all"><Button size="icon" variant="ghost" onClick={runAll} aria-label="Refresh all"><RefreshCw size={13} /></Button></Tooltip>
-        <Tooltip label="Delete dashboard"><Button size="icon" variant="ghost" onClick={() => confirm(`Delete dashboard "${dashboard.title}"?`) && void deleteDashboard(dashboard.id)} aria-label="Delete dashboard"><Trash2 size={13} /></Button></Tooltip>
+        <Tooltip label="Refresh all">
+          <Button size="icon" variant="ghost" onClick={runAll} aria-label="Refresh all">
+            <RefreshCw size={13} />
+          </Button>
+        </Tooltip>
+        <Tooltip label="Delete dashboard">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => confirm(`Delete dashboard "${dashboard.title}"?`) && void deleteDashboard(dashboard.id)}
+            aria-label="Delete dashboard"
+          >
+            <Trash2 size={13} />
+          </Button>
+        </Tooltip>
       </div>
       <div className="flex-1 overflow-auto scroll p-3">
         {dashboard.charts.length === 0 ? (
@@ -89,8 +116,13 @@ export function DashboardTab({ tab }: { tab: DTab }) {
                 loading={data[c.id]?.loading}
                 height={260}
                 onRefresh={() => void run(c)}
-                onShowQuery={() => c.source.kind === "sql" && openTab({ kind: "query", connectionId: conn.id, title: c.title, sql: c.source.sql })}
-                onRemove={() => void saveDashboard({ ...dashboard, charts: dashboard.charts.filter((x) => x.id !== c.id) })}
+                onShowQuery={() =>
+                  c.source.kind === "sql" &&
+                  openTab({ kind: "query", connectionId: conn.id, title: c.title, sql: c.source.sql })
+                }
+                onRemove={() =>
+                  void saveDashboard({ ...dashboard, charts: dashboard.charts.filter((x) => x.id !== c.id) })
+                }
               />
             ))}
           </div>

@@ -122,10 +122,17 @@ pub struct Manager {
 
 impl Manager {
     pub fn new(data_dir: &std::path::Path) -> Self {
-        Manager { sessions: Default::default(), known_hosts_path: data_dir.join("ssh_known_hosts.json") }
+        Manager {
+            sessions: Default::default(),
+            known_hosts_path: data_dir.join("ssh_known_hosts.json"),
+        }
     }
 
-    pub async fn connect(&self, mut config: ConnectionConfig, secrets: &ConnectionSecrets) -> Result<Arc<Session>> {
+    pub async fn connect(
+        &self,
+        mut config: ConnectionConfig,
+        secrets: &ConnectionSecrets,
+    ) -> Result<Arc<Session>> {
         // Optional SSH tunnel: rewrite host/port to the local forward.
         let mut tunnel = None;
         if let Some(ssh) = config.ssh.clone() {
@@ -152,7 +159,9 @@ impl Manager {
                 Live::Sql(sql::SqlConn::connect(&config, secrets).await?)
             }
             Driver::Redis => Live::Redis(redis::RedisConn::connect(&config, secrets).await?),
-            Driver::Mongodb => Live::Mongo(mongo::MongoConn::connect(&config, secrets, tunnel.is_some()).await?),
+            Driver::Mongodb => {
+                Live::Mongo(mongo::MongoConn::connect(&config, secrets, tunnel.is_some()).await?)
+            }
         };
         let session = Arc::new(Session {
             config: config.clone(),
@@ -160,15 +169,19 @@ impl Manager {
             _tunnel: tunnel,
             connected_at: chrono::Utc::now(),
         });
-        self.sessions.write().await.insert(config.id.clone(), session.clone());
+        self.sessions
+            .write()
+            .await
+            .insert(config.id.clone(), session.clone());
         Ok(session)
     }
 
     pub async fn disconnect(&self, id: &str) {
         if let Some(s) = self.sessions.write().await.remove(id)
-            && let Live::Sql(c) = &s.live {
-                c.close().await;
-            }
+            && let Live::Sql(c) = &s.live
+        {
+            c.close().await;
+        }
     }
 
     pub async fn get(&self, id: &str) -> Result<Arc<Session>> {
@@ -187,12 +200,17 @@ impl Manager {
 
 fn target_host_port(c: &ConnectionConfig) -> Result<(String, u16)> {
     if let Some(url) = &c.url {
-        let parsed = url::Url::parse(url).map_err(|e| AppError::Msg(format!("invalid url: {e}")))?;
+        let parsed =
+            url::Url::parse(url).map_err(|e| AppError::Msg(format!("invalid url: {e}")))?;
         let host = parsed.host_str().unwrap_or("127.0.0.1").to_string();
         let port = parsed.port().unwrap_or(c.driver.default_port());
         return Ok((host, port));
     }
-    let port = if c.port == 0 { c.driver.default_port() } else { c.port };
+    let port = if c.port == 0 {
+        c.driver.default_port()
+    } else {
+        c.port
+    };
     Ok((c.host.clone(), port))
 }
 

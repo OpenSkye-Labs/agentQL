@@ -20,9 +20,21 @@ export function Welcome({ onNewConnection }: { onNewConnection: () => void }) {
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-8">
-          <Card icon={<Plug size={16} />} title="Connect" text="PostgreSQL, MySQL, MariaDB, SQLite, Redis and MongoDB. Direct, URL, SSL or over SSH." />
-          <Card icon={<Table2 size={16} />} title="Browse & edit" text="Fast virtualised grids, inline edits that become reviewable SQL, filters, structure and DDL." />
-          <Card icon={<Bot size={16} />} title="Ask the agent" text="Use your Claude or OpenAI key, or your Claude Code / Codex subscription, to chat with your data and build dashboards." />
+          <Card
+            icon={<Plug size={16} />}
+            title="Connect"
+            text="PostgreSQL, MySQL, MariaDB, SQLite, Redis and MongoDB. Direct, URL, SSL or over SSH."
+          />
+          <Card
+            icon={<Table2 size={16} />}
+            title="Browse & edit"
+            text="Fast virtualised grids, inline edits that become reviewable SQL, filters, structure and DDL."
+          />
+          <Card
+            icon={<Bot size={16} />}
+            title="Ask the agent"
+            text="Use your Claude or OpenAI key, or your Claude Code / Codex subscription, to chat with your data and build dashboards."
+          />
         </div>
 
         {connections.length > 0 ? (
@@ -39,7 +51,10 @@ export function Welcome({ onNewConnection }: { onNewConnection: () => void }) {
                   <span className="flex-1 min-w-0">
                     <span className="block truncate text-[13px] font-medium">{c.name}</span>
                     <span className="block truncate text-xs text-muted">
-                      {c.driver} · {c.url ? c.url.replace(/:\/\/[^@]*@/, "://•••@") : `${c.host || c.file_path || ""}${c.database ? `/${c.database}` : ""}`}
+                      {c.driver} ·{" "}
+                      {c.url
+                        ? c.url.replace(/:\/\/[^@]*@/, "://•••@")
+                        : `${c.host || c.file_path || ""}${c.database ? `/${c.database}` : ""}`}
                     </span>
                   </span>
                 </button>
@@ -53,14 +68,23 @@ export function Welcome({ onNewConnection }: { onNewConnection: () => void }) {
             <Plug size={14} /> New connection
           </Button>
           <span className="text-xs text-muted flex items-center gap-3">
-            <span><Kbd>{mod}</Kbd> <Kbd>N</Kbd> new connection</span>
-            <span><Kbd>{mod}</Kbd> <Kbd>T</Kbd> new query</span>
-            <span><Kbd>{mod}</Kbd> <Kbd>K</Kbd> assistant</span>
-            <span><Kbd>{mod}</Kbd> <Kbd>,</Kbd> settings</span>
+            <span>
+              <Kbd>{mod}</Kbd> <Kbd>N</Kbd> new connection
+            </span>
+            <span>
+              <Kbd>{mod}</Kbd> <Kbd>T</Kbd> new query
+            </span>
+            <span>
+              <Kbd>{mod}</Kbd> <Kbd>K</Kbd> assistant
+            </span>
+            <span>
+              <Kbd>{mod}</Kbd> <Kbd>,</Kbd> settings
+            </span>
           </span>
         </div>
         <p className="mt-6 flex items-center gap-1.5 text-xs text-faint">
-          <KeyRound size={12} /> Passwords are stored in your OS keychain. <Sparkles size={12} className="ml-2" /> Agent writes are off until you enable them.
+          <KeyRound size={12} /> Passwords are stored in your OS keychain. <Sparkles size={12} className="ml-2" /> Agent
+          writes are off until you enable them.
         </p>
       </div>
     </div>

@@ -27,7 +27,12 @@ pub fn run() {
                 store: Arc::new(config::Store::new(dir)),
                 agent: Arc::new(ai::Agent::default()),
             };
-            let ctx = ai::Ctx { app: app.handle().clone(), manager: state.manager.clone(), store: state.store.clone(), agent: state.agent.clone() };
+            let ctx = ai::Ctx {
+                app: app.handle().clone(),
+                manager: state.manager.clone(),
+                store: state.store.clone(),
+                agent: state.agent.clone(),
+            };
             app.manage(state);
             tauri::async_runtime::spawn(async move {
                 match mcp::start(ctx.clone()).await {

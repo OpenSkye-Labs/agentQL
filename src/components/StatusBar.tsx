@@ -11,7 +11,10 @@ export function StatusBar({ onToggleChat }: { onToggleChat: () => void }) {
   const secretStorage = useStore((s) => s.secretStorage);
   const chatOpen = useStore((s) => s.chatOpen);
   return (
-    <footer className="flex h-6 items-center gap-3 border-t border-border bg-elev px-3 text-[11px] text-muted" role="contentinfo">
+    <footer
+      className="flex h-6 items-center gap-3 border-t border-border bg-elev px-3 text-[11px] text-muted"
+      role="contentinfo"
+    >
       {conn ? (
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: conn.color ?? "var(--success)" }} />

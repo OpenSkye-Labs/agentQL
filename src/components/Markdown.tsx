@@ -11,17 +11,49 @@ export function Markdown({ text, connectionId }: { text: string; connectionId?: 
       {blocks.map((b, i) => {
         if (b.type === "code") return <CodeBlock key={i} lang={b.lang} code={b.text} connectionId={connectionId} />;
         if (b.type === "heading") return <h3 key={i}>{inline(b.text)}</h3>;
-        if (b.type === "list") return b.ordered ? <ol key={i}>{b.items.map((it, j) => <li key={j}>{inline(it)}</li>)}</ol> : <ul key={i}>{b.items.map((it, j) => <li key={j}>{inline(it)}</li>)}</ul>;
+        if (b.type === "list")
+          return b.ordered ? (
+            <ol key={i}>
+              {b.items.map((it, j) => (
+                <li key={j}>{inline(it)}</li>
+              ))}
+            </ol>
+          ) : (
+            <ul key={i}>
+              {b.items.map((it, j) => (
+                <li key={j}>{inline(it)}</li>
+              ))}
+            </ul>
+          );
         if (b.type === "table")
           return (
             <div key={i} className="overflow-auto scroll">
               <table>
-                <thead><tr>{b.head.map((h, j) => <th key={j}>{inline(h)}</th>)}</tr></thead>
-                <tbody>{b.rows.map((r, j) => <tr key={j}>{r.map((c, k) => <td key={k}>{inline(c)}</td>)}</tr>)}</tbody>
+                <thead>
+                  <tr>
+                    {b.head.map((h, j) => (
+                      <th key={j}>{inline(h)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {b.rows.map((r, j) => (
+                    <tr key={j}>
+                      {r.map((c, k) => (
+                        <td key={k}>{inline(c)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
               </table>
             </div>
           );
-        if (b.type === "quote") return <blockquote key={i} className="border-l-2 border-border pl-2 text-muted">{inline(b.text)}</blockquote>;
+        if (b.type === "quote")
+          return (
+            <blockquote key={i} className="border-l-2 border-border pl-2 text-muted">
+              {inline(b.text)}
+            </blockquote>
+          );
         return <p key={i}>{inline(b.text)}</p>;
       })}
     </div>
@@ -31,16 +63,44 @@ export function Markdown({ text, connectionId }: { text: string; connectionId?: 
 function CodeBlock({ lang, code, connectionId }: { lang: string; code: string; connectionId?: string }) {
   const openTab = useStore((s) => s.openTab);
   const toast = useStore((s) => s.toast);
-  const isSql = /sql|postgres|mysql|sqlite/i.test(lang) || (!lang && /^\s*(select|with|insert|update|delete|create|alter|explain)\b/i.test(code));
+  const isSql =
+    /sql|postgres|mysql|sqlite/i.test(lang) ||
+    (!lang && /^\s*(select|with|insert|update|delete|create|alter|explain)\b/i.test(code));
   return (
     <div className="group relative my-1.5">
-      <pre><code>{code}</code></pre>
+      <pre>
+        <code>{code}</code>
+      </pre>
       <div className="absolute right-1 top-1 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
-        <button className="rounded border border-border bg-elev p-1 hover:bg-hover" title="Copy" aria-label="Copy code" onClick={() => { void navigator.clipboard.writeText(code); toast("Copied", "success"); }}><Copy size={12} /></button>
+        <button
+          className="rounded border border-border bg-elev p-1 hover:bg-hover"
+          title="Copy"
+          aria-label="Copy code"
+          onClick={() => {
+            void navigator.clipboard.writeText(code);
+            toast("Copied", "success");
+          }}
+        >
+          <Copy size={12} />
+        </button>
         {isSql && connectionId && (
           <>
-            <button className="rounded border border-border bg-elev p-1 hover:bg-hover" title="Insert into current query tab" aria-label="Insert into editor" onClick={() => window.dispatchEvent(new CustomEvent("agentql:insert-sql", { detail: code.trim() }))}><ArrowDownToLine size={12} /></button>
-            <button className="rounded border border-border bg-elev p-1 hover:bg-hover" title="Open in a new query tab" aria-label="Open in new query tab" onClick={() => openTab({ kind: "query", connectionId, title: "From assistant", sql: code.trim() })}><Play size={12} /></button>
+            <button
+              className="rounded border border-border bg-elev p-1 hover:bg-hover"
+              title="Insert into current query tab"
+              aria-label="Insert into editor"
+              onClick={() => window.dispatchEvent(new CustomEvent("agentql:insert-sql", { detail: code.trim() }))}
+            >
+              <ArrowDownToLine size={12} />
+            </button>
+            <button
+              className="rounded border border-border bg-elev p-1 hover:bg-hover"
+              title="Open in a new query tab"
+              aria-label="Open in new query tab"
+              onClick={() => openTab({ kind: "query", connectionId, title: "From assistant", sql: code.trim() })}
+            >
+              <Play size={12} />
+            </button>
           </>
         )}
       </div>
@@ -62,7 +122,10 @@ function parseBlocks(src: string): Block[] {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    if (!line.trim()) { i++; continue; }
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
     const fence = line.match(/^\s*```\s*(\w*)/);
     if (fence) {
       const buf: string[] = [];
@@ -73,10 +136,24 @@ function parseBlocks(src: string): Block[] {
       continue;
     }
     const h = line.match(/^\s*#{1,6}\s+(.*)/);
-    if (h) { out.push({ type: "heading", text: h[1] }); i++; continue; }
-    if (/^\s*>\s?/.test(line)) { out.push({ type: "quote", text: line.replace(/^\s*>\s?/, "") }); i++; continue; }
+    if (h) {
+      out.push({ type: "heading", text: h[1] });
+      i++;
+      continue;
+    }
+    if (/^\s*>\s?/.test(line)) {
+      out.push({ type: "quote", text: line.replace(/^\s*>\s?/, "") });
+      i++;
+      continue;
+    }
     if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1])) {
-      const cells = (l: string) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      const cells = (l: string) =>
+        l
+          .trim()
+          .replace(/^\|/, "")
+          .replace(/\|$/, "")
+          .split("|")
+          .map((c) => c.trim());
       const head = cells(line);
       i += 2;
       const rows: string[][] = [];
@@ -93,14 +170,16 @@ function parseBlocks(src: string): Block[] {
         if (!m) break;
         items.push(m[2]);
         i++;
-        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !/^\s*([-*+]|\d+[.)])\s+/.test(lines[i])) items[items.length - 1] += " " + lines[i++].trim();
+        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !/^\s*([-*+]|\d+[.)])\s+/.test(lines[i]))
+          items[items.length - 1] += " " + lines[i++].trim();
       }
       out.push({ type: "list", ordered, items });
       continue;
     }
     const buf = [line];
     i++;
-    while (i < lines.length && lines[i].trim() && !/^\s*(```|#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\|)/.test(lines[i])) buf.push(lines[i++]);
+    while (i < lines.length && lines[i].trim() && !/^\s*(```|#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\|)/.test(lines[i]))
+      buf.push(lines[i++]);
     out.push({ type: "p", text: buf.join(" ") });
   }
   return out;
@@ -120,7 +199,15 @@ function inline(text: string): ReactNode {
     else if (m[5]) {
       const href = m[7];
       parts.push(
-        <a key={k++} href={href} className="underline text-accent" onClick={(e) => { e.preventDefault(); if (/^https?:\/\//.test(href)) void openUrl(href).catch(() => {}); }}>
+        <a
+          key={k++}
+          href={href}
+          className="underline text-accent"
+          onClick={(e) => {
+            e.preventDefault();
+            if (/^https?:\/\//.test(href)) void openUrl(href).catch(() => {});
+          }}
+        >
           {m[6]}
         </a>,
       );
