@@ -52,16 +52,14 @@ cargo test --test live -- --ignored   # optional, needs the Docker databases
 
 ## Versioning and releases
 
-AgentQL uses [semantic versioning](https://semver.org) with `v`-prefixed tags. Maintainers cut a release like this:
+Versions follow [semantic versioning](https://semver.org) and are managed by [release-please](https://github.com/googleapis/release-please). Nobody edits version numbers by hand.
 
-```bash
-pnpm version:set 0.2.0                 # updates package.json, tauri.conf.json, Cargo.toml, Cargo.lock
-git commit -am "chore: release v0.2.0" # PR into dev, merge it
-# open a PR from dev into main, merge it, then tag main:
-git checkout main && git pull && git tag v0.2.0 && git push origin v0.2.0
-```
+1. PR titles use [conventional commits](https://www.conventionalcommits.org): `feat:` bumps the minor version, `fix:` the patch, `feat!:` or a `BREAKING CHANGE:` footer the minor while we are pre-1.0. Other types (`chore:`, `docs:`, `ci:`, `refactor:`) do not trigger a release.
+2. Feature PRs are squash-merged into `dev`. When `dev` is ready to ship, a maintainer opens a PR from `dev` into `main` and merges it with a **merge commit** so the individual titles survive.
+3. release-please then opens a release PR against `main` that bumps `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` and updates `CHANGELOG.md`.
+4. Merging the release PR creates the `vX.Y.Z` tag and GitHub Release and starts the installer build for macOS (Apple Silicon and Intel), Linux and Windows. Assets appear on the release a few minutes later.
 
-Pushing the tag builds installers for macOS (Apple Silicon and Intel), Linux and Windows and attaches them to a draft GitHub Release with auto-generated notes. A maintainer reviews the draft and publishes it.
+`pnpm version:check` fails CI if the three version files ever disagree.
 
 ## Reporting bugs and proposing features
 

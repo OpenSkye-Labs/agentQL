@@ -10,8 +10,7 @@
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
     "check": "node --experimental-strip-types src/lib/sql.check.ts",
-    "version:set": "node scripts/version.mjs set",
-    "version:check": "node scripts/version.mjs check",
+    "version:check": "node scripts/version.mjs",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint": "oxlint --deny-warnings"

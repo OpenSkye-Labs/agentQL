@@ -36,3 +36,6 @@ Append-only record of shipped behaviour. Newest at the bottom.
   CI runs oxfmt/oxlint/tsc/build for frontend changes and rustfmt/clippy/test for Rust changes, filtered by touched paths,
   plus a version-consistency check (`pnpm version:check`). CONTRIBUTING.md, PR template, CODEOWNERS, Dependabot for actions,
   and all actions pinned to commit SHAs. Codebase formatted once with `cargo fmt` and `oxfmt`.
+- Automated versioning with release-please: conventional-commit PR titles drive the bump; on every merge to `main` a release PR
+  bumps package.json / tauri.conf.json / Cargo.toml and CHANGELOG.md; merging it tags `vX.Y.Z`, creates the GitHub Release and
+  dispatches the installer build. `dev` -> `main` PRs use a merge commit so individual commit titles survive.

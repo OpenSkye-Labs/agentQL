@@ -58,6 +58,8 @@ docs/             PLAN.md, ARCHITECTURE.md, TASKS.md, FEATURES.md, REVIEWS.md
   Work on a branch off `dev` (`feat/...`, `fix/...`), push, open a PR against `dev`. See CONTRIBUTING.md.
 - Frontend quality gates: `pnpm format:check` (oxfmt), `pnpm lint` (oxlint), `pnpm typecheck`, `pnpm check`, `pnpm build`.
   Rust: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. CI runs only the stack you touched.
-- Version lives in package.json, tauri.conf.json and Cargo.toml; change it with `pnpm version:set X.Y.Z`.
-  Releases are cut by pushing a `vX.Y.Z` tag, which builds installers into a draft GitHub Release.
+- Versioning is automated by release-please from conventional-commit PR titles (`feat:` minor, `fix:` patch).
+  Feature PRs squash into `dev`; `dev` -> `main` uses a merge commit; release-please opens a release PR on `main`
+  that bumps package.json / tauri.conf.json / Cargo.toml + CHANGELOG.md; merging it tags and builds the installers.
+  Never bump versions by hand (`pnpm version:check` guards consistency in CI).
 - Commits and PRs carry no AI co-author or "generated with" trailers.
