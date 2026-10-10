@@ -9,6 +9,7 @@ import type {
   QueryResult,
   RowChange,
   ScanResult,
+  SchemaCatalog,
   Settings,
   TableDetails,
   TableInfo,
@@ -46,6 +47,7 @@ export const api = {
   listTables: (id: string, schema: string) => invoke<TableInfo[]>("list_tables", { id, schema }),
   tableDetails: (id: string, schema: string, table: string) =>
     invoke<TableDetails>("table_details", { id, schema, table }),
+  schemaCatalog: (id: string, schema: string) => invoke<SchemaCatalog>("schema_catalog", { id, schema }),
   fetchTable: (id: string, query: TableQuery) => invoke<TablePage>("fetch_table", { id, query }),
   countTable: (id: string, query: TableQuery) => invoke<number>("count_table", { id, query }),
   previewChanges: (

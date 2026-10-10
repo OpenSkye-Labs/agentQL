@@ -16,6 +16,7 @@ const DashboardTab = lazy(() => import("./components/DashboardTab").then((m) => 
 const ChatPanel = lazy(() => import("./components/ChatPanel").then((m) => ({ default: m.ChatPanel })));
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { SHORTCUTS_EVENT, ShortcutsDialog } from "./components/ShortcutsDialog";
 import { StatusBar } from "./components/StatusBar";
 import { Toasts } from "./components/Toasts";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -62,6 +63,9 @@ export default function App() {
       } else if (e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        window.dispatchEvent(new Event(SHORTCUTS_EVENT));
       } else if (/^[1-9]$/.test(e.key)) {
         const idx = Number(e.key) - 1;
         if (s.tabs[idx]) {
@@ -134,6 +138,7 @@ export default function App() {
           onOpenChange={(o) => setConnDialog((d) => ({ ...d, open: o }))}
         />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <ShortcutsDialog />
       </div>
     </TooltipProvider>
   );

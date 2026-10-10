@@ -159,6 +159,9 @@ pub struct Settings {
     pub theme: Option<String>,
     #[serde(default)]
     pub editor_font_size: Option<u8>,
+    /// Vim keybindings in the SQL editor.
+    #[serde(default)]
+    pub editor_vim: bool,
 }
 fn default_row_limit() -> u32 {
     1000

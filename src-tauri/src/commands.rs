@@ -5,7 +5,7 @@ use crate::ai::{self, AgentEvent, ChatSession, Ctx};
 use crate::config::{ConnectionConfig, ConnectionSecrets, Settings};
 use crate::db::mongo::MongoFind;
 use crate::db::redis::ScanResult;
-use crate::db::{Live, QueryResult, RowChange, TableDetails, TableInfo, TableQuery};
+use crate::db::{Live, QueryResult, RowChange, SchemaCatalog, TableDetails, TableInfo, TableQuery};
 use crate::error::{AppError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -828,4 +828,14 @@ pub async fn install_update(app: AppHandle) -> Result<()> {
         .await
         .map_err(|e| e.to_string())?;
     app.restart();
+}
+
+#[tauri::command]
+pub async fn schema_catalog(
+    st: State<'_, AppState>,
+    id: String,
+    schema: String,
+) -> Result<SchemaCatalog> {
+    let s = st.manager.get(&id).await?;
+    sql(&s).await?.schema_catalog(&schema).await
 }

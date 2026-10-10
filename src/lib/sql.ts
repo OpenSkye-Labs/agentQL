@@ -1,5 +1,5 @@
-/** Find the `;`-delimited statement containing `pos` (ignores quotes/comments reasonably). */
-export function statementAt(doc: string, pos: number): string {
+/** Offsets where `;`-delimited statements start/end (ignores quotes/comments reasonably). */
+export function statementBounds(doc: string): number[] {
   const bounds: number[] = [0];
   let i = 0;
   let quote: string | null = null;
@@ -18,6 +18,20 @@ export function statementAt(doc: string, pos: number): string {
     i++;
   }
   bounds.push(doc.length);
+  return bounds;
+}
+
+/** Start offset of the statement containing `pos`. */
+export function statementStart(doc: string, pos: number): number {
+  const bounds = statementBounds(doc);
+  let start = 0;
+  for (const b of bounds) if (b <= pos) start = b;
+  return start;
+}
+
+/** Find the `;`-delimited statement containing `pos`. */
+export function statementAt(doc: string, pos: number): string {
+  const bounds = statementBounds(doc);
   for (let b = 0; b < bounds.length - 1; b++) {
     const start = bounds[b];
     const end = bounds[b + 1];

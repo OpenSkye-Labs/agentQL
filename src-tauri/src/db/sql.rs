@@ -3,8 +3,8 @@
 
 use super::value::{mysql_value, pg_value, sqlite_value};
 use super::{
-    Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult, RowChange, TableDetails, TableInfo,
-    TableQuery,
+    CatalogColumn, CatalogForeignKey, Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult,
+    RowChange, SchemaCatalog, TableDetails, TableInfo, TableQuery,
 };
 use crate::config::{ConnectionConfig, ConnectionSecrets, Driver};
 use crate::error::{AppError, Result};
@@ -919,6 +919,91 @@ impl SqlConn {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Columns and foreign keys of every table in `schema`, for editor completion.
+    /// ponytail: whole-schema payload in one go; page or lazy-load per table if a schema with
+    /// tens of thousands of columns ever shows up.
+    pub async fn schema_catalog(&self, schema: &str) -> Result<SchemaCatalog> {
+        let s = self.literal(&Value::String(schema.into()));
+        let (cols, fks) = match self.driver {
+            Driver::Postgres => (
+                self.rows(&format!(
+                    "SELECT c.relname AS tbl, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS data_type \
+                     FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     WHERE n.nspname = {s} AND c.relkind IN ('r','v','m','p','f') AND a.attnum > 0 AND NOT a.attisdropped \
+                     ORDER BY c.relname, a.attnum"
+                ))
+                .await?,
+                self.rows(&format!(
+                    "SELECT c.relname AS tbl, \
+                     (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS cols, \
+                     rn.nspname AS ref_schema, rc.relname AS ref_table, \
+                     (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(con.confkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS ref_cols \
+                     FROM pg_constraint con JOIN pg_class c ON c.oid = con.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     JOIN pg_class rc ON rc.oid = con.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace \
+                     WHERE con.contype = 'f' AND n.nspname = {s} ORDER BY c.relname, con.conname"
+                ))
+                .await?,
+            ),
+            Driver::Mysql | Driver::Mariadb => (
+                self.rows(&format!(
+                    "SELECT TABLE_NAME AS tbl, COLUMN_NAME AS name, COLUMN_TYPE AS data_type \
+                     FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = {s} ORDER BY TABLE_NAME, ORDINAL_POSITION"
+                ))
+                .await?,
+                self.rows(&format!(
+                    "SELECT TABLE_NAME AS tbl, GROUP_CONCAT(COLUMN_NAME ORDER BY ORDINAL_POSITION) AS cols, \
+                     REFERENCED_TABLE_SCHEMA AS ref_schema, REFERENCED_TABLE_NAME AS ref_table, \
+                     GROUP_CONCAT(REFERENCED_COLUMN_NAME ORDER BY ORDINAL_POSITION) AS ref_cols \
+                     FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = {s} AND REFERENCED_TABLE_NAME IS NOT NULL \
+                     GROUP BY TABLE_NAME, CONSTRAINT_NAME, REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME ORDER BY TABLE_NAME, CONSTRAINT_NAME"
+                ))
+                .await?,
+            ),
+            Driver::Sqlite => {
+                // ponytail: one pragma pair per table (local file, cheap); no bulk catalog in SQLite.
+                let mut out = SchemaCatalog::default();
+                for t in self.tables(schema).await? {
+                    let d = self.table_details(schema, &t.name).await?;
+                    out.columns.extend(d.columns.into_iter().map(|c| CatalogColumn {
+                        table: t.name.clone(),
+                        name: c.name,
+                        data_type: c.data_type,
+                    }));
+                    out.foreign_keys
+                        .extend(d.foreign_keys.into_iter().map(|f| CatalogForeignKey {
+                            table: t.name.clone(),
+                            columns: f.columns,
+                            ref_schema: f.ref_schema,
+                            ref_table: f.ref_table,
+                            ref_columns: f.ref_columns,
+                        }));
+                }
+                return Ok(out);
+            }
+            _ => unreachable!(),
+        };
+        Ok(SchemaCatalog {
+            columns: cols
+                .into_iter()
+                .map(|mut r| CatalogColumn {
+                    table: take_str(&mut r, "tbl"),
+                    name: take_str(&mut r, "name"),
+                    data_type: take_str(&mut r, "data_type"),
+                })
+                .collect(),
+            foreign_keys: fks
+                .into_iter()
+                .map(|mut r| CatalogForeignKey {
+                    table: take_str(&mut r, "tbl"),
+                    columns: split_csv(opt_str(&mut r, "cols")),
+                    ref_schema: opt_str(&mut r, "ref_schema"),
+                    ref_table: take_str(&mut r, "ref_table"),
+                    ref_columns: split_csv(opt_str(&mut r, "ref_cols")),
+                })
+                .collect(),
+        })
     }
 
     fn synth_ddl(

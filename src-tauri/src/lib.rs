@@ -99,6 +99,7 @@ pub fn run() {
             commands::ai_resolve_approval,
             commands::run_chart,
             commands::app_info,
+            commands::schema_catalog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

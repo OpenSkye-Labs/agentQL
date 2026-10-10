@@ -1,6 +1,15 @@
 import { create } from "zustand";
 import { api, errMsg } from "./api";
-import type { ChatSession, ConnectionConfig, Dashboard, HistoryEntry, SavedQuery, Settings, TableInfo } from "./types";
+import type {
+  ChatSession,
+  ConnectionConfig,
+  Dashboard,
+  HistoryEntry,
+  SavedQuery,
+  SchemaCatalog,
+  Settings,
+  TableInfo,
+} from "./types";
 
 export type Tab =
   | { id: string; kind: "query"; connectionId: string; title: string; sql: string; pinned?: boolean }
@@ -26,6 +35,7 @@ export interface LiveConn {
   version: string | null;
   schemas: string[];
   tables: Record<string, TableInfo[]>; // by schema
+  catalog: Record<string, SchemaCatalog>; // by schema, for editor completion
   databases: string[];
   expanded: Record<string, boolean>;
   loading?: boolean;
@@ -142,6 +152,7 @@ export const useStore = create<State>((set, get) => ({
             version: r.server_version,
             schemas,
             tables: {},
+            catalog: {},
             databases,
             expanded: first ? { [first]: true } : {},
           },
@@ -173,11 +184,24 @@ export const useStore = create<State>((set, get) => ({
 
   loadTables: async (connId, schema) => {
     try {
-      const tables = await api.listTables(connId, schema);
+      const [tables, catalog] = await Promise.all([
+        api.listTables(connId, schema),
+        // Completion is best-effort: a failing catalog query must not break the sidebar.
+        api.schemaCatalog(connId, schema).catch((e) => (console.warn("schema catalog", errMsg(e)), null)),
+      ]);
       set((s) => {
         const l = s.live[connId];
         if (!l) return {};
-        return { live: { ...s.live, [connId]: { ...l, tables: { ...l.tables, [schema]: tables } } } };
+        return {
+          live: {
+            ...s.live,
+            [connId]: {
+              ...l,
+              tables: { ...l.tables, [schema]: tables },
+              catalog: catalog ? { ...l.catalog, [schema]: catalog } : l.catalog,
+            },
+          },
+        };
       });
     } catch (e) {
       get().toast(errMsg(e), "error");
@@ -189,7 +213,7 @@ export const useStore = create<State>((set, get) => ({
     if (!l) return;
     try {
       const schemas = await api.listSchemas(connId);
-      set((s) => ({ live: { ...s.live, [connId]: { ...s.live[connId], schemas, tables: {} } } }));
+      set((s) => ({ live: { ...s.live, [connId]: { ...s.live[connId], schemas, tables: {}, catalog: {} } } }));
       await Promise.all(schemas.filter((sc) => l.expanded[sc]).map((sc) => get().loadTables(connId, sc)));
     } catch (e) {
       get().toast(errMsg(e), "error");
@@ -303,7 +327,7 @@ export const useStore = create<State>((set, get) => ({
 }));
 
 export function emptyLive(id: string): LiveConn {
-  return { id, database: "", version: null, schemas: [], tables: {}, databases: [], expanded: {} };
+  return { id, database: "", version: null, schemas: [], tables: {}, catalog: {}, databases: [], expanded: {} };
 }
 
 export function applyTheme(theme: string, fontSize: number | null) {
