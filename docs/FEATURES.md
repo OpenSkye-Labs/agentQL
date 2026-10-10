@@ -51,3 +51,12 @@ Append-only record of shipped behaviour. Newest at the bottom.
   Later / Update now; after an update installs, "What's new in vX.Y.Z" shows that version's section of the bundled CHANGELOG.md once.
 - Windows build fix: ssh-agent auth uses the OpenSSH agent named pipe on Windows (russh `connect_named_pipe`); CI now runs
   `cargo check` on Windows and macOS for Rust changes so cross-platform compile errors fail the PR, not the release build.
+- AI trust and audit (M2): first-use consent card per connection before a remote API provider (Anthropic/OpenAI/compatible
+  with a non-localhost base URL) receives any schema or data, stored as `agent_remote_consent_at` on the connection and
+  revocable in the connection dialog; CLI providers and localhost base URLs skip it. Per-connection agent scope (`agent_scope`,
+  whole schemas or single tables, picked from the "Scope" pill in the assistant) is enforced in the tool layer: list/describe
+  tools filter or refuse, and run_sql / explain_sql / charts parse the SQL with sqlparser to check every referenced table
+  (unparsable SQL is refused while a scope is set). Every statement the agent executes lands in the normal query history
+  tagged `source: "agent"` with its session id (backend writes `history.json` under a lock; the UI appends through the same
+  command). run_sql pushes `LIMIT <limit>` into bare SELECTs that have no LIMIT/OFFSET/FETCH/lock clause so the database
+  stops scanning early.

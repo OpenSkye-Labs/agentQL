@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
 import { api, errMsg } from "./api";
 import type { ChatSession, ConnectionConfig, Dashboard, HistoryEntry, SavedQuery, Settings, TableInfo } from "./types";
 
@@ -117,6 +118,10 @@ export const useStore = create<State>((set, get) => ({
       secretStorage,
     });
     applyTheme(settings.theme ?? "system", settings.editor_font_size ?? null);
+    // Statements the agent runs are appended by the backend; mirror them into the list.
+    void listen<HistoryEntry>("history:added", ({ payload }) =>
+      set((s) => ({ history: [payload, ...s.history].slice(0, 500) })),
+    );
   },
 
   refreshConnections: async () => set({ connections: await api.listConnections() }),
@@ -283,9 +288,8 @@ export const useStore = create<State>((set, get) => ({
     set({ savedQueries: list });
   },
   addHistory: async (h) => {
-    const list = [h, ...get().history].slice(0, 500);
-    set({ history: list });
-    await api.kvSet("history", list).catch(() => {});
+    set((s) => ({ history: [h, ...s.history].slice(0, 500) }));
+    await api.historyAdd(h).catch(() => {});
   },
   clearHistory: async () => {
     set({ history: [] });

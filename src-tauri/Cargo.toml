@@ -55,7 +55,7 @@ keyring = { version = "3", features = [
   "crypto-rust",
   "tokio",
 ] }
-sqlparser = "0.53"
+sqlparser = { version = "0.53", features = ["visitor"] }
 async-stream = "0.3"
 bytes = "1"
 csv = "1"

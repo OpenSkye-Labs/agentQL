@@ -28,6 +28,8 @@ fn cfg(driver: Driver, port: u16, user: &str, database: &str) -> ConnectionConfi
         ssl_key_path: None,
         ssh: None,
         read_only: false,
+        agent_scope: None,
+        agent_remote_consent_at: None,
         options: HashMap::new(),
         created_at: None,
         updated_at: None,

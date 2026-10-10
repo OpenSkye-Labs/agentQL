@@ -643,6 +643,12 @@ pub fn kv_set(st: State<'_, AppState>, name: String, value: Value) -> Result<()>
     st.store.write(&format!("{name}.json"), &value)
 }
 
+/// Prepend one query-history entry (the UI's own runs); agent runs go through the same store call.
+#[tauri::command]
+pub fn history_add(st: State<'_, AppState>, entry: Value) -> Result<()> {
+    st.store.push_history(entry)
+}
+
 // ----------------------------------------------------------------- ai
 
 #[tauri::command]

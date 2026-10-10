@@ -25,15 +25,26 @@ import {
 } from "lucide-react";
 import { api, errMsg } from "../lib/api";
 import { useStore, useActiveTab } from "../lib/store";
-import type { AgentEvent, Block, ChartSpec, ChatSession, Dashboard, Message, QueryResult } from "../lib/types";
+import {
+  isSql,
+  type AgentEvent,
+  type Block,
+  type ChartSpec,
+  type ChatSession,
+  type Dashboard,
+  type Message,
+  type QueryResult,
+} from "../lib/types";
 import { Button, Menu, Spinner, Empty, Tooltip } from "./ui";
 import { Markdown } from "./Markdown";
 import { ChartCard } from "./ChartCard";
+import { AgentScopeDialog } from "./AgentScopeDialog";
 import { ResultGrid } from "./ResultGrid";
 import { fmtDuration } from "../lib/format";
 
 interface Approval {
   id: string;
+  kind: "write" | "consent";
   description: string;
   statement: string;
 }
@@ -66,6 +77,8 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
   const openTab = useStore((s) => s.openTab);
   const prefill = useStore((s) => s.chatPrefill);
   const takeChatPrefill = useStore((s) => s.takeChatPrefill);
+  const refreshConnections = useStore((s) => s.refreshConnections);
+  const [scopeOpen, setScopeOpen] = useState(false);
 
   const connId =
     activeTab?.connectionId && live[activeTab.connectionId] ? activeTab.connectionId : (Object.keys(live)[0] ?? null);
@@ -143,7 +156,7 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
       else if (ev.kind === "approval_request")
         patchTurn(sid, (t) => ({
           ...t,
-          approval: { id: ev.id, description: ev.description, statement: ev.statement },
+          approval: { id: ev.id, kind: ev.approval_kind, description: ev.description, statement: ev.statement },
         }));
       else if (ev.kind === "error") toast(ev.message, "error");
       else if (ev.kind === "done") {
@@ -154,12 +167,14 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
         });
         setSession((cur) => (cur?.id === sid ? ev.session : cur));
         void refreshSessions();
+        // A granted remote-provider consent is stored on the connection by the backend.
+        void refreshConnections();
       }
     });
     return () => {
       void un.then((f) => f());
     };
-  }, [patchTurn, toast, refreshSessions]);
+  }, [patchTurn, toast, refreshSessions, refreshConnections]);
 
   // Prefill queued from elsewhere in the app (store-backed, so it survives the panel mounting late).
   useEffect(() => {
@@ -288,6 +303,9 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
 
   return (
     <section className="flex h-full flex-col border-l border-border bg-bg" aria-label="AI assistant">
+      {conn && (
+        <AgentScopeDialog key={`${conn.id}-${scopeOpen}`} conn={conn} open={scopeOpen} onOpenChange={setScopeOpen} />
+      )}
       <header className="flex h-9 items-center gap-1 border-b border-border bg-elev px-2">
         <Menu
           align="start"
@@ -400,7 +418,12 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
                 <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold">
                   <Lock size={12} className="text-warning" /> {approval.description}
                 </div>
-                <pre className="mb-2 max-h-40 overflow-auto scroll rounded-lg bg-sunken p-2 font-mono text-xs whitespace-pre-wrap selectable">
+                <pre
+                  className={clsx(
+                    "mb-2 max-h-40 overflow-auto scroll rounded-lg bg-sunken p-2 text-xs whitespace-pre-wrap selectable",
+                    approval.kind === "write" && "font-mono",
+                  )}
+                >
                   {approval.statement}
                 </pre>
                 <div className="flex gap-2">
@@ -413,7 +436,7 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
                       patchTurn(session!.id, (t) => ({ ...t, approval: null }));
                     }}
                   >
-                    <Check size={12} /> Run it
+                    <Check size={12} /> {approval.kind === "consent" ? "Allow" : "Run it"}
                   </Button>
                   <Button
                     size="sm"
@@ -422,7 +445,7 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
                       patchTurn(session!.id, (t) => ({ ...t, approval: null }));
                     }}
                   >
-                    Deny
+                    {approval.kind === "consent" ? "Not now" : "Deny"}
                   </Button>
                 </div>
               </div>
@@ -516,6 +539,23 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
                 {settings.agent_allow_writes ? "Writes on" : "Read-only"}
               </button>
             </Tooltip>
+            {conn && isSql(conn.driver) && (
+              <Tooltip label="Which schemas and tables the agent may see on this connection">
+                <button
+                  type="button"
+                  onClick={() => setScopeOpen(true)}
+                  className={clsx(
+                    "flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+                    conn.agent_scope
+                      ? "border-accent/40 bg-accent-soft text-fg"
+                      : "border-border text-muted hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  <Table2 size={11} />
+                  {conn.agent_scope ? `Scope: ${conn.agent_scope.length}` : "All tables"}
+                </button>
+              </Tooltip>
+            )}
             <span className="flex-1" />
             {busy ? (
               <Tooltip label="Stop">

@@ -110,10 +110,24 @@ pub struct ConnectionConfig {
     pub read_only: bool,
     #[serde(default)]
     pub options: HashMap<String, String>,
+    /// Schemas/tables the AI agent may see. `None` = everything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_scope: Option<Vec<ScopeEntry>>,
+    /// When the user allowed sending this connection's schema and data to a remote LLM provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_remote_consent_at: Option<String>,
     #[serde(default)]
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+}
+
+/// One allowed item of the agent scope: a whole schema (`table: None`) or a single table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeEntry {
+    pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<String>,
 }
 
 /// Secrets travel with the config only in memory / over IPC, never to connections.json.
@@ -242,6 +256,17 @@ impl Store {
 
     pub fn settings(&self) -> Settings {
         self.read("settings.json")
+    }
+
+    /// Prepend one entry to the query history (`history.json`, newest first, capped at 500).
+    /// The UI and the agent both append through here so neither overwrites the other.
+    pub fn push_history(&self, entry: serde_json::Value) -> Result<()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _g = LOCK.lock().unwrap();
+        let mut list: Vec<serde_json::Value> = self.read("history.json");
+        list.insert(0, entry);
+        list.truncate(500);
+        self.write("history.json", &list)
     }
 
     pub fn save_settings(&self, s: &Settings) -> Result<()> {
