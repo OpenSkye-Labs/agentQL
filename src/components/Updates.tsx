@@ -30,7 +30,10 @@ const ls = {
 /** The `## <version> ...` section of the bundled CHANGELOG, without the version heading. */
 export function changelogFor(version: string, text = changelog): string | null {
   const lines = text.split("\n");
-  const start = lines.findIndex((l) => l.startsWith(`## ${version}`) || l.startsWith(`## [${version}]`));
+  // Exact version only: "## 0.1.1" must not match "## 0.1.10". Accepts "## 0.1.1 (date)" and "## [0.1.1](url)".
+  const esc = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const heading = new RegExp(`^## \\[?${esc}\\]?(?=\\s|\\(|$)`);
+  const start = lines.findIndex((l) => heading.test(l));
   if (start < 0) return null;
   let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
   if (end < 0) end = lines.length;
@@ -50,6 +53,14 @@ export function UpdateButton() {
   const [current, setCurrent] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"update" | "whatsnew" | null>(null);
   const [installing, setInstalling] = useState(false);
+  // An update found while "What's new" is showing waits here until that dialog closes.
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+
+  const showUpdatePrompt = (version: string) => {
+    ls.set(PROMPTED, version);
+    setPendingPrompt(null);
+    setDialog("update");
+  };
 
   useEffect(() => {
     // What's new: runs once per installed version, skipped on the very first launch.
@@ -58,7 +69,7 @@ export function UpdateButton() {
         setCurrent(v);
         const seen = ls.get(LAST_SEEN);
         ls.set(LAST_SEEN, v);
-        if (seen && seen !== v && changelogFor(v)) setDialog("whatsnew");
+        if (seen && seen !== v && changelogFor(v)) setDialog((d) => d ?? "whatsnew");
       })
       .catch(() => {});
     // ponytail: one check at startup; add a periodic re-check if sessions run for days.
@@ -67,13 +78,24 @@ export function UpdateButton() {
       .then((u) => {
         if (!u) return;
         setUpdate(u);
-        if (ls.get(PROMPTED) !== u.version) {
+        if (ls.get(PROMPTED) === u.version) return;
+        setDialog((d) => {
+          if (d) {
+            setPendingPrompt(u.version);
+            return d;
+          }
           ls.set(PROMPTED, u.version);
-          setDialog((d) => d ?? "update");
-        }
+          return "update";
+        });
       })
-      .catch(() => {});
+      // Offline or no release yet: nothing the user can act on, so stay quiet (the button shows once a check succeeds).
+      .catch((e) => console.warn("update check failed", e));
   }, []);
+
+  const closeWhatsNew = () => {
+    if (pendingPrompt && update) showUpdatePrompt(update.version);
+    else setDialog(null);
+  };
 
   const install = () => {
     setInstalling(true);
@@ -127,9 +149,9 @@ export function UpdateButton() {
       {current && (
         <Dialog
           open={dialog === "whatsnew"}
-          onOpenChange={(o) => setDialog(o ? "whatsnew" : null)}
+          onOpenChange={(o) => (o ? setDialog("whatsnew") : closeWhatsNew())}
           title={`What's new in v${current}`}
-          footer={<Button onClick={() => setDialog(null)}>Close</Button>}
+          footer={<Button onClick={closeWhatsNew}>Close</Button>}
         >
           <Markdown text={changelogFor(current) ?? "_No notes for this version._"} />
         </Dialog>
