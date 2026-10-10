@@ -112,4 +112,11 @@ Round 4: 1 finding (P2), fixed:
 | --- | --- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | 9   | P2  | Keyword/snippet source also fired inside strings and comments (`SELECT 'F`) | Source wrapped in `ifNotIn` with the same node list lang-sql uses for its keyword completion |
 
+Round 5: 2 findings (P2), both fixed:
+
+| #   | Sev | Finding                                                                              | Resolution                                                                                                              |
+| --- | --- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| 10  | P2  | Every saved query went through the snippet parser, so `'${HOME}'` loaded as `'HOME'` | `isSnippet()` (numbered placeholders only) decides between snippet load and verbatim load; same for trigger completions |
+| 11  | P2  | Sidebar table listing waited for the whole-schema catalog (slow on big SQLite files) | Tables are published first; the catalog loads independently and merges when it arrives                                  |
+
 Skipped: none.

@@ -8,7 +8,7 @@ import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
 import type { QueryResult } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
-import { buildNamespace, editorCompletions } from "../lib/completion";
+import { buildNamespace, editorCompletions, isSnippet } from "../lib/completion";
 import { SqlEditor, type SqlEditorHandle } from "./SqlEditor";
 import { ResultGrid } from "./ResultGrid";
 import { SHORTCUTS_EVENT } from "./ShortcutsDialog";
@@ -65,7 +65,11 @@ export function QueryTab({ tab }: { tab: QTab }) {
         snippets: () =>
           compDeps.current.savedQueries
             .filter((q) => q.trigger)
-            .map((q) => snippetCompletion(q.sql, { label: q.trigger!, detail: q.name, type: "text", boost: 3 })),
+            .map((q) =>
+              isSnippet(q.sql)
+                ? snippetCompletion(q.sql, { label: q.trigger!, detail: q.name, type: "text", boost: 3 })
+                : { label: q.trigger!, detail: q.name, type: "text", boost: 3, apply: q.sql },
+            ),
       }),
     [],
   );
@@ -281,9 +285,11 @@ export function QueryTab({ tab }: { tab: QTab }) {
                   ...savedQueries.map((q) => ({
                     label: q.trigger ? `${q.name} · ${q.trigger}` : q.name,
                     onSelect: () => {
-                      // Snippet load: `${1:x}` placeholders become Tab stops; plain SQL loads unchanged.
-                      editor.current?.loadSnippet(q.sql);
-                      updateTab(tab.id, { title: q.name });
+                      // `${1:x}` placeholders become Tab stops; anything else loads verbatim.
+                      if (isSnippet(q.sql)) {
+                        editor.current?.loadSnippet(q.sql);
+                        updateTab(tab.id, { title: q.name });
+                      } else updateTab(tab.id, { sql: q.sql, title: q.name });
                     },
                   })),
                 ]
@@ -415,7 +421,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
         open={saveForm !== null}
         onOpenChange={(o) => !o && setSaveForm(null)}
         title="Save query"
-        description={"Placeholders like ${1:table} become Tab stops when the query is loaded."}
+        description={"Numbered placeholders like ${1:table} or ${2} become Tab stops when the query is loaded."}
         width="max-w-md"
         footer={
           <>

@@ -1,6 +1,14 @@
 // Runnable self-check: node --experimental-strip-types src/lib/completion.check.ts
 import assert from "node:assert/strict";
-import { buildNamespace, contextKeywords, editorCompletions, ident, joinSuggestions, tableRefs } from "./completion.ts";
+import {
+  buildNamespace,
+  contextKeywords,
+  editorCompletions,
+  ident,
+  isSnippet,
+  joinSuggestions,
+  tableRefs,
+} from "./completion.ts";
 
 const catalog = {
   public: {
@@ -126,4 +134,9 @@ assert.ok(contextKeywords("select * from t order by id ").includes("DESC"));
 assert.ok(contextKeywords("update t set a = 1 ", true).includes("RETURNING"));
 assert.ok(!contextKeywords("update t set a = 1 ", false).includes("RETURNING"));
 assert.ok(contextKeywords("delete from t ").includes("WHERE"));
+
+// snippets are opt-in through numbered placeholders; shell-style or escaped braces are ordinary SQL
+assert.ok(isSnippet("select * from ${1:table} limit ${2}"));
+assert.ok(!isSnippet("select '${HOME}' as home"));
+assert.ok(!isSnippet("select 1"));
 console.log("completion.check ok");

@@ -184,25 +184,22 @@ export const useStore = create<State>((set, get) => ({
 
   loadTables: async (connId, schema) => {
     try {
-      const [tables, catalog] = await Promise.all([
-        api.listTables(connId, schema),
-        // Completion is best-effort: a failing catalog query must not break the sidebar.
-        api.schemaCatalog(connId, schema).catch((e) => (console.warn("schema catalog", errMsg(e)), null)),
-      ]);
+      const tables = await api.listTables(connId, schema);
       set((s) => {
         const l = s.live[connId];
         if (!l) return {};
-        return {
-          live: {
-            ...s.live,
-            [connId]: {
-              ...l,
-              tables: { ...l.tables, [schema]: tables },
-              catalog: catalog ? { ...l.catalog, [schema]: catalog } : l.catalog,
-            },
-          },
-        };
+        return { live: { ...s.live, [connId]: { ...l, tables: { ...l.tables, [schema]: tables } } } };
       });
+      // Completion catalog is best-effort and must neither delay nor break the sidebar.
+      void api
+        .schemaCatalog(connId, schema)
+        .then((catalog) =>
+          set((s) => {
+            const l = s.live[connId];
+            return l ? { live: { ...s.live, [connId]: { ...l, catalog: { ...l.catalog, [schema]: catalog } } } } : {};
+          }),
+        )
+        .catch((e) => console.warn("schema catalog", errMsg(e)));
     } catch (e) {
       get().toast(errMsg(e), "error");
     }

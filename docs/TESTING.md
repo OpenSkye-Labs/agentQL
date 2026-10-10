@@ -52,7 +52,8 @@ least two tables linked by a foreign key (the demo containers above, or `?mock=1
 - [ ] Inside a string or comment (`SELECT 'F`, `-- wh`) no keyword or snippet completion appears.
 - [ ] Saved query with trigger `topn` and body `SELECT * FROM ${1:table} ORDER BY ${2:col} DESC LIMIT ${3:10}`:
       typing `topn` offers it; accepting it selects `table`, Tab moves to `col`, then `10`.
-- [ ] Loading that query from the Saved menu does the same placeholder walk; a saved query without `${}` loads as is.
+- [ ] Loading that query from the Saved menu does the same placeholder walk; a saved query without numbered
+      placeholders loads verbatim (`SELECT '${HOME}'` keeps its braces).
 - [ ] Settings → "Vim keymap" on: `Esc`, `dd`, `ciw` work; `Mod+Enter` still runs; off again restores normal editing.
 - [ ] `Mod+Shift+/` and the keyboard button in the query toolbar open the shortcut reference; `Mod+/` still
       toggles a line comment.
