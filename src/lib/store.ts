@@ -233,7 +233,6 @@ export const useStore = create<State>((set, get) => ({
         case "erd":
           return t.kind === "erd" && t.schema === tab.schema;
         case "redis":
-        case "diff":
           return true;
         default:
           return false;
@@ -241,11 +240,8 @@ export const useStore = create<State>((set, get) => ({
     });
     if (existing) {
       // Re-opening a table with a filter (FK jump) re-targets the already open tab.
-      const patch = tab.kind === "table" && tab.filter !== undefined ? { filter: tab.filter } : {};
-      set((s) => ({
-        activeTab: existing.id,
-        tabs: s.tabs.map((t) => (t.id === existing.id ? ({ ...t, ...patch } as Tab) : t)),
-      }));
+      if (tab.kind === "table" && tab.filter !== undefined) get().updateTab(existing.id, { filter: tab.filter });
+      set({ activeTab: existing.id });
       return existing.id;
     }
     const id = tab.id ?? uid();

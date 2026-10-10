@@ -16,7 +16,7 @@ const CHAR_W = 6.6; // 11px monospace
 const MIN_W = 150;
 const MARGIN = 24;
 
-interface Node {
+interface ErdNode {
   id: string;
   name: string;
   kind: string;
@@ -26,7 +26,7 @@ interface Node {
   x: number; // top-left after layout
   y: number;
 }
-interface Edge {
+interface ErdEdge {
   id: string;
   from: string;
   to: string;
@@ -36,7 +36,7 @@ interface Edge {
 }
 
 function buildGraph(objects: SchemaObject[]) {
-  const nodes = new Map<string, Node>();
+  const nodes = new Map<string, ErdNode>();
   for (const o of objects) {
     if (o.table.kind !== "table") continue;
     const fkCols = new Set(o.details.foreign_keys.flatMap((f) => f.columns));
@@ -58,7 +58,7 @@ function buildGraph(objects: SchemaObject[]) {
       y: 0,
     });
   }
-  const edges: Edge[] = [];
+  const edges: ErdEdge[] = [];
   for (const o of objects) {
     const from = nodes.get(o.table.name);
     if (!from) continue;
@@ -97,7 +97,7 @@ function buildGraph(objects: SchemaObject[]) {
   return { nodes: [...nodes.values()], edges, width: size.width ?? 0, height: size.height ?? 0 };
 }
 
-function edgePath(e: Edge, byId: Map<string, Node>) {
+function edgePath(e: ErdEdge, byId: Map<string, ErdNode>) {
   const a = byId.get(e.from)!;
   const b = byId.get(e.to)!;
   const y1 = a.y + HEAD_H + e.fromRow * ROW_H + ROW_H / 2;
@@ -114,7 +114,18 @@ function edgePath(e: Edge, byId: Map<string, Node>) {
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
 
-const THEME_VARS = ["bg", "bg-elev", "bg-sunken", "fg", "fg-muted", "fg-faint", "border", "accent", "accent-soft"];
+const THEME_VARS = [
+  "bg",
+  "bg-elev",
+  "bg-sunken",
+  "fg",
+  "fg-muted",
+  "fg-faint",
+  "border",
+  "accent",
+  "accent-soft",
+  "font-mono",
+];
 
 function toBase64(bytes: Uint8Array) {
   let bin = "";
@@ -159,12 +170,22 @@ export function ErdTab({ tab }: { tab: ETab }) {
     const svg = svgRef.current;
     if (!svg || !graph || !graph.width) return;
     const { width, height } = svg.getBoundingClientRect();
+    if (!width || !height) return false; // tab hidden: nothing to fit to yet
     const k = Math.min(1, width / graph.width, height / graph.height);
     setView({ k, x: (width - graph.width * k) / 2, y: (height - graph.height * k) / 2 });
+    return true;
   }, [graph]);
 
+  // Fit once the diagram has a size: immediately, or when the tab becomes visible after loading in the background.
   useEffect(() => {
-    fit();
+    if (fit() !== false) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const ro = new ResizeObserver(() => {
+      if (fit()) ro.disconnect();
+    });
+    ro.observe(svg);
+    return () => ro.disconnect();
   }, [fit]);
 
   const onWheel = (e: React.WheelEvent) => {
@@ -191,7 +212,7 @@ export function ErdTab({ tab }: { tab: ETab }) {
     drag.current = null;
   };
 
-  const openTable = (n: Node) => {
+  const openTable = (n: ErdNode) => {
     if (!conn) return;
     openTab({
       kind: "table",

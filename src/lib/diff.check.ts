@@ -51,6 +51,24 @@ assert.equal(
 assert.equal(normaliseDdl("CREATE TABLE `app`.`t` (x int)", "app"), "CREATE TABLE `t` (x int)");
 assert.equal(normaliseDdl("CREATE TABLE app.t (x int)", "app"), "CREATE TABLE t (x int)");
 assert.equal(normaliseDdl("CREATE TABLE myapp.t (x int)", "app"), "CREATE TABLE myapp.t (x int)"); // not a prefix of another name
+// Postgres serial defaults carry the schema inside a regclass literal; other literals are left alone.
+assert.equal(normaliseDdl("DEFAULT nextval('a.t_id_seq'::regclass)", "a"), "DEFAULT nextval('t_id_seq'::regclass)");
+assert.equal(normaliseDdl("DEFAULT 'a.t_id_seq'", "a"), "DEFAULT 'a.t_id_seq'");
+{
+  const serial = (schema: string) => {
+    const o = obj(
+      "t",
+      [["id", "integer", false]],
+      `CREATE TABLE "${schema}"."t" ("id" integer NOT NULL DEFAULT nextval('${schema}.t_id_seq'::regclass))`,
+      schema,
+    );
+    o.details.columns[0].default = `nextval('${schema}.t_id_seq'::regclass)`;
+    return o;
+  };
+  const d = compareSchemas([serial("a")], [serial("b")]);
+  assert.equal(d[0].status, "same");
+  assert.equal(migrationSql("postgres", "a", d), "");
+}
 assert.equal(
   compareSchemas(
     [obj("t", [["id", "int", false]], 'CREATE TABLE "a"."t" ("id" int)', "a")],
@@ -128,6 +146,42 @@ assert.equal(
   ].join("\n"),
 );
 assert.equal(migrationSql("postgres", "public", compareSchemas(left, left)), "");
+// Added tables keep their foreign keys and list secondary indexes.
+const withFk = obj(
+  "child",
+  [
+    ["id", "int", false],
+    ["parent_id", "int", true],
+  ],
+  "x",
+);
+withFk.details.foreign_keys = [
+  { name: "child_parent_fkey", columns: ["parent_id"], ref_schema: "public", ref_table: "parent", ref_columns: ["id"] },
+];
+withFk.details.indexes = [
+  { name: "child_parent_idx", columns: ["parent_id"], unique: false, primary: false, definition: null },
+];
+assert.equal(
+  migrationSql("postgres", "s", compareSchemas([], [withFk])),
+  [
+    "-- create child",
+    'CREATE TABLE "s"."child" (',
+    '  "id" int NOT NULL,',
+    '  "parent_id" int,',
+    '  PRIMARY KEY ("id")',
+    ");",
+    "-- index child_parent_idx (parent_id)",
+    "",
+    "-- foreign keys of created tables",
+    'ALTER TABLE "s"."child" ADD CONSTRAINT "child_parent_fkey" FOREIGN KEY ("parent_id") REFERENCES "s"."parent" ("id");',
+    "",
+  ].join("\n"),
+);
+// References into another schema keep that schema; foreign tables get their own drop statement.
+withFk.details.foreign_keys[0].ref_schema = "shared";
+assert.ok(migrationSql("postgres", "s", compareSchemas([], [withFk])).includes('REFERENCES "shared"."parent" ("id")'));
+const ft = obj("remote", [["id", "int", false]], "x", "public", "foreign");
+assert.equal(migrationSql("postgres", "s", compareSchemas([ft], [])), 'DROP FOREIGN TABLE "s"."remote";\n');
 // Literals keep their content; MySQL string defaults are quoted and AUTO_INCREMENT survives.
 assert.equal(
   normaliseDdl("CREATE TABLE a.t (x text DEFAULT 'a.example')", "a"),
@@ -149,4 +203,40 @@ assert.equal(
   migrationSql("mysql", "s", compareSchemas([], [my])),
   "-- create m\nCREATE TABLE `s`.`m` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `status` varchar(20) NOT NULL DEFAULT 'pending',\n  `ts` datetime DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (`id`)\n);\n",
 );
+// Defaults and names from the other database never become code in the copied script.
+const evil = obj(
+  "e\nSELECT 1",
+  [
+    ["id", "int", false],
+    ["d", "text", true],
+  ],
+  "x",
+  "public",
+  "view",
+);
+evil.details.columns[1].default = "a(); SELECT 1; select(1)";
+const evilTable = obj(
+  "t",
+  [
+    ["id", "int", false],
+    ["d", "text", true],
+  ],
+  "x",
+);
+evilTable.details.columns[1].default = "a(); SELECT 1; select(1)";
+evilTable.details.columns[1].extra = "x */ SELECT 1 /*";
+const script = migrationSql("mysql", "s", compareSchemas([], [evil, evilTable]));
+assert.ok(script.includes("-- create view e SELECT 1; definition on B:"), script);
+assert.ok(script.includes("DEFAULT 'a(); SELECT 1; select(1)' /* x * / SELECT 1 /* */"), script);
+const gen = obj(
+  "g",
+  [
+    ["id", "int", false],
+    ["u", "char(36)", true],
+  ],
+  "x",
+);
+gen.details.columns[1].default = "uuid()";
+gen.details.columns[1].extra = "DEFAULT_GENERATED";
+assert.ok(migrationSql("mysql", "s", compareSchemas([], [gen])).includes("DEFAULT uuid() /* DEFAULT_GENERATED */"));
 console.log("diff.check ok");

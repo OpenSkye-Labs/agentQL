@@ -35,7 +35,8 @@ export function statementAt(doc: string, pos: number): string {
   return doc.trim();
 }
 
-export type QuoteDriver = "postgres" | "mysql" | "mariadb" | "sqlite" | string;
+/** Driver id as stored on the connection (`Driver` from types.ts); unknown values quote like Postgres. */
+export type QuoteDriver = string;
 
 /** Quote an identifier the way the driver expects (mirrors `SqlConn::quote_ident`). */
 export function quoteIdent(driver: QuoteDriver, name: string): string {

@@ -26,7 +26,7 @@ export function SchemaDiffTab({ tab }: { tab: DTab }) {
   const sqlConns = connections.filter((c) => isSql(c.driver) && live[c.id] && !live[c.id].loading);
   const [a, setA] = useState<Side>({ conn: tab.connectionId, schema: tab.schema ?? "" });
   const [b, setB] = useState<Side>({ conn: tab.connectionId, schema: "" });
-  const [result, setResult] = useState<{ diffs: ObjectDiff[]; target: Side; driver: string } | null>(null);
+  const [result, setResult] = useState<{ diffs: ObjectDiff[]; a: Side; b: Side; driver: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -47,7 +47,7 @@ export function SchemaDiffTab({ tab }: { tab: DTab }) {
       const diffs = compareSchemas(l, r);
       // The migration runs on A (source), so it is written for A's schema and dialect.
       const driver = connections.find((c) => c.id === a.conn)?.driver ?? "postgres";
-      setResult({ diffs, target: a, driver });
+      setResult({ diffs, a, b, driver });
       setSelected(diffs.find((d) => d.status !== "same")?.name ?? diffs[0]?.name ?? null);
     } catch (e) {
       if (gen === generation.current) setError(errMsg(e));
@@ -127,7 +127,7 @@ export function SchemaDiffTab({ tab }: { tab: DTab }) {
             </label>
             <Button
               size="sm"
-              onClick={() => copy(migrationSql(result.driver, result.target.schema, result.diffs), "Migration")}
+              onClick={() => copy(migrationSql(result.driver, result.a.schema, result.diffs), "Migration")}
               disabled={counts.added + counts.removed + counts.changed === 0}
             >
               <Copy size={12} /> Copy as migration
@@ -228,8 +228,8 @@ export function SchemaDiffTab({ tab }: { tab: DTab }) {
           <span>{counts.same} unchanged</span>
           <span className="flex-1" />
           <span>
-            A = {connections.find((c) => c.id === a.conn)?.name}.{a.schema} · B ={" "}
-            {connections.find((c) => c.id === b.conn)?.name}.{b.schema}
+            A = {connections.find((c) => c.id === result.a.conn)?.name}.{result.a.schema} · B ={" "}
+            {connections.find((c) => c.id === result.b.conn)?.name}.{result.b.schema}
           </span>
         </div>
       )}

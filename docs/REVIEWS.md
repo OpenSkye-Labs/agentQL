@@ -107,3 +107,23 @@ are logged under the schema diff entry below.
 | 6   | P2  | Normalisation could rewrite `'a.example'` string literals                              | Replacement skips `'…'` literals                                                              |
 | 7   | P2  | MySQL string defaults rendered unquoted (`DEFAULT pending`)                            | Literal-vs-expression heuristic quotes literals for mysql/mariadb (`ponytail:` comment)       |
 | 8   | P2  | AUTO_INCREMENT dropped from synthesised columns                                        | `extra` preserved: AUTO_INCREMENT appended, other extras as inline comment                    |
+
+## 2026-10-11 — M4 review panel (Claude subagents: correctness, security, requirements, maintainability, skeptic, judge) + Codex follow-up
+
+Requirements: all M4 criteria met. Judge: 8/10 (advisory). Findings addressed before the PR's second push:
+
+| #   | Source               | Finding                                                                                              | Resolution                                                                                     |
+| --- | -------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1   | security             | MySQL default heuristic let a crafted default from B become code in the copied migration             | Strict allow-list (numbers, NULL, CURRENT_*, bit literals) or `DEFAULT_GENERATED`; else quoted |
+| 2   | security             | Names / view DDL in `--` comment lines could carry CR/LF or `*/` and break out                       | `oneLine()` on every interpolated name and comment line                                        |
+| 3   | skeptic              | Postgres serial defaults (`nextval('a.seq'::regclass)`) made identical cross-schema tables "changed" | Regclass literals lose the schema prefix; column defaults compared normalised                  |
+| 4   | skeptic, correctness | Exported SVG/PNG rendered in a serif font (`--font-mono` not resolved)                               | `font-mono` added to the inlined variables                                                     |
+| 5   | correctness          | `fit()` while the tab is hidden produced a zero scale                                                | Fit returns false on a 0×0 viewport and retries via ResizeObserver when visible                |
+| 6   | correctness          | Removed foreign tables emitted `DROP TABLE`                                                          | `DROP FOREIGN TABLE`                                                                           |
+| 7   | correctness          | Diff footer labelled A/B from the live pickers, not the compared result                              | Result stores both sides                                                                       |
+| 8   | maintainability      | Added tables lost their FKs and secondary indexes in the migration                                   | FKs emitted as `ALTER TABLE … ADD CONSTRAINT` after all CREATEs; indexes listed as comments    |
+| 9   | maintainability      | `diff` tabs deduplicated and dropped the chosen schema; inline copy of `updateTab`                   | Diff tabs open fresh like query tabs; `openTab` reuses `updateTab`                             |
+| 10  | Codex follow-up      | FK constraints inline in CREATE TABLE failed when the parent is created later / cyclic               | See #8                                                                                         |
+| 11  | Codex follow-up      | FK references into other schemas were rewritten to the destination schema                            | `ref_schema` kept when it differs from the object's schema                                     |
+| 12  | correctness          | `validate_filter` rejects FK keys containing `--`                                                    | Skipped: rare; the jump surfaces the backend error instead of running an unvalidated filter    |
+| 13  | judge                | `Node`/`Edge` shadow DOM types; `MYSQL` predicate; decorative `QuoteDriver` union                    | Renamed `ErdNode`/`ErdEdge`/`isMysql`; `QuoteDriver = string` with a doc comment               |
