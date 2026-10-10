@@ -71,6 +71,14 @@ fn default_ssh_port() -> u16 {
     22
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Environment {
+    Dev,
+    Staging,
+    Production,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionConfig {
     pub id: String,
@@ -108,6 +116,9 @@ pub struct ConnectionConfig {
     pub ssh: Option<SshConfig>,
     #[serde(default)]
     pub read_only: bool,
+    /// `production` makes the UI confirm every SQL write.
+    #[serde(default)]
+    pub environment: Option<Environment>,
     #[serde(default)]
     pub options: HashMap<String, String>,
     #[serde(default)]

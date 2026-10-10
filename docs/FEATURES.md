@@ -51,3 +51,11 @@ Append-only record of shipped behaviour. Newest at the bottom.
   Later / Update now; after an update installs, "What's new in vX.Y.Z" shows that version's section of the bundled CHANGELOG.md once.
 - Windows build fix: ssh-agent auth uses the OpenSSH agent named pipe on Windows (russh `connect_named_pipe`); CI now runs
   `cargo check` on Windows and macOS for Rust changes so cross-platform compile errors fail the PR, not the release build.
+- Safety defaults (M1): `Cmd/Ctrl+Shift+Enter` / "Run all" asks for confirmation when the script holds more than one
+  statement (count shown); `Cmd/Ctrl+Enter` still runs only the statement under the cursor. Connections carry an optional
+  **environment** tag (`dev` / `staging` / `production`) set in the connection dialog and shown as a badge in the tab bar and
+  status bar. On `production`, every write from the editor is confirmed with the statement kind and target table
+  (`classify_sql`, backed by the same sqlparser classifier as read-only mode; unparseable scripts fail closed), and grid
+  edits always go through the SQL preview. The preview and the pending-changes bar say the batch runs in one transaction.
+  Known limits: the prompt is SQL-only (Redis/Mongo connections get the badge but no write prompt yet, tracked in TASKS.md),
+  and side effects hidden in functions (`SELECT setval(...)`, `pg_terminate_backend`) are invisible to a static classifier.

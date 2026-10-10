@@ -4,6 +4,7 @@ import type {
   ChatSession,
   ConnectionConfig,
   ConnectionSecrets,
+  Driver,
   MongoFind,
   MongoPage,
   QueryResult,
@@ -14,6 +15,7 @@ import type {
   TableInfo,
   TablePage,
   TableQuery,
+  WriteInfo,
 } from "./types";
 
 export interface ConnectResult {
@@ -39,6 +41,7 @@ export const api = {
 
   // sql
   runQuery: (id: string, sqlText: string, limit?: number) => invoke<QueryResult[]>("run_query", { id, sqlText, limit }),
+  classifySql: (driver: Driver, sqlText: string) => invoke<WriteInfo[]>("classify_sql", { driver, sqlText }),
   explainQuery: (id: string, sqlText: string, analyze: boolean) =>
     invoke<QueryResult>("explain_query", { id, sqlText, analyze }),
   listDatabases: (id: string) => invoke<string[]>("list_databases", { id }),

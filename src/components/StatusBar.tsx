@@ -1,7 +1,7 @@
 import { Bot, KeyRound } from "lucide-react";
 import { useStore, useActiveTab, useConnection } from "../lib/store";
 import { driverLabel } from "../lib/types";
-import { Tooltip } from "./ui";
+import { Tooltip, EnvBadge } from "./ui";
 import { UpdateButton } from "./Updates";
 import { mod } from "../lib/format";
 
@@ -23,6 +23,7 @@ export function StatusBar({ onToggleChat }: { onToggleChat: () => void }) {
           <span>· {driverLabel(conn.driver)}</span>
           {live?.database && <span>· {live.database}</span>}
           {live?.version && <span className="text-faint">· {live.version}</span>}
+          <EnvBadge env={conn.environment} />
           {conn.read_only && <span className="rounded bg-warning/20 px-1 text-warning">read-only</span>}
         </span>
       ) : (
