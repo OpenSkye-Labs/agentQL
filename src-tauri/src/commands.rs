@@ -423,6 +423,79 @@ pub async fn export_rows(
     Ok(rows.len())
 }
 
+/// Read a text file the user picked in a dialog (.sql, profile JSON). Capped so a stray
+/// multi-GB pick cannot stall the webview.
+// ponytail: like `export_rows`, the path is whatever the (first-party) webview sends; gate it on a
+// backend-held set of dialog-returned paths or tauri-plugin-fs scopes if the webview ever renders
+// third-party HTML.
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String> {
+    blocking(move || {
+        const MAX: u64 = 20 * 1024 * 1024;
+        let len = std::fs::metadata(&path)?.len();
+        if len > MAX {
+            return Err(AppError::Msg(format!(
+                "file is {} MB; the editor opens files up to 20 MB",
+                len / (1024 * 1024)
+            )));
+        }
+        let text = String::from_utf8(std::fs::read(&path)?).map_err(|_| {
+            AppError::Msg("file is not UTF-8 text (UTF-16 files are not supported)".into())
+        })?;
+        // Editors on Windows often write a BOM; it is invisible in the editor and breaks the first statement.
+        Ok(text.trim_start_matches('\u{feff}').to_string())
+    })
+    .await
+}
+
+/// Writes next to the target and renames, so a failed save leaves the previous file intact.
+// ponytail: a dangling symlink is replaced by a regular file; resolve `read_link` chains if that matters.
+#[tauri::command]
+pub async fn write_text_file(path: String, contents: String) -> Result<()> {
+    blocking(move || {
+        // Follow a symlink so the target gets the text and the link survives.
+        let dest = std::fs::canonicalize(&path).unwrap_or_else(|_| std::path::PathBuf::from(&path));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let name = dest
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
+        let tmp = dest.with_file_name(format!(".{name}.{}.{nonce}.tmp", std::process::id()));
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let write = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = opts.open(&tmp)?;
+            f.write_all(contents.as_bytes())?;
+            f.sync_all()?;
+            // Keep the destination's mode instead of the private temp mode.
+            if let Ok(meta) = std::fs::metadata(&dest) {
+                std::fs::set_permissions(&tmp, meta.permissions())?;
+            }
+            std::fs::rename(&tmp, &dest)
+        };
+        write().map_err(|e| {
+            std::fs::remove_file(&tmp).ok();
+            AppError::Msg(format!("saving {}: {e}", dest.display()))
+        })
+    })
+    .await
+}
+
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| AppError::Msg(e.to_string()))?
+}
+
 // ----------------------------------------------------------------- redis
 
 #[tauri::command]

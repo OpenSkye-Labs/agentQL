@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Database,
+  Download,
   Eye,
   FolderOpen,
   KeySquare,
@@ -19,15 +20,18 @@ import {
   Settings,
   Table2,
   Trash2,
+  Upload,
   FileCode2,
   Layers,
   LayoutDashboard,
 } from "lucide-react";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useStore, type LiveConn } from "../lib/store";
 import { api, errMsg } from "../lib/api";
 import { driverLabel, isSql, type ConnectionConfig, type TableInfo } from "../lib/types";
 import { Button, ContextMenu, Menu, Spinner, Tooltip } from "./ui";
 import { fmtCount } from "../lib/format";
+import { exportProfiles, parseProfiles } from "../lib/profiles";
 
 type Items = React.ComponentProps<typeof ContextMenu>["items"];
 /** One Radix context menu for the whole tree; rows just publish their items on right-click. */
@@ -47,7 +51,46 @@ export function Sidebar({
   const filter = useStore((s) => s.sidebarFilter);
   const setFilter = useStore((s) => s.setSidebarFilter);
   const dashboards = useStore((s) => s.dashboards);
+  const refreshConnections = useStore((s) => s.refreshConnections);
+  const toast = useStore((s) => s.toast);
   const [menuItems, setMenuItems] = useState<Items>([]);
+
+  const exportConnections = async () => {
+    try {
+      const path = await saveDialog({
+        defaultPath: "agentql-connections.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
+      await api.writeTextFile(path, exportProfiles(connections));
+      toast(`Exported ${connections.length} connection profile(s) without passwords`, "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const importConnections = async () => {
+    let list: ConnectionConfig[];
+    try {
+      const path = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (!path) return;
+      list = parseProfiles(await api.readTextFile(path));
+    } catch (e) {
+      toast(errMsg(e), "error");
+      return;
+    }
+    let done = 0;
+    try {
+      for (const c of list) {
+        await api.saveConnection(c);
+        done++;
+      }
+      toast(`Imported ${done} connection(s). Edit each one to enter its password.`, "success");
+    } catch (e) {
+      toast(`Imported ${done} of ${list.length} connections, then: ${errMsg(e)}`, "error");
+    } finally {
+      await refreshConnections().catch((e) => toast(errMsg(e), "error"));
+    }
+  };
 
   const groups = useMemo(() => {
     const m = new Map<string, ConnectionConfig[]>();
@@ -75,6 +118,22 @@ export function Sidebar({
             <Settings size={14} />
           </Button>
         </Tooltip>
+        <Menu
+          trigger={
+            <Button variant="ghost" size="icon" aria-label="Connection profiles">
+              <MoreHorizontal size={14} />
+            </Button>
+          }
+          items={[
+            {
+              label: "Export profiles (no passwords)…",
+              icon: <Upload size={13} />,
+              disabled: connections.length === 0,
+              onSelect: () => void exportConnections(),
+            },
+            { label: "Import profiles…", icon: <Download size={13} />, onSelect: () => void importConnections() },
+          ]}
+        />
       </div>
       <div className="px-2 py-1.5">
         <div className="relative">

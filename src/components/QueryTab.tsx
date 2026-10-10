@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { clsx } from "clsx";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Bot, Download, History, Keyboard, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { Bot, Download, FileText, History, Keyboard, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
 import { snippetCompletion } from "@codemirror/autocomplete";
 import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
-import type { QueryResult } from "../lib/types";
+import type { QueryResult, SavedQuery } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
 import { buildNamespace, editorCompletions, isSnippet, snippetTemplate } from "../lib/completion";
 import { SqlEditor, type SqlEditorHandle } from "./SqlEditor";
@@ -14,12 +14,15 @@ import { ResultGrid } from "./ResultGrid";
 import { SHORTCUTS_EVENT } from "./ShortcutsDialog";
 import { Button, Dialog, Field, Input, Menu, Spinner, Tooltip, Kbd, Empty } from "./ui";
 
+const basename = (p: string) => p.split(/[\\/]/).pop() || p;
+
 type QTab = Extract<Tab, { kind: "query" }>;
 
 export function QueryTab({ tab }: { tab: QTab }) {
   const conn = useConnection(tab.connectionId);
   const live = useStore((s) => s.live[tab.connectionId]);
   const updateTab = useStore((s) => s.updateTab);
+  const openTab = useStore((s) => s.openTab);
   const toast = useStore((s) => s.toast);
   const addHistory = useStore((s) => s.addHistory);
   const saveQuery = useStore((s) => s.saveQuery);
@@ -43,7 +46,9 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [active, setActive] = useState(0);
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const inFlight = useRef(0);
+  const savedCurrent = tab.savedId ? allSaved.find((q) => q.id === tab.savedId) : undefined;
 
   const driver = conn?.driver;
   const quote = driver === "mysql" || driver === "mariadb" ? "`" : '"';
@@ -168,22 +173,75 @@ export function QueryTab({ tab }: { tab: QTab }) {
 
   const askAgent = (prompt: string) => askAssistant(prompt);
 
+  const sqlFilter = [{ name: "SQL", extensions: ["sql"] }];
+  const openFile = async () => {
+    try {
+      const path = await openDialog({ multiple: false, filters: sqlFilter });
+      if (!path) return;
+      const sql = await api.readTextFile(path);
+      const patch = { sql, filePath: path, title: basename(path), savedId: undefined };
+      // Never clobber unsaved text: a non-empty tab opens the file next to it.
+      if ((editor.current?.getValue() ?? "").trim())
+        openTab({ kind: "query", connectionId: tab.connectionId, ...patch, id: undefined });
+      else updateTab(tab.id, patch);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const saveFile = async (as = false) => {
+    try {
+      let path = as ? null : (tab.filePath ?? null);
+      if (!path) path = await saveDialog({ defaultPath: tab.filePath ?? "query.sql", filters: sqlFilter });
+      if (!path) return;
+      await api.writeTextFile(path, editor.current?.getValue() ?? "");
+      updateTab(tab.id, { filePath: path, title: basename(path) });
+      toast(`Saved ${basename(path)}`, "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  /** Save to the store; re-saving an existing query records the previous text as a version. */
+  const persistNamed = async (q: SavedQuery) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await saveQuery(q);
+      updateTab(tab.id, { savedId: q.id, title: q.name });
+      setSaveForm(null);
+      toast(`Saved "${q.name}"`, "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  /** Re-save the query this tab was loaded from (name, trigger and connection kept). */
+  const saveNamed = (existing: SavedQuery) => {
+    const sql = editor.current?.getValue() ?? "";
+    if (sql.trim()) void persistNamed({ ...existing, sql });
+  };
+  /** Save dialog submit: a new saved query (optionally a snippet trigger). */
   const submitSave = () => {
     const sql = editor.current?.getValue() ?? "";
-    if (saving || !saveForm || !conn || !saveForm.name.trim() || !sql.trim()) return;
-    setSaving(true);
-    saveQuery({
+    if (!saveForm || !conn || !saveForm.name.trim() || !sql.trim()) return;
+    void persistNamed({
       id: crypto.randomUUID(),
       connection_id: conn.id,
       name: saveForm.name.trim(),
       sql,
       trigger: saveForm.trigger.trim() || null,
       created_at: new Date().toISOString(),
-    })
-      .then(() => setSaveForm(null))
-      .catch((e) => toast(errMsg(e), "error"))
-      .finally(() => setSaving(false));
+    });
   };
+  // Mod+S (global shortcut in App.tsx) saves whatever this tab is bound to: its .sql file, else its
+  // saved query, else a new file.
+  const onSave = useRef<() => void>(() => {});
+  onSave.current = () => void (tab.filePath ? saveFile() : savedCurrent ? saveNamed(savedCurrent) : saveFile());
+  useEffect(() => {
+    const h = () => activeTab === tab.id && onSave.current();
+    window.addEventListener("agentql:save", h);
+    return () => window.removeEventListener("agentql:save", h);
+  }, [activeTab, tab.id]);
 
   if (!conn) return <Empty title="Connection removed" />;
   const current = results?.[active];
@@ -251,6 +309,28 @@ export function QueryTab({ tab }: { tab: QTab }) {
             <Bot size={13} />
           </Button>
         </Tooltip>
+        <Menu
+          trigger={
+            <Button size="sm" variant="ghost">
+              <FileText size={13} /> File
+            </Button>
+          }
+          items={[
+            { label: "Open .sql file…", onSelect: () => void openFile() },
+            {
+              label: tab.filePath ? `Save ${basename(tab.filePath)}` : "Save as .sql…",
+              shortcut: `${mod}+S`,
+              onSelect: () => void saveFile(),
+            },
+            ...(tab.filePath ? [{ label: "Save as…", onSelect: () => void saveFile(true) }] : []),
+          ]}
+          align="start"
+        />
+        {tab.filePath && (
+          <span className="min-w-0 max-w-[280px] truncate text-[11px] text-muted" title={tab.filePath}>
+            {tab.filePath}
+          </span>
+        )}
         <Tooltip label={`Keyboard shortcuts (${mod}+Shift+/)`}>
           <Button
             size="sm"
@@ -284,27 +364,73 @@ export function QueryTab({ tab }: { tab: QTab }) {
             </Button>
           }
           items={[
-            {
-              label: "Save current query…",
-              onSelect: () => setSaveForm({ name: tab.title === "Query" ? "" : tab.title, trigger: "" }),
-            },
+            savedCurrent
+              ? { label: `Save "${savedCurrent.name}"`, onSelect: () => saveNamed(savedCurrent) }
+              : {
+                  label: "Save current query…",
+                  onSelect: () => setSaveForm({ name: tab.title === "Query" ? "" : tab.title, trigger: "" }),
+                },
+            ...(savedCurrent
+              ? [
+                  { label: "Save as new…", onSelect: () => setSaveForm({ name: "", trigger: "" }) },
+                  {
+                    label: `Versions (${savedCurrent.versions?.length ?? 0})…`,
+                    onSelect: () => setVersionsOpen(true),
+                  },
+                ]
+              : []),
             ...(savedQueries.length
               ? [
                   { separator: true, label: "" },
                   ...savedQueries.map((q) => ({
                     label: q.trigger ? `${q.name} · ${q.trigger}` : q.name,
                     onSelect: () => {
+                      const bind = { title: q.name, savedId: q.id, filePath: undefined };
                       // `${1:x}` placeholders become Tab stops; anything else loads verbatim.
                       if (isSnippet(q.sql)) {
                         editor.current?.loadSnippet(snippetTemplate(q.sql));
-                        updateTab(tab.id, { title: q.name });
-                      } else updateTab(tab.id, { sql: q.sql, title: q.name });
+                        updateTab(tab.id, bind);
+                      } else updateTab(tab.id, { sql: q.sql, ...bind });
                     },
                   })),
                 ]
               : []),
           ]}
         />
+        <Dialog
+          open={versionsOpen}
+          onOpenChange={setVersionsOpen}
+          title={`Versions of "${savedCurrent?.name ?? ""}"`}
+          description="Earlier edits, newest first. Restore puts a version in the editor; Saved › Save keeps it."
+        >
+          {savedCurrent?.versions?.length ? (
+            <ul className="flex flex-col gap-2">
+              {savedCurrent.versions.map((v, i) => (
+                <li key={v.ts + i} className="rounded-md border border-border bg-sunken p-2">
+                  <div className="flex items-center gap-2 text-xs text-muted">
+                    <span>{new Date(v.ts).toLocaleString()}</span>
+                    <span className="flex-1" />
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        updateTab(tab.id, { sql: v.sql });
+                        setVersionsOpen(false);
+                        toast("Version restored into the editor. Save to keep it.", "info");
+                      }}
+                    >
+                      Restore
+                    </Button>
+                  </div>
+                  <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[11px] selectable">
+                    {v.sql}
+                  </pre>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Empty title="No earlier versions yet" hint="Versions are recorded each time you save this query." />
+          )}
+        </Dialog>
         <Menu
           trigger={
             <Button size="sm" variant="ghost" disabled={!current || current.rows.length === 0}>

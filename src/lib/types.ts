@@ -241,6 +241,11 @@ export interface Dashboard {
   updated_at: string;
 }
 
+export interface QueryVersion {
+  sql: string;
+  ts: string;
+}
+
 export interface SavedQuery {
   id: string;
   connection_id: string | null;
@@ -250,7 +255,12 @@ export interface SavedQuery {
   /** Typing this word in the editor offers the query as a snippet completion. */
   trigger?: string | null;
   created_at: string;
+  updated_at?: string;
+  /** Previous edits, newest first, capped at MAX_QUERY_VERSIONS. */
+  versions?: QueryVersion[];
 }
+
+export const MAX_QUERY_VERSIONS = 20;
 
 export interface HistoryEntry {
   id: string;

@@ -10,9 +10,21 @@ import type {
   Settings,
   TableInfo,
 } from "./types";
+import { withVersion } from "./queries";
 
 export type Tab =
-  | { id: string; kind: "query"; connectionId: string; title: string; sql: string; pinned?: boolean }
+  | {
+      id: string;
+      kind: "query";
+      connectionId: string;
+      title: string;
+      sql: string;
+      pinned?: boolean;
+      /** Saved query this tab was loaded from; "Save" updates it and records a version. */
+      savedId?: string;
+      /** On-disk .sql file this tab was opened from or saved to. */
+      filePath?: string;
+    }
   | { id: string; kind: "table"; connectionId: string; title: string; schema: string; table: string; tableKind: string }
   | { id: string; kind: "chat"; connectionId: string; title: string; sessionId: string }
   | { id: string; kind: "dashboard"; connectionId: string; title: string; dashboardId: string }
@@ -297,18 +309,15 @@ export const useStore = create<State>((set, get) => ({
     set({ dashboards: list });
     for (const t of get().tabs) if (t.kind === "dashboard" && t.dashboardId === id) get().closeTab(t.id);
   },
-  saveQuery: async (q) => {
-    const list = get()
-      .savedQueries.filter((x) => x.id !== q.id)
-      .concat(q);
-    await api.kvSet("saved_queries", list);
-    set({ savedQueries: list });
-  },
-  deleteSavedQuery: async (id) => {
-    const list = get().savedQueries.filter((x) => x.id !== id);
-    await api.kvSet("saved_queries", list);
-    set({ savedQueries: list });
-  },
+  saveQuery: (q) =>
+    writeSavedQueries((before) => {
+      const next = withVersion(
+        before.find((x) => x.id === q.id),
+        q,
+      );
+      return before.filter((x) => x.id !== q.id).concat(next);
+    }),
+  deleteSavedQuery: (id) => writeSavedQueries((before) => before.filter((x) => x.id !== id)),
   addHistory: async (h) => {
     const list = [h, ...get().history].slice(0, 500);
     set({ history: list });
@@ -328,6 +337,27 @@ export const useStore = create<State>((set, get) => ({
     return p;
   },
 }));
+
+// Every saved-query write rewrites the whole list, so they run one at a time: each mutation
+// starts from the state the previous one left, is shown immediately, and rolls back to the last
+// persisted list if its write fails.
+let savedQueue: Promise<unknown> = Promise.resolve();
+function writeSavedQueries(mutate: (before: SavedQuery[]) => SavedQuery[]): Promise<void> {
+  const run = async () => {
+    const before = useStore.getState().savedQueries;
+    const list = mutate(before);
+    useStore.setState({ savedQueries: list });
+    try {
+      await api.kvSet("saved_queries", list);
+    } catch (e) {
+      useStore.setState({ savedQueries: before });
+      throw e;
+    }
+  };
+  const p = savedQueue.then(run, run);
+  savedQueue = p.catch(() => {});
+  return p;
+}
 
 export function emptyLive(id: string): LiveConn {
   return { id, database: "", version: null, schemas: [], tables: {}, catalog: {}, databases: [], expanded: {} };

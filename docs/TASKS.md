@@ -101,9 +101,9 @@ M7 Editor ergonomics (S–M)
 
 M8 Query versioning and portable profiles (S)
 
-- [ ] Saved query version history
-- [ ] Export/import connection profiles without secrets
-- [ ] Open/save .sql files from the editor
+- [x] Saved query version history
+- [x] Export/import connection profiles without secrets
+- [x] Open/save .sql files from the editor
 
 M9 Linux tier-1 and performance proof (S)
 

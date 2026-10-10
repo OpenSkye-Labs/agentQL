@@ -105,6 +105,8 @@ export const api = {
   detectClis: () => invoke<{ claude: string | null; codex: string | null }>("detect_clis"),
   kvGet: <T>(name: string) => invoke<T | null>("kv_get", { name }),
   kvSet: (name: string, value: unknown) => invoke<void>("kv_set", { name, value }),
+  readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  writeTextFile: (path: string, contents: string) => invoke<void>("write_text_file", { path, contents }),
 
   // ai
   aiListSessions: (connectionId?: string) => invoke<ChatSession[]>("ai_list_sessions", { connectionId }),

@@ -432,6 +432,8 @@ const handlers: Record<string, Handler> = {
           ]
         : [],
   kv_set: () => null,
+  read_text_file: () => "select 1;\n",
+  write_text_file: () => null,
   ai_list_sessions: () => [{ ...session, messages: [] }],
   ai_get_session: () => session,
   ai_create_session: () => ({ ...session, id: "s2", title: "New chat", messages: [] }),
