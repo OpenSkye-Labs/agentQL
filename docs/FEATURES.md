@@ -51,3 +51,9 @@ Append-only record of shipped behaviour. Newest at the bottom.
   Later / Update now; after an update installs, "What's new in vX.Y.Z" shows that version's section of the bundled CHANGELOG.md once.
 - Windows build fix: ssh-agent auth uses the OpenSSH agent named pipe on Windows (russh `connect_named_pipe`); CI now runs
   `cargo check` on Windows and macOS for Rust changes so cross-platform compile errors fail the PR, not the release build.
+- M8 Query versioning and portable profiles: a query tab remembers the saved query it was loaded from, so "Save"
+  updates it and keeps the previous text as a version (last 20, with timestamps; "Versions…" dialog restores one into
+  the editor). Sidebar "…" menu exports all connection profiles to JSON without any secret (ids dropped, URL
+  passwords stripped; `src/lib/profiles.ts`) and imports such a file as new connections that still need their
+  passwords entered. "File" menu in the query tab opens/saves `.sql` files (`Mod+S`); the path shows next to the
+  toolbar and as the tab tooltip. Backend: `read_text_file` (20 MB cap) / `write_text_file` commands.

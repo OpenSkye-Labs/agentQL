@@ -423,6 +423,34 @@ pub async fn export_rows(
     Ok(rows.len())
 }
 
+/// Read a text file the user picked in a dialog (.sql, profile JSON). Capped so a stray
+/// multi-GB pick cannot stall the webview.
+// ponytail: like `export_rows`, the path is whatever the (first-party) webview sends; gate it on a
+// backend-held set of dialog-returned paths or tauri-plugin-fs scopes if the webview ever renders
+// third-party HTML.
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String> {
+    const MAX: u64 = 20 * 1024 * 1024;
+    let len = std::fs::metadata(&path)?.len();
+    if len > MAX {
+        return Err(AppError::Msg(format!(
+            "file is {} MB; the editor opens files up to 20 MB",
+            len / (1024 * 1024)
+        )));
+    }
+    let bytes = std::fs::read(&path)?;
+    let text = String::from_utf8(bytes).map_err(|_| {
+        AppError::Msg("file is not UTF-8 text (UTF-16 files are not supported)".into())
+    })?;
+    // Editors on Windows often write a BOM; it is invisible in the editor and breaks the first statement.
+    Ok(text.trim_start_matches('\u{feff}').to_string())
+}
+
+#[tauri::command]
+pub async fn write_text_file(path: String, contents: String) -> Result<()> {
+    Ok(std::fs::write(&path, contents)?)
+}
+
 // ----------------------------------------------------------------- redis
 
 #[tauri::command]

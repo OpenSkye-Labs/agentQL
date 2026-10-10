@@ -1,9 +1,21 @@
 import { create } from "zustand";
 import { api, errMsg } from "./api";
 import type { ChatSession, ConnectionConfig, Dashboard, HistoryEntry, SavedQuery, Settings, TableInfo } from "./types";
+import { withVersion } from "./queries";
 
 export type Tab =
-  | { id: string; kind: "query"; connectionId: string; title: string; sql: string; pinned?: boolean }
+  | {
+      id: string;
+      kind: "query";
+      connectionId: string;
+      title: string;
+      sql: string;
+      pinned?: boolean;
+      /** Saved query this tab was loaded from; "Save" updates it and records a version. */
+      savedId?: string;
+      /** On-disk .sql file this tab was opened from or saved to. */
+      filePath?: string;
+    }
   | { id: string; kind: "table"; connectionId: string; title: string; schema: string; table: string; tableKind: string }
   | { id: string; kind: "chat"; connectionId: string; title: string; sessionId: string }
   | { id: string; kind: "dashboard"; connectionId: string; title: string; dashboardId: string }
@@ -271,9 +283,13 @@ export const useStore = create<State>((set, get) => ({
     for (const t of get().tabs) if (t.kind === "dashboard" && t.dashboardId === id) get().closeTab(t.id);
   },
   saveQuery: async (q) => {
+    const next = withVersion(
+      get().savedQueries.find((x) => x.id === q.id),
+      q,
+    );
     const list = get()
       .savedQueries.filter((x) => x.id !== q.id)
-      .concat(q);
+      .concat(next);
     await api.kvSet("saved_queries", list);
     set({ savedQueries: list });
   },

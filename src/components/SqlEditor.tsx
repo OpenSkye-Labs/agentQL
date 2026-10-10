@@ -33,19 +33,20 @@ interface Props {
   schema?: SQLNamespace;
   onRun: () => void;
   onRunAll?: () => void;
+  onSave?: () => void;
   placeholder?: string;
   readOnly?: boolean;
 }
 
 export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
-  { value, onChange, driver, schema, onRun, onRunAll, placeholder, readOnly },
+  { value, onChange, driver, schema, onRun, onRunAll, onSave, placeholder, readOnly },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const langComp = useRef(new Compartment());
-  const cbs = useRef({ onChange, onRun, onRunAll });
-  cbs.current = { onChange, onRun, onRunAll };
+  const cbs = useRef({ onChange, onRun, onRunAll, onSave });
+  cbs.current = { onChange, onRun, onRunAll, onSave };
 
   const langExt = (): Extension =>
     sql({
@@ -76,6 +77,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
         keymap.of([
           { key: "Mod-Enter", run: () => (cbs.current.onRun(), true) },
           { key: "Mod-Shift-Enter", run: () => (cbs.current.onRunAll?.(), true) },
+          { key: "Mod-s", run: () => (cbs.current.onSave?.(), true) },
           { key: "F5", run: () => (cbs.current.onRun(), true) },
           ...closeBracketsKeymap,
           ...defaultKeymap,
