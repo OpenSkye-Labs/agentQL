@@ -68,10 +68,11 @@ export function SchemaDiffTab({ tab }: { tab: DTab }) {
     return c;
   }, [result]);
 
-  const copy = (text: string, what: string) => {
-    void navigator.clipboard.writeText(text);
-    toast(`${what} copied`, "success");
-  };
+  const copy = (text: string, what: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => toast(`${what} copied`, "success"),
+      (e) => toast(errMsg(e), "error"),
+    );
 
   const sidePicker = (label: string, side: Side, set: (s: Side) => void) => (
     <div className="flex items-center gap-1">

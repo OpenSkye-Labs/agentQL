@@ -388,7 +388,16 @@ export function ErdTab({ tab }: { tab: ETab }) {
                 <g
                   key={n.id}
                   transform={`translate(${n.x} ${n.y})`}
-                  className="cursor-pointer"
+                  className="cursor-pointer outline-none focus-visible:[&>rect]:stroke-[var(--accent)]"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open ${n.name}`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openTable(n);
+                    }
+                  }}
                   data-hover={hover === n.id ? "1" : undefined}
                   onPointerEnter={() => setHover(n.id)}
                   onPointerLeave={() => setHover((h) => (h === n.id ? null : h))}

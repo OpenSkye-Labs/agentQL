@@ -258,6 +258,7 @@ export function TableTab({ tab }: { tab: TTab }) {
                   size="sm"
                   variant="ghost"
                   onClick={() => {
+                    if (dirty && !confirm(`Discard pending changes in ${tab.table}?`)) return;
                     setFilter("");
                     setFilterDraft("");
                     setOffset(0);

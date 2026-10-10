@@ -140,7 +140,14 @@ export function migrationSql(driver: QuoteDriver, schema: string, diffs: ObjectD
       const lc = new Map(d.left!.details.columns.map((c) => [c.name, c]));
       const rc = new Map(d.right!.details.columns.map((c) => [c.name, c]));
       const lines: string[] = [`-- alter ${name}`];
-      for (const [name, c] of rc) if (!lc.has(name)) lines.push(`ALTER TABLE ${t} ADD COLUMN ${columnDef(driver, c)};`);
+      for (const [name, c] of rc) {
+        if (lc.has(name)) continue;
+        // NOT NULL without a default fails on populated tables (and always on SQLite): add nullable, flag the backfill.
+        const needsBackfill = !c.nullable && c.default == null;
+        if (needsBackfill)
+          lines.push(oneLine(`-- ${name} is NOT NULL without a default on B; backfill, then add the constraint`));
+        lines.push(`ALTER TABLE ${t} ADD COLUMN ${columnDef(driver, needsBackfill ? { ...c, nullable: true } : c)};`);
+      }
       for (const name of lc.keys())
         if (!rc.has(name)) lines.push(`ALTER TABLE ${t} DROP COLUMN ${quoteIdent(driver, name)};`);
       for (const [name, b] of rc) {

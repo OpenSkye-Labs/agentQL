@@ -146,6 +146,21 @@ assert.equal(
   ].join("\n"),
 );
 assert.equal(migrationSql("postgres", "public", compareSchemas(left, left)), "");
+// A new NOT NULL column without a default is added nullable with a backfill note.
+{
+  const before = obj("n", [["id", "int", false]], "v1");
+  const after = obj(
+    "n",
+    [
+      ["id", "int", false],
+      ["req", "text", false],
+    ],
+    "v2",
+  );
+  const s = migrationSql("postgres", "p", compareSchemas([before], [after]));
+  assert.ok(s.includes("-- req is NOT NULL without a default on B; backfill, then add the constraint"), s);
+  assert.ok(s.includes('ALTER TABLE "p"."n" ADD COLUMN "req" text;'), s);
+}
 // Added tables keep their foreign keys and list secondary indexes.
 const withFk = obj(
   "child",
