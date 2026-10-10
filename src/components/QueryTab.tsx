@@ -561,13 +561,14 @@ export function QueryTab({ tab }: { tab: QTab }) {
         footer={
           <>
             <Button onClick={() => setSaveForm(null)}>Cancel</Button>
-            <Button variant="primary" disabled={saving || !saveForm?.name.trim()} onClick={submitSave}>
+            <Button variant="primary" type="submit" form="save-query-form" disabled={saving || !saveForm?.name.trim()}>
               Save
             </Button>
           </>
         }
       >
         <form
+          id="save-query-form"
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault();
