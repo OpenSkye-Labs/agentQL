@@ -49,6 +49,7 @@ least two tables linked by a foreign key (the demo containers above, or `?mock=1
       `order_items o2 ON o2.order_id = o.id` (reverse FK) above the plain table names; picking one inserts the clause.
 - [ ] Keywords follow the clause: after `SELECT id ` → `FROM` first; after `FROM t ` → `WHERE`/`JOIN`/`ORDER BY`;
       after `WHERE x = 1 ` → `AND`/`OR`; after `ORDER BY id ` → `ASC`/`DESC`. `RETURNING`/`ILIKE` only on Postgres.
+- [ ] Inside a string or comment (`SELECT 'F`, `-- wh`) no keyword or snippet completion appears.
 - [ ] Saved query with trigger `topn` and body `SELECT * FROM ${1:table} ORDER BY ${2:col} DESC LIMIT ${3:10}`:
       typing `topn` offers it; accepting it selects `table`, Tab moves to `col`, then `10`.
 - [ ] Loading that query from the Saved menu does the same placeholder walk; a saved query without `${}` loads as is.

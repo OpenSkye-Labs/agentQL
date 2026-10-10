@@ -106,4 +106,10 @@ Round 3: 2 findings (P2), both fixed:
 | 7   | P2  | `Mod+/` is CodeMirror's comment toggle, so opening the shortcut dialog also commented the query | Dialog moved to `Mod+Shift+/`; the reference lists both                                                                     |
 | 8   | P2  | SQLite `REFERENCES parent` without a column list yields an empty target column → `c."" = o.x`   | `table_details` resolves the parent's primary key (shared by TableTab and the catalog); non-ignored test in `tests/live.rs` |
 
+Round 4: 1 finding (P2), fixed:
+
+| #   | Sev | Finding                                                                     | Resolution                                                                                   |
+| --- | --- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 9   | P2  | Keyword/snippet source also fired inside strings and comments (`SELECT 'F`) | Source wrapped in `ifNotIn` with the same node list lang-sql uses for its keyword completion |
+
 Skipped: none.

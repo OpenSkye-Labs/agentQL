@@ -16,6 +16,7 @@ import {
   closeBrackets,
   closeBracketsKeymap,
   completionKeymap,
+  ifNotIn,
   snippet,
   type CompletionSource,
 } from "@codemirror/autocomplete";
@@ -68,7 +69,11 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
       schema,
       upperCaseKeywords: true,
     });
-    const extra: CompletionSource = (ctx) => cbs.current.completions?.(ctx) ?? null;
+    // Same exclusions lang-sql applies to its keyword source: no keywords/snippets inside strings or comments.
+    const extra = ifNotIn(
+      ["QuotedIdentifier", "SpecialVar", "String", "LineComment", "BlockComment", "."],
+      (ctx) => cbs.current.completions?.(ctx) ?? null,
+    );
     return [lang, lang.language.data.of({ autocomplete: extra })];
   };
 
