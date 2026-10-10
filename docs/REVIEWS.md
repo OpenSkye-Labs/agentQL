@@ -83,9 +83,14 @@ plain thread (`off_runtime` in config.rs). Added an ignored latency test (`cargo
 
 ## 2026-10-11 — M4 FK click-through (Codex, `codex exec review --uncommitted`, 2 rounds)
 
-| #   | Sev | Finding                                                                                  | Resolution                                                                                                   |
-| --- | --- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| 1   | P1  | FK jump into an already open table re-targeted its filter and `load()` dropped pending edits | Table tabs publish `dirty`; the jump (and the filter form) asks before discarding                          |
-| 2   | P2  | SQLite `REFERENCES parent` without a column list yields an empty `ref_columns` entry       | Backend resolves omitted targets to the parent's primary key (`PRAGMA table_info`); grid skips malformed FKs |
-| 3   | P2  | Binary key cells (`{ "$bytes": … }`) were quoted as JSON text                                | `sqlLiteral` renders `decode(…,'base64')` / `FROM_BASE64` / `X'…'` like the backend; self-checks added      |
-| 4   | P2  | Postgres array-valued keys serialised as JSON                                              | Skipped: FKs cannot reference array columns in practice; noted with a `ponytail:` comment                   |
+| #   | Sev | Finding                                                                                      | Resolution                                                                                                   |
+| --- | --- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 1   | P1  | FK jump into an already open table re-targeted its filter and `load()` dropped pending edits | Table tabs publish `dirty`; the jump (and the filter form) asks before discarding                            |
+| 2   | P2  | SQLite `REFERENCES parent` without a column list yields an empty `ref_columns` entry         | Backend resolves omitted targets to the parent's primary key (`PRAGMA table_info`); grid skips malformed FKs |
+| 3   | P2  | Binary key cells (`{ "$bytes": … }`) were quoted as JSON text                                | `sqlLiteral` renders `decode(…,'base64')` / `FROM_BASE64` / `X'…'` like the backend; self-checks added       |
+| 4   | P2  | Postgres array-valued keys serialised as JSON                                                | Skipped: FKs cannot reference array columns in practice; noted with a `ponytail:` comment                    |
+
+## 2026-10-11 — M4 ER diagram (Codex, `codex exec review --uncommitted`)
+
+No findings on the diagram. The run also reviewed the in-progress schema diff files (not yet wired in); those findings
+are logged under the schema diff entry below.

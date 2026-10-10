@@ -305,6 +305,64 @@ const handlers: Record<string, Handler> = {
     ],
     ddl: 'CREATE TABLE "public"."Candidate" (\n  "id" uuid NOT NULL DEFAULT gen_random_uuid(),\n  "name" text NOT NULL,\n  "email" text,\n  "status" text,\n  "score" numeric,\n  "tags" text[],\n  "createdAt" timestamptz DEFAULT now(),\n  "meta" jsonb,\n  PRIMARY KEY ("id")\n);',
   }),
+  schema_objects: (a) => {
+    // A small graph so the ER diagram has something to lay out.
+    const fks: Record<string, [string, string][]> = {
+      Candidate: [["personId", "Person"]],
+      Claim: [
+        ["candidateId", "Candidate"],
+        ["tenantId", "Tenant"],
+      ],
+      Mention: [
+        ["personId", "Person"],
+        ["searchId", "Search"],
+      ],
+      Search: [["tenantId", "Tenant"]],
+      FaceObservation: [["personId", "Person"]],
+      NameCandidate: [["candidateId", "Candidate"]],
+      EngineHit: [["searchId", "Search"]],
+      ChatMessage: [["tenantId", "Tenant"]],
+      ApiClient: [["tenantId", "Tenant"]],
+    };
+    const col = (name: string, data_type: string, is_primary = false, position = 1) => ({
+      name,
+      data_type,
+      nullable: !is_primary,
+      default: null,
+      is_primary,
+      position,
+      comment: null,
+      extra: null,
+    });
+    return (a.schema === "public" ? tables : [{ schema: "audit", name: "events", kind: "table", row_estimate: 1 }]).map(
+      (t) => {
+        const refs = fks[t.name] ?? [];
+        const columns = [
+          col("id", "uuid", true, 1),
+          col("name", "text", false, 2),
+          ...refs.map(([c], i) => col(c, "uuid", false, 3 + i)),
+          col("createdAt", "timestamptz", false, 3 + refs.length),
+        ];
+        const ddl = `CREATE TABLE "${t.schema}"."${t.name}" (\n${columns.map((c) => `  "${c.name}" ${c.data_type}`).join(",\n")}\n);`;
+        return {
+          table: t,
+          details: {
+            columns,
+            indexes: [{ name: `${t.name}_pkey`, columns: ["id"], unique: true, primary: true, definition: null }],
+            foreign_keys: refs.map(([c, ref]) => ({
+              name: `${t.name}_${c}_fkey`,
+              columns: [c],
+              ref_schema: t.schema,
+              ref_table: ref,
+              ref_columns: ["id"],
+            })),
+            ddl,
+          },
+        };
+      },
+    );
+  },
+  save_file: () => null,
   fetch_table: (a) => ({
     result: result((a.query as { limit: number }).limit),
     total: null,

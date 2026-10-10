@@ -21,6 +21,8 @@ export type Tab =
   | { id: string; kind: "dashboard"; connectionId: string; title: string; dashboardId: string }
   | { id: string; kind: "redis"; connectionId: string; title: string }
   | { id: string; kind: "mongo"; connectionId: string; title: string; db: string; collection: string }
+  | { id: string; kind: "erd"; connectionId: string; title: string; schema: string }
+  | { id: string; kind: "diff"; connectionId: string; title: string; schema?: string }
   | { id: string; kind: "welcome"; connectionId: null; title: string };
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -228,7 +230,10 @@ export const useStore = create<State>((set, get) => ({
           return t.kind === "dashboard" && t.dashboardId === tab.dashboardId;
         case "chat":
           return t.kind === "chat" && t.sessionId === tab.sessionId;
+        case "erd":
+          return t.kind === "erd" && t.schema === tab.schema;
         case "redis":
+        case "diff":
           return true;
         default:
           return false;

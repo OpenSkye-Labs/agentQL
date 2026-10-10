@@ -22,6 +22,7 @@ import {
   FileCode2,
   Layers,
   LayoutDashboard,
+  Network,
 } from "lucide-react";
 import { useStore, type LiveConn } from "../lib/store";
 import { api, errMsg } from "../lib/api";
@@ -404,6 +405,13 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
               meta={tables ? String(tables.length) : undefined}
               expanded={expanded}
               onToggle={() => toggleSchema(conn.id, schema)}
+              menu={[
+                {
+                  label: "ER diagram",
+                  icon: <Network size={13} />,
+                  onSelect: () => openTab({ kind: "erd", connectionId: conn.id, title: `ERD · ${schema}`, schema }),
+                },
+              ]}
             />
             {expanded && (
               <div role="group">

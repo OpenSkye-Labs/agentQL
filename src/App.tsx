@@ -14,6 +14,7 @@ const RedisTab = lazy(() => import("./components/RedisTab").then((m) => ({ defau
 const MongoTab = lazy(() => import("./components/MongoTab").then((m) => ({ default: m.MongoTab })));
 const DashboardTab = lazy(() => import("./components/DashboardTab").then((m) => ({ default: m.DashboardTab })));
 const ChatPanel = lazy(() => import("./components/ChatPanel").then((m) => ({ default: m.ChatPanel })));
+const ErdTab = lazy(() => import("./components/ErdTab").then((m) => ({ default: m.ErdTab })));
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { StatusBar } from "./components/StatusBar";
@@ -106,6 +107,7 @@ export default function App() {
                         {t.kind === "redis" && <RedisTab tab={t} />}
                         {t.kind === "mongo" && <MongoTab tab={t} />}
                         {t.kind === "dashboard" && <DashboardTab tab={t} />}
+                        {t.kind === "erd" && <ErdTab tab={t} />}
                       </Suspense>
                     </ErrorBoundary>
                   </div>

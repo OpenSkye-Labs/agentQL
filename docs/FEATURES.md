@@ -55,3 +55,7 @@ Append-only record of shipped behaviour. Newest at the bottom.
   row in …" context-menu item) that opens the referenced table filtered to that key (`"id" = …`). The filter now lives on
   the tab, so jumping into an already open table re-targets it; tabs with pending edits ask before discarding them.
   SQLite FKs declared without a target column list resolve to the parent's primary key.
+- ER diagram (M4): "ER diagram" on a schema's context menu opens a tab that introspects every table (`schema_objects`),
+  lays them out with dagre (left-to-right ranks) and draws them as plain SVG: PK columns highlighted, FK columns marked,
+  edges from the FK column to the referenced table. Wheel zooms around the cursor, drag pans, hovering a table lights up
+  its relations, clicking opens the table tab. Export writes SVG (theme colours inlined) or PNG (2x) via the save dialog.
