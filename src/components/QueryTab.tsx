@@ -131,7 +131,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
         }
         // The editor stayed editable during the IPC round trip: never prompt for, or run, SQL the user no longer sees.
         if (editor.current?.getValue() !== docBefore || useStore.getState().activeTab !== tab.id) {
-          toast("Editor changed while checking the statements; run again.", "warning");
+          toast("Editor changed while checking the statements; run again.", "error");
           return;
         }
         if (writes.length)
