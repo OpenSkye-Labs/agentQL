@@ -122,3 +122,8 @@ skipped (a dangling symlink picked in the save dialog would be replaced by a reg
 | 6   | minor | `refreshConnections` failure in `finally` rejected the import handler silently    | Caught and toasted                                                                                                               |
 | 7   | minor | Mod+S only worked with editor focus; `cbs.current` written during render          | Shortcut moved to the global handler in App.tsx (dispatches `agentql:save` to the active query tab); SqlEditor change reverted   |
 | 8   | minor | Versions dialog said "Save keeps it" but Mod+S saves the file in a file-bound tab | Text now points at Saved › Save                                                                                                  |
+
+CodeRabbit on PR #6, round 2: 0 new comments; one follow-up on the `saveQuery` rollback (two overlapping failed
+saves could leave an unpersisted list in the store). Addressed: saved-query writes (save and delete) now go
+through one promise queue in `src/lib/store.ts`, each starting from the state the previous write left and rolling
+back to the last persisted list on failure.
