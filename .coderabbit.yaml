@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+    # Feature PRs land on dev; dev -> main and release-please PRs are already-reviewed aggregates.
+    base_branches:
+      - dev
+  path_filters:
+    - "!pnpm-lock.yaml"
+    - "!src-tauri/Cargo.lock"
+    - "!CHANGELOG.md"
+    - "!src-tauri/icons/**"
+    - "!src-tauri/gen/**"
+    - "!dist/**"
+  path_instructions:
+    - path: "src-tauri/**/*.rs"
+      instructions: |
+        Rust 2024 edition, Tauri 2. Commands return Result<T, AppError>. Flag anything that could execute a
+        database write without the in-app approval flow, leak secrets into connections.json or logs, or
+        bypass READ ONLY transactions on read-only connections. Prefer the smallest change that works.
+    - path: "src/**/*.{ts,tsx}"
+      instructions: |
+        React 19 + TypeScript, zustand store, Tailwind v4. Flag stale-response races in async effects,
+        missing error handling on invoke calls, and accessibility regressions (labels, keyboard access).
+    - path: ".github/workflows/**"
+      instructions: |
+        All actions must stay pinned to full commit SHAs with a version comment. Flag any untrusted input
+        used directly in run: steps.
+
+chat:
+  auto_reply: true
