@@ -99,6 +99,8 @@ pub fn run() {
             commands::ai_resolve_approval,
             commands::run_chart,
             commands::app_info,
+            commands::read_text_file,
+            commands::write_text_file,
             commands::classify_sql,
         ])
         .run(tauri::generate_context!())
