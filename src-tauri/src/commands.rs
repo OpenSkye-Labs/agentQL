@@ -787,3 +787,45 @@ pub fn app_info(st: State<'_, AppState>) -> Value {
         "secret_storage": st.store.secret_storage(),
     })
 }
+
+// ----------------------------------------------------------------- Updater
+
+#[derive(Serialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: Option<String>,
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>> {
+    use tauri_plugin_updater::UpdaterExt as _;
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateInfo {
+        version: u.version,
+        notes: u.body,
+    }))
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<()> {
+    use tauri_plugin_updater::UpdaterExt as _;
+    let Some(update) = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(());
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}

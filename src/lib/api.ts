@@ -96,6 +96,8 @@ export const api = {
   // settings / kv
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
+  checkUpdate: () => invoke<{ version: string; notes: string | null } | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
   setProviderKey: (providerId: string, key: string | null) => invoke<void>("set_provider_key", { providerId, key }),
   hasProviderKey: (providerId: string) => invoke<boolean>("has_provider_key", { providerId }),
   detectClis: () => invoke<{ claude: string | null; codex: string | null }>("detect_clis"),

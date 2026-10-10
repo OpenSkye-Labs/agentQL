@@ -43,3 +43,5 @@ Append-only record of shipped behaviour. Newest at the bottom.
   Private key and password live in the repo secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
   the public key and `createUpdaterArtifacts` are in `src-tauri/tauri.release.conf.json`, merged only by the release workflow
   so local builds need no key. Release assets include `.sig` files and `latest.json` for the updater plugin.
+- In-app updater (`tauri-plugin-updater`): the status bar checks `releases/latest/download/latest.json` once at startup and shows
+  an "Update to vX.Y.Z" button that downloads, verifies the minisign signature against the pubkey in tauri.conf.json, installs and restarts.
