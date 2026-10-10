@@ -47,10 +47,19 @@ Append-only record of shipped behaviour. Newest at the bottom.
   an "Update to vX.Y.Z" button that downloads, verifies the minisign signature against the pubkey in tauri.conf.json, installs and restarts.
 - Licensed under MIT (LICENSE, package.json, Cargo.toml). README gained the SignPath-required "Code signing policy" and
   "Privacy policy" sections plus a License section; SECURITY.md documents private vulnerability reporting.
+- Brand: new app icon and logo ("talking database": cylinder with a chat tail and an amber band). Source of truth is
+  `assets/brand/icon.svg` / `logo.svg` / `logo-dark.svg`; platform icons regenerated with `pnpm tauri icon assets/brand/icon.svg`.
+  README header uses the SVG lockup with a light/dark swap; `assets/brand/social-1080.png` is for social avatars and the GitHub social preview.
 - Update dialogs: when a newer release is found the status bar button opens "Update available" with the release notes and
   Later / Update now; after an update installs, "What's new in vX.Y.Z" shows that version's section of the bundled CHANGELOG.md once.
 - Windows build fix: ssh-agent auth uses the OpenSSH agent named pipe on Windows (russh `connect_named_pipe`); CI now runs
   `cargo check` on Windows and macOS for Rust changes so cross-platform compile errors fail the PR, not the release build.
+- M8 Query versioning and portable profiles: a query tab remembers the saved query it was loaded from, so "Save"
+  updates it and keeps the previous text as a version (last 20, with timestamps; "Versions…" dialog restores one into
+  the editor). Sidebar "…" menu exports all connection profiles to JSON without any secret (ids dropped, URL
+  passwords stripped; `src/lib/profiles.ts`) and imports such a file as new connections that still need their
+  passwords entered. "File" menu in the query tab opens/saves `.sql` files (`Mod+S`); the path shows next to the
+  toolbar and as the tab tooltip. Backend: `read_text_file` (20 MB cap) / `write_text_file` commands.
 - Foreign-key click-through (M4): in a table tab, cells of FK columns show a jump arrow on hover (and an "Open referenced
   row in …" context-menu item) that opens the referenced table filtered to that key (`"id" = …`). The filter now lives on
   the tab, so jumping into an already open table re-targets it; tabs with pending edits ask before discarding them.

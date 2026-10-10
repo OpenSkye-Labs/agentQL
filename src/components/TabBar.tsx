@@ -95,7 +95,9 @@ export function TabBar() {
                   />
                 )}
                 <span className="shrink-0 text-faint">{icons[t.kind]}</span>
-                <span className="truncate flex-1">{t.title}</span>
+                <span className="truncate flex-1" title={t.kind === "query" ? t.filePath : undefined}>
+                  {t.title}
+                </span>
                 {t.kind !== "welcome" && (
                   <button
                     onClick={(e) => {

@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
-    "check": "node --experimental-strip-types src/lib/sql.check.ts && node --experimental-strip-types src/lib/diff.check.ts",
+    "check": "node --experimental-strip-types src/lib/sql.check.ts && node --experimental-strip-types src/lib/diff.check.ts && node --experimental-strip-types src/lib/profiles.check.ts && node --experimental-strip-types src/lib/queries.check.ts",
     "version:check": "node scripts/version.mjs",
     "format": "oxfmt",
     "format:check": "oxfmt --check",

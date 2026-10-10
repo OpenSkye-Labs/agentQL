@@ -55,6 +55,11 @@ export default function App() {
           e.preventDefault();
           s.closeTab(active.id);
         }
+      } else if (e.key === "s" && !e.shiftKey) {
+        if (active?.kind === "query") {
+          e.preventDefault();
+          window.dispatchEvent(new Event("agentql:save"));
+        }
       } else if (e.key === "k" || e.key === "j") {
         e.preventDefault();
         s.setChatOpen(!s.chatOpen);
