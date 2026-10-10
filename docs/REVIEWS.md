@@ -127,3 +127,15 @@ Requirements: all M4 criteria met. Judge: 8/10 (advisory). Findings addressed be
 | 11  | Codex follow-up      | FK references into other schemas were rewritten to the destination schema                            | `ref_schema` kept when it differs from the object's schema                                     |
 | 12  | correctness          | `validate_filter` rejects FK keys containing `--`                                                    | Skipped: rare; the jump surfaces the backend error instead of running an unvalidated filter    |
 | 13  | judge                | `Node`/`Edge` shadow DOM types; `MYSQL` predicate; decorative `QuoteDriver` union                    | Renamed `ErdNode`/`ErdEdge`/`isMysql`; `QuoteDriver = string` with a doc comment               |
+
+## 2026-10-11 — M4 PR #10 (CodeRabbit, first pass: 7 comments)
+
+| #   | Sev   | Finding                                                             | Resolution                                                           |
+| --- | ----- | ------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 1   | minor | `fit()` stored scale 0 while the ERD tab was hidden                 | Already fixed from the panel round (guard + ResizeObserver)          |
+| 2   | minor | Diagram nodes not reachable from the keyboard                       | `role="button"`, `tabIndex`, aria-label, Enter/Space opens the table |
+| 3   | minor | Clipboard write failure still showed "copied"                       | Toast follows the promise; failures show an error toast              |
+| 4   | minor | Diff footer read the live pickers instead of the compared result    | Already fixed from the panel round                                   |
+| 5   | major | "Clear" on a filtered table discarded pending edits without asking  | Same dirty confirm as Apply                                          |
+| 6   | minor | `ADD COLUMN … NOT NULL` without a default fails on populated tables | Added nullable with a backfill note; self-check added                |
+| 7   | minor | Existing diff tab was reactivated without the new schema            | Already fixed from the panel round (diff tabs open fresh)            |
