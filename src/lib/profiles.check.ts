@@ -1,6 +1,6 @@
 // Runnable self-check: node --experimental-strip-types src/lib/profiles.check.ts
 import assert from "node:assert/strict";
-import { exportProfiles, parseProfiles, stripUrlPassword } from "./profiles.ts";
+import { exportProfiles, parseProfiles, stripUrlPassword, stripUrlSecrets } from "./profiles.ts";
 import type { ConnectionConfig } from "./types.ts";
 
 assert.equal(stripUrlPassword("postgres://bob:s%3Acret@db:5432/app"), "postgres://bob@db:5432/app");
@@ -9,6 +9,11 @@ assert.equal(stripUrlPassword("mongodb://h/db?x=a@b"), "mongodb://h/db?x=a@b");
 assert.equal(stripUrlPassword("mongodb://localhost:27017?appName=a@b"), "mongodb://localhost:27017?appName=a@b");
 assert.equal(stripUrlPassword("mysql://u:p%40w@h:3306/d?x=a@b"), "mysql://u@h:3306/d?x=a@b");
 assert.equal(stripUrlPassword("postgres://u@h/d"), "postgres://u@h/d");
+assert.equal(
+  stripUrlSecrets("mongodb://u:p@h/db?authSource=admin&authMechanismProperties=AWS_SESSION_TOKEN:abc&tls=true#f"),
+  "mongodb://u@h/db?authSource=admin&tls=true#f",
+);
+assert.equal(stripUrlSecrets("redis://h:6379/0?password=x"), "redis://h:6379/0");
 
 const conn: ConnectionConfig = {
   id: "abc",

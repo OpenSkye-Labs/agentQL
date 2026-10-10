@@ -102,3 +102,23 @@ Reviewer panel (correctness / security / requirements / skeptic, read-only agent
 | 7   | low  | Saving a file-bound tab as a named query dropped the file binding                          | Bindings are independent; Mod+S prefers the file                                                                      |
 | 8   | low  | Version logic had no runnable check                                                        | Extracted to `src/lib/queries.ts` with `queries.check.ts` in `pnpm check`                                             |
 | 9   | low  | Mod+S outside the editor falls through to the webview default; `write` is not tmp+rename   | Skipped: pre-existing behaviour, same as `export_rows`                                                                |
+
+CodeRabbit on PR #6, round 1: 10 comments, all addressed (table below). Codex round 3 on those fixes: 3 findings,
+addressed: unique per-save temp file name (pid + nanos, removed on a failed rename); destination permissions copied
+onto the temp file before the rename; `saveQuery` rolls back its optimistic state when `kvSet` rejects, unless a
+newer save already landed. Codex round 4: 2 findings on the same write path, addressed: the destination symlink is
+resolved first so the target gets the text; the temp file is created `create_new` with mode 0600 (Unix) before any
+bytes are written, then takes the destination's mode and is removed on any failure. Codex round 5: 1 finding
+skipped (a dangling symlink picked in the save dialog would be replaced by a regular file; not a realistic flow for
+`.sql` files chosen in a native dialog, and the ceiling is noted in the function's comment).
+
+| #   | Sev   | Finding                                                                           | Resolution                                                                                                                       |
+| --- | ----- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | major | File commands did blocking fs work on the async runtime                           | Both run through `spawn_blocking`                                                                                                |
+| 2   | major | Saving over an existing `.sql` truncated it before writing                        | Write `<path>.tmp` then rename                                                                                                   |
+| 3   | major | Mongo `authMechanismProperties=AWS_SESSION_TOKEN:…` survived in exported URLs     | `stripUrlSecrets` drops credential-bearing query params (password/pwd/token/secret/authMechanismProperties) on export and import |
+| 4   | major | Two tabs saving the same query could lose a version (state set after `kvSet`)     | State updated synchronously first, then persisted                                                                                |
+| 5   | minor | Dialog rejections in QueryTab / Sidebar escaped the `try`                         | Dialog calls moved inside the `try` blocks                                                                                       |
+| 6   | minor | `refreshConnections` failure in `finally` rejected the import handler silently    | Caught and toasted                                                                                                               |
+| 7   | minor | Mod+S only worked with editor focus; `cbs.current` written during render          | Shortcut moved to the global handler in App.tsx (dispatches `agentql:save` to the active query tab); SqlEditor change reverted   |
+| 8   | minor | Versions dialog said "Save keeps it" but Mod+S saves the file in a file-bound tab | Text now points at Saved › Save                                                                                                  |

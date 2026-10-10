@@ -56,12 +56,12 @@ export function Sidebar({
   const [menuItems, setMenuItems] = useState<Items>([]);
 
   const exportConnections = async () => {
-    const path = await saveDialog({
-      defaultPath: "agentql-connections.json",
-      filters: [{ name: "JSON", extensions: ["json"] }],
-    });
-    if (!path) return;
     try {
+      const path = await saveDialog({
+        defaultPath: "agentql-connections.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
       await api.writeTextFile(path, exportProfiles(connections));
       toast(`Exported ${connections.length} connection profile(s) without passwords`, "success");
     } catch (e) {
@@ -69,10 +69,10 @@ export function Sidebar({
     }
   };
   const importConnections = async () => {
-    const path = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
-    if (!path) return;
     let list: ConnectionConfig[];
     try {
+      const path = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (!path) return;
       list = parseProfiles(await api.readTextFile(path));
     } catch (e) {
       toast(errMsg(e), "error");
@@ -88,7 +88,7 @@ export function Sidebar({
     } catch (e) {
       toast(`Imported ${done} of ${list.length} connections, then: ${errMsg(e)}`, "error");
     } finally {
-      await refreshConnections();
+      await refreshConnections().catch((e) => toast(errMsg(e), "error"));
     }
   };
 

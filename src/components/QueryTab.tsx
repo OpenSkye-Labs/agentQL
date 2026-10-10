@@ -147,9 +147,9 @@ export function QueryTab({ tab }: { tab: QTab }) {
 
   const sqlFilter = [{ name: "SQL", extensions: ["sql"] }];
   const openFile = async () => {
-    const path = await openDialog({ multiple: false, filters: sqlFilter });
-    if (!path) return;
     try {
+      const path = await openDialog({ multiple: false, filters: sqlFilter });
+      if (!path) return;
       const sql = await api.readTextFile(path);
       const patch = { sql, filePath: path, title: basename(path), savedId: undefined };
       // Never clobber unsaved text: a non-empty tab opens the file next to it.
@@ -161,10 +161,10 @@ export function QueryTab({ tab }: { tab: QTab }) {
     }
   };
   const saveFile = async (as = false) => {
-    let path = as ? null : (tab.filePath ?? null);
-    if (!path) path = await saveDialog({ defaultPath: tab.filePath ?? "query.sql", filters: sqlFilter });
-    if (!path) return;
     try {
+      let path = as ? null : (tab.filePath ?? null);
+      if (!path) path = await saveDialog({ defaultPath: tab.filePath ?? "query.sql", filters: sqlFilter });
+      if (!path) return;
       await api.writeTextFile(path, editor.current?.getValue() ?? "");
       updateTab(tab.id, { filePath: path, title: basename(path) });
       toast(`Saved ${basename(path)}`, "success");
@@ -194,8 +194,15 @@ export function QueryTab({ tab }: { tab: QTab }) {
       toast(errMsg(e), "error");
     }
   };
-  // Mod+S saves whatever this tab is bound to: its .sql file, else its saved query, else a new file.
-  const onSave = () => void (tab.filePath ? saveFile() : savedCurrent ? saveNamed(savedCurrent) : saveFile());
+  // Mod+S (global shortcut in App.tsx) saves whatever this tab is bound to: its .sql file, else its
+  // saved query, else a new file.
+  const onSave = useRef<() => void>(() => {});
+  onSave.current = () => void (tab.filePath ? saveFile() : savedCurrent ? saveNamed(savedCurrent) : saveFile());
+  useEffect(() => {
+    const h = () => activeTab === tab.id && onSave.current();
+    window.addEventListener("agentql:save", h);
+    return () => window.removeEventListener("agentql:save", h);
+  }, [activeTab, tab.id]);
 
   if (!conn) return <Empty title="Connection removed" />;
   const current = results?.[active];
@@ -336,7 +343,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
           open={versionsOpen}
           onOpenChange={setVersionsOpen}
           title={`Versions of "${savedCurrent?.name ?? ""}"`}
-          description="Earlier edits, newest first. Restore puts a version in the editor; Save keeps it."
+          description="Earlier edits, newest first. Restore puts a version in the editor; Saved › Save keeps it."
         >
           {savedCurrent?.versions?.length ? (
             <ul className="flex flex-col gap-2">
@@ -390,7 +397,6 @@ export function QueryTab({ tab }: { tab: QTab }) {
             schema={schema}
             onRun={() => run(editor.current?.getRunnable() ?? "")}
             onRunAll={() => run(editor.current?.getValue() ?? "")}
-            onSave={onSave}
             placeholder={`Write ${conn.driver === "postgres" ? "PostgreSQL" : conn.driver} here. ${mod}+Enter runs the statement under the cursor.`}
           />
         </Panel>

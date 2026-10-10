@@ -290,8 +290,16 @@ export const useStore = create<State>((set, get) => ({
     const list = get()
       .savedQueries.filter((x) => x.id !== q.id)
       .concat(next);
-    await api.kvSet("saved_queries", list);
+    // State first, persist second, so a second save of the same query sees this one's version.
+    const before = get().savedQueries;
     set({ savedQueries: list });
+    try {
+      await api.kvSet("saved_queries", list);
+    } catch (e) {
+      // Roll back only if nothing newer landed meanwhile.
+      if (get().savedQueries === list) set({ savedQueries: before });
+      throw e;
+    }
   },
   deleteSavedQuery: async (id) => {
     const list = get().savedQueries.filter((x) => x.id !== id);

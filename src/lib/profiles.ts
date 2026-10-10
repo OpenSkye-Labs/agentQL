@@ -18,12 +18,26 @@ export function stripUrlPassword(url: string): string {
   return url.slice(0, start) + authority.slice(0, colon) + url.slice(start + at);
 }
 
+const SECRET_PARAM = /password|passwd|pwd|token|secret|authMechanismProperties/i;
+
+/** Drop the userinfo password and any credential-bearing query parameter
+ *  (e.g. Mongo `authMechanismProperties=AWS_SESSION_TOKEN:…`). */
+export function stripUrlSecrets(url: string): string {
+  const u = stripUrlPassword(url);
+  const q = u.indexOf("?");
+  if (q < 0) return u;
+  const hash = u.indexOf("#", q);
+  const query = u.slice(q + 1, hash < 0 ? undefined : hash);
+  const kept = query.split("&").filter((kv) => !SECRET_PARAM.test(kv.split("=")[0]));
+  return u.slice(0, q) + (kept.length ? `?${kept.join("&")}` : "") + (hash < 0 ? "" : u.slice(hash));
+}
+
 /** Connection profiles as JSON. ConnectionConfig never carries secrets (keychain only), and any
  *  password still embedded in a URL is stripped again here as a belt-and-braces guard. */
 export function exportProfiles(connections: ConnectionConfig[]): string {
   const list = connections.map(({ id: _id, created_at: _c, updated_at: _u, url, ...rest }) => ({
     ...rest,
-    url: url ? stripUrlPassword(url) : url,
+    url: url ? stripUrlSecrets(url) : url,
   }));
   return JSON.stringify({ format: PROFILES_FORMAT, version: PROFILES_VERSION, connections: list }, null, 2);
 }
@@ -72,7 +86,7 @@ export function parseProfiles(json: string): ConnectionConfig[] {
       // Colours are rendered as inline CSS, so only accept hex values.
       color: color && /^#[0-9a-f]{3,8}$/i.test(color) ? color : null,
       group: str("group"),
-      url: str("url") ? stripUrlPassword(str("url") as string) : null,
+      url: str("url") ? stripUrlSecrets(str("url") as string) : null,
       host: str("host") ?? "",
       port: port(o.port) ?? 0,
       user: str("user") ?? "",
