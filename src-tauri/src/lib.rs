@@ -100,6 +100,7 @@ pub fn run() {
             commands::run_chart,
             commands::app_info,
             commands::history_add,
+            commands::set_agent_scope,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

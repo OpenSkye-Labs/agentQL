@@ -414,6 +414,7 @@ const handlers: Record<string, Handler> = {
         : [],
   kv_set: () => null,
   history_add: () => null,
+  set_agent_scope: () => null,
   ai_list_sessions: () => [{ ...session, messages: [] }],
   ai_get_session: () => session,
   ai_create_session: () => ({ ...session, id: "s2", title: "New chat", messages: [] }),

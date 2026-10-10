@@ -118,6 +118,9 @@ async fn check_sql_scope(
     let Some(refs) = referenced_tables(driver, sql) else {
         return Err("could not parse this SQL to check it against the agent scope; simplify it and qualify table names with their schema".into());
     };
+    if let Some(st) = refs.opaque.first() {
+        return Err(format!("{st} statements are not allowed while an agent scope is set; use list_tables / describe_table instead.").into());
+    }
     if let Some(f) = refs.functions.iter().find(|f| {
         let bare = f.rsplit('.').next().unwrap_or(f);
         // SQLite's pragma_* table functions read metadata of any table by name.
@@ -552,7 +555,7 @@ async fn execute_inner(
                 .iter()
                 .map(|st| with_limit(conn.config.driver, st, limit))
                 .collect::<Vec<_>>()
-                .join(";\n");
+                .join("\n;\n");
             let started = std::time::Instant::now();
             let res = if read_only {
                 c.run_read_only(&sql, limit).await

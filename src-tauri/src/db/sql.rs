@@ -1320,6 +1320,8 @@ pub fn with_limit(driver: Driver, stmt: &str, limit: u32) -> String {
 pub struct SqlRefs {
     pub tables: Vec<(Option<String>, String)>,
     pub functions: Vec<String>,
+    /// Statements whose targets the visitor does not report (SHOW, DESCRIBE, PRAGMA, ...).
+    pub opaque: Vec<String>,
 }
 
 /// Every table the SQL reads or writes, with identifiers normalised the way the database resolves
@@ -1327,7 +1329,7 @@ pub struct SqlRefs {
 /// skipped only where they are lexically visible, table-valued functions always (they are reported
 /// under `functions`). `None` when the text does not parse, so callers can fail closed.
 pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
-    use sqlparser::ast::{Expr, Ident, ObjectName, Query, TableFactor, Visit, Visitor};
+    use sqlparser::ast::{Expr, Ident, ObjectName, Query, Statement, TableFactor, Visit, Visitor};
     use std::ops::ControlFlow;
     /// One `WITH` clause: its names become visible one by one (all at once when RECURSIVE).
     struct Frame {
@@ -1345,6 +1347,7 @@ pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
         function_names: Vec<*const ObjectName>,
         functions: Vec<String>,
         relations: Vec<ObjectName>,
+        opaque: Vec<String>,
     }
     /// Function names as the database resolves them: quotes dropped, lowercased.
     fn function_key(n: &ObjectName) -> String {
@@ -1416,6 +1419,21 @@ pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
             }
             ControlFlow::Continue(())
         }
+        fn pre_visit_statement(&mut self, st: &Statement) -> ControlFlow<()> {
+            if !matches!(
+                st,
+                Statement::Query(_)
+                    | Statement::Insert(_)
+                    | Statement::Update { .. }
+                    | Statement::Delete(_)
+                    | Statement::Explain { .. }
+            ) {
+                let text = st.to_string();
+                let head: Vec<&str> = text.split_whitespace().take(2).collect();
+                self.opaque.push(head.join(" "));
+            }
+            ControlFlow::Continue(())
+        }
         fn pre_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
             if let Expr::Function(f) = e {
                 self.functions.push(function_key(&f.name));
@@ -1452,6 +1470,7 @@ pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
             })
             .collect(),
         functions: c.functions,
+        opaque: c.opaque,
     })
 }
 
@@ -1601,6 +1620,16 @@ mod tests {
                 .unwrap()
                 .functions,
             vec!["pragma_table_info"]
+        );
+        // Statements the visitor cannot see into are reported so scoped runs can refuse them.
+        let r = referenced_tables(Driver::Mysql, "show create table x.t; show tables").unwrap();
+        assert!(r.tables.is_empty());
+        assert_eq!(r.opaque, vec!["SHOW CREATE", "SHOW TABLES"]);
+        assert!(
+            referenced_tables(pg, "explain select * from t")
+                .unwrap()
+                .opaque
+                .is_empty()
         );
     }
 }

@@ -10,6 +10,7 @@ import type {
   QueryResult,
   RowChange,
   ScanResult,
+  ScopeEntry,
   Settings,
   TableDetails,
   TableInfo,
@@ -105,6 +106,7 @@ export const api = {
   kvGet: <T>(name: string) => invoke<T | null>("kv_get", { name }),
   kvSet: (name: string, value: unknown) => invoke<void>("kv_set", { name, value }),
   historyAdd: (entry: HistoryEntry) => invoke<void>("history_add", { entry }),
+  setAgentScope: (id: string, scope: ScopeEntry[] | null) => invoke<void>("set_agent_scope", { id, scope }),
 
   // ai
   aiListSessions: (connectionId?: string) => invoke<ChatSession[]>("ai_list_sessions", { connectionId }),

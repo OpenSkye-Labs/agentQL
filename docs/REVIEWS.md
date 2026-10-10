@@ -115,3 +115,13 @@ plain thread (`off_runtime` in config.rs). Added an ignored latency test (`cargo
 | 2   | P2  | SQLite `pragma_table_info('secret')` leaks excluded metadata        | Any `pragma_*` function refused while a scope is set                                                                                                                                   |
 | 3   | P2  | Scope narrowed while a write approval was pending still executed    | Scope reloaded and re-checked after approval, right before execution                                                                                                                   |
 | 4   | sec | Blocklist incomplete; MySQL `/*! */` bodies invisible to the parser | Added `pg_stat_file`, `pg_ls_logdir`, `pg_ls_waldir`, `ts_stat`, `lo_open`, `loread`; `/*!` and `/*+` refused while scoped. Allowlist of pure functions remains the named upgrade path |
+
+## 2026-10-11 — M2 AI trust and audit, CodeRabbit on PR #9
+
+3 comments, all addressed:
+
+| #   | Finding                                                                                         | Resolution                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 1   | Rejoining statements with `;\n` lets a trailing `--` comment swallow the separator              | Separator on its own line (`\n;\n`)                                                                     |
+| 2   | `SHOW CREATE TABLE` / `SHOW TABLES` carry no visited relation, so a scope let them through      | Statements the visitor cannot see into (SHOW, DESCRIBE, PRAGMA, …) are refused while scoped; test added |
+| 3   | Scope dialog saved the whole stale connection config, could clobber a consent granted meanwhile | Narrow `set_agent_scope` command updates only that field                                                |

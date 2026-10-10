@@ -60,7 +60,7 @@ export function AgentScopeDialog({
         });
     setSaving(true);
     try {
-      await api.saveConnection({ ...conn, agent_scope: scope });
+      await api.setAgentScope(conn.id, scope);
       await refreshConnections();
       onOpenChange(false);
     } catch (e) {
