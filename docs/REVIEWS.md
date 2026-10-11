@@ -356,6 +356,7 @@ Requirements: all M4 criteria met. Judge: 8/10 (advisory). Findings addressed be
 
 ## 2026-10-11 — M4 PR #10 (CodeRabbit, fourth pass after merging PR #8: 1 comment)
 
-| #   | Sev   | Finding                                                                                         | Resolution                                                                                                                    |
-| --- | ----- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 1   | minor | `split_statements` escapes backslashes for every dialect, so a Postgres key with `\'` mis-split | `validate_filter` splits the driver-aware literal-blanked text, so `;` inside a literal never splits; tests for both dialects |
+| #   | Sev   | Finding                                                                                                                             | Resolution                                                                                                                    |
+| --- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 1   | minor | `split_statements` escapes backslashes for every dialect, so a Postgres key with `\'` mis-split                                     | `validate_filter` splits the driver-aware literal-blanked text, so `;` inside a literal never splits; tests for both dialects |
+| 2   | high  | Commit security scan: Postgres `E'…'` escape strings use backslashes, so `E'\'' ; …` could hide a second statement from the blanker | The blanker enables backslash escapes for a literal prefixed by a bare `E`/`e`; tests for `E'…'`, `e'…'` and a literal `'E'`  |

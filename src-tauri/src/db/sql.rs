@@ -1231,22 +1231,30 @@ use exec_stream;
 
 /// Replace the contents of single-quoted literals by spaces so lexical checks skip them.
 /// `''` stays inside the literal; with `backslash` (MySQL dialects) so does a backslash-escaped character.
+/// `backslash` is the dialect default (MySQL); a Postgres `E'…'` escape string enables it per literal.
 fn blank_string_literals(sql: &str, backslash: bool) -> String {
     let mut out = String::with_capacity(sql.len());
     let mut in_str = false;
+    let mut esc = backslash;
+    let mut prev = [' ', ' ']; // the two characters before the current one
     let mut chars = sql.chars();
     while let Some(c) = chars.next() {
         if c == '\'' {
+            if !in_str {
+                let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '"' || c == '`';
+                esc = backslash || (matches!(prev[1], 'E' | 'e') && !is_ident(prev[0]));
+            }
             in_str = !in_str;
             out.push(c);
         } else if in_str {
             out.push(' ');
-            if backslash && c == '\\' && chars.next().is_some() {
+            if esc && c == '\\' && chars.next().is_some() {
                 out.push(' ');
             }
         } else {
             out.push(c);
         }
+        prev = [prev[1], c];
     }
     out
 }
@@ -1807,6 +1815,11 @@ mod tests {
         assert!(pg("\"x\" = 'a\\'';b'").is_ok());
         assert!(my("\"x\" = 'a\\';b'").is_ok());
         assert!(pg("\"x\" = 'a'; delete from t").is_err());
+        // Postgres escape strings do use backslashes: E'\'' is one quote, not a closed literal.
+        assert!(pg("\"x\" = E'a\\'b'").is_ok());
+        assert!(pg("\"x\" = E'\\'' ; delete from t; --'").is_err());
+        assert!(pg("\"x\" = e'\\'' ; delete from t; --'").is_err());
+        assert!(pg("\"some\" = 'E'; delete from t").is_err()); // a literal E is not a prefix
         assert!(pg("\"id\" = 1 -- drop").is_err());
         assert!(pg("\"id\" = 1 /* c */").is_err());
         assert!(pg("\"id\" = 1; delete from t").is_err());
