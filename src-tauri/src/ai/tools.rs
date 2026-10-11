@@ -4,7 +4,9 @@
 use super::{AgentEvent, ChatSession, Ctx, ToolDef};
 use crate::config::{Driver, ScopeEntry};
 use crate::db::mongo::MongoFind;
-use crate::db::sql::{SqlConn, is_read_only, referenced_tables, split_statements, with_limit};
+use crate::db::sql::{
+    SqlConn, SqlRefs, is_read_only, referenced_tables, split_statements, with_limit,
+};
 use crate::db::{Live, QueryResult};
 use serde_json::{Value, json};
 use tauri::Emitter;
@@ -92,22 +94,15 @@ const DYNAMIC_SQL_FUNCTIONS: &[&str] = &[
     "pg_logical_slot_get_changes",
     "pg_logical_slot_peek_changes",
     "load_file",
+    // Changes search_path (and anything else) from inside a SELECT; SET statements are opaque already.
+    "set_config",
 ];
 
 const OUT_OF_SCOPE: &str = "is outside the agent scope for this connection (the user picks it with the Scope button in the assistant). Do not try to reach it another way.";
 
-/// Enforce the connection's agent scope on SQL the model wants to run, using the parsed table list.
-/// An unqualified name is taken as `<current schema>.<name>` and must exist there (so a search_path
-/// fallthrough to another schema cannot slip past). Unparsable SQL is refused while a scope is set.
-async fn check_sql_scope(
-    c: &SqlConn,
-    driver: Driver,
-    scope: &Scope<'_>,
-    sql: &str,
-) -> crate::error::Result<()> {
-    if scope.entries.is_none() {
-        return Ok(());
-    }
+/// The parser-only half of the scope check: everything the parsed table list cannot vouch for is
+/// refused before the database is asked anything. Fails closed on SQL that does not parse.
+fn static_scope_check(driver: Driver, sql: &str) -> crate::error::Result<SqlRefs> {
     // MySQL runs `/*! ... */` and `/*+ ... */` comment bodies that the parser only sees as whitespace.
     if sql.contains("/*!") || sql.contains("/*+") {
         return Err(
@@ -121,6 +116,9 @@ async fn check_sql_scope(
     if let Some(st) = refs.opaque.first() {
         return Err(format!("{st} statements are not allowed while an agent scope is set; use list_tables / describe_table instead.").into());
     }
+    if let Some(u) = refs.unsupported.first() {
+        return Err(format!("{u} cannot be checked against the agent scope; rewrite with plain SELECT ... FROM schema.table, subqueries and joins.").into());
+    }
     if let Some(f) = refs.functions.iter().find(|f| {
         let bare = f.rsplit('.').next().unwrap_or(f);
         // SQLite's pragma_* table functions read metadata of any table by name.
@@ -128,10 +126,31 @@ async fn check_sql_scope(
     }) {
         return Err(format!("{f}() reads data outside the parsed table list and is not allowed while an agent scope is set.").into());
     }
+    Ok(refs)
+}
+
+/// Enforce the connection's agent scope on SQL the model wants to run, using the parsed table list.
+/// Returns the `search_path` the statement must run under: on Postgres an unqualified name is taken
+/// as `<current schema>.<name>`, must exist there, and execution pins that schema with `SET LOCAL`
+/// so a `search_path` changed between check and run cannot redirect it. Other drivers have no such
+/// pin, so unqualified names are refused there while a scope is set.
+async fn check_sql_scope(
+    c: &SqlConn,
+    driver: Driver,
+    scope: &Scope<'_>,
+    sql: &str,
+) -> crate::error::Result<Option<String>> {
+    if scope.entries.is_none() {
+        return Ok(None);
+    }
+    let refs = static_scope_check(driver, sql)?;
     let mut current: Option<(String, Vec<String>)> = None;
     for (schema, table) in refs.tables {
         let ok = match schema.as_deref() {
             Some(sch) => scope.table_allowed(sch, &table),
+            None if driver != Driver::Postgres => {
+                return Err(format!("'{table}' is unqualified; while an agent scope is set, write it as <schema>.{table} (see list_tables).").into());
+            }
             None => {
                 if current.is_none() {
                     let cs = c.current_schema().await?;
@@ -149,7 +168,7 @@ async fn check_sql_scope(
             );
         }
     }
-    Ok(())
+    Ok(current.map(|(cs, _)| cs))
 }
 
 /// Default schema for unqualified calls: the first one the agent may see.
@@ -169,15 +188,15 @@ async fn run_agent_chart(
     scope: &Scope<'_>,
     source: &Value,
 ) -> crate::error::Result<QueryResult> {
-    let sql = match (&conn.live, source.get("sql").and_then(|s| s.as_str())) {
-        (Live::Sql(c), Some(sql)) => {
-            check_sql_scope(c, conn.config.driver, scope, sql).await?;
-            Some(sql)
-        }
-        _ => None,
+    let (sql, search_path) = match (&conn.live, source.get("sql").and_then(|s| s.as_str())) {
+        (Live::Sql(c), Some(sql)) => (
+            Some(sql),
+            check_sql_scope(c, conn.config.driver, scope, sql).await?,
+        ),
+        _ => (None, None),
     };
     let started = std::time::Instant::now();
-    let res = run_chart_source(ctx, &session.connection_id, source)
+    let res = run_chart_source(ctx, &session.connection_id, source, search_path.as_deref())
         .await
         .map(|r| vec![r]);
     if let Some(sql) = sql {
@@ -531,7 +550,7 @@ async fn execute_inner(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(200)
                 .min(2000) as u32;
-            check_sql_scope(c, conn.config.driver, &scope, sql).await?;
+            let mut search_path = check_sql_scope(c, conn.config.driver, &scope, sql).await?;
             let read_only = is_read_only(conn.config.driver, sql);
             if !read_only {
                 if !writes_allowed {
@@ -548,7 +567,7 @@ async fn execute_inner(
                 // The scope may have been narrowed while the card was waiting.
                 let fresh = stored_scope(ctx, &session.connection_id);
                 let scope = Scope::new(fresh.as_deref(), conn.config.driver);
-                check_sql_scope(c, conn.config.driver, &scope, sql).await?;
+                search_path = check_sql_scope(c, conn.config.driver, &scope, sql).await?;
             }
             // Bare SELECTs get the row cap pushed into the database so it stops scanning early;
             // one extra row so the client-side `truncated` flag still fires.
@@ -558,11 +577,9 @@ async fn execute_inner(
                 .collect::<Vec<_>>()
                 .join("\n;\n");
             let started = std::time::Instant::now();
-            let res = if read_only {
-                c.run_read_only(&sql, limit).await
-            } else {
-                c.run(&sql, limit).await
-            };
+            let res = c
+                .run_with_search_path(&sql, limit, read_only, search_path.as_deref())
+                .await;
             record_history(ctx, session, &sql, started.elapsed().as_millis(), &res);
             let results = res?;
             let mut text = String::new();
@@ -581,7 +598,7 @@ async fn execute_inner(
                 .get("analyze")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            check_sql_scope(c, conn.config.driver, &scope, sql).await?;
+            let search_path = check_sql_scope(c, conn.config.driver, &scope, sql).await?;
             if analyze && !is_read_only(conn.config.driver, sql) {
                 return Ok(err(
                     "EXPLAIN ANALYZE would execute a write statement; run plain explain instead.",
@@ -590,9 +607,11 @@ async fn execute_inner(
             let stmt = split_statements(sql).into_iter().next().unwrap_or_default();
             let explain = c.explain_sql(&stmt, analyze);
             let started = std::time::Instant::now();
-            let res = c.run_one_read_only(&explain, 5000).await.map(|r| vec![r]);
+            let res = c
+                .run_with_search_path(&explain, 5000, true, search_path.as_deref())
+                .await;
             record_history(ctx, session, &explain, started.elapsed().as_millis(), &res);
-            let r = res?.remove(0);
+            let r = res?.into_iter().next().ok_or("EXPLAIN returned nothing")?;
             let plan: Vec<String> = r
                 .rows
                 .iter()
@@ -840,6 +859,7 @@ pub async fn run_chart_source(
     ctx: &Ctx,
     connection_id: &str,
     source: &Value,
+    search_path: Option<&str>,
 ) -> crate::error::Result<QueryResult> {
     let conn = ctx.manager.get(connection_id).await?;
     match (&conn.live, source.get("kind").and_then(|k| k.as_str())) {
@@ -851,7 +871,7 @@ pub async fn run_chart_source(
             if !is_read_only(conn.config.driver, sql) {
                 return Err("chart queries must be read-only".into());
             }
-            let mut results = c.run_read_only(sql, 5000).await?;
+            let mut results = c.run_with_search_path(sql, 5000, true, search_path).await?;
             results.pop().ok_or_else(|| "query returned nothing".into())
         }
         (Live::Mongo(m), Some("mongo")) => {
@@ -1022,4 +1042,32 @@ pub async fn execute_for_mcp(ctx: &Ctx, session_id: &str, name: &str, input: &Va
         let _ = ctx.save_session(&mut s);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The parser-only half of the scope check refuses every known bypass before touching the database.
+    #[test]
+    fn static_scope_check_refuses_bypasses() {
+        let pg = Driver::Postgres;
+        for sql in [
+            "TABLE other.secrets",
+            "with x as (table other.secrets) select * from x",
+            "select * from lateral pg_read_file('/etc/passwd') f",
+            "SET search_path TO other",
+            "select set_config('search_path', 'other', false)",
+            "select pg_catalog.set_config('search_path', 'other', false)",
+            "select * from t pivot (sum(x) for y in ('a'))",
+            "show tables",
+            "select /*! 1 */ * from t",
+            "select * from",
+        ] {
+            assert!(static_scope_check(pg, sql).is_err(), "{sql}");
+        }
+        let ok =
+            static_scope_check(pg, "select * from public.t, lateral jsonb_each(t.doc) x").unwrap();
+        assert_eq!(ok.tables, vec![(Some("public".into()), "t".into())]);
+    }
 }
