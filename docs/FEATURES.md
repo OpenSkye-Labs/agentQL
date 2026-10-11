@@ -118,3 +118,4 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - Themes: "Follow system" asks the backend for the OS preference (gsettings on GNOME, the registry under WSL) because
   WebKitGTK's `prefers-color-scheme` only follows the GTK theme. Named themes (GitHub light/dark, Solarized light/dark,
   Nord, Dracula, One Dark) are token blocks in `index.css`; `pnpm check` verifies tokens and WCAG AA contrast.
+- Primary buttons use the theme's `--accent-fg` again: an unlayered `button { color: inherit }` reset in index.css was out-ranking every Tailwind `text-*` utility.
