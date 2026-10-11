@@ -172,3 +172,4 @@ back to the last persisted list on failure.
 | 1   | Rejoining statements with `;\n` lets a trailing `--` comment swallow the separator              | Separator on its own line (`\n;\n`)                                                                     |
 | 2   | `SHOW CREATE TABLE` / `SHOW TABLES` carry no visited relation, so a scope let them through      | Statements the visitor cannot see into (SHOW, DESCRIBE, PRAGMA, …) are refused while scoped; test added |
 | 3   | Scope dialog saved the whole stale connection config, could clobber a consent granted meanwhile | Narrow `set_agent_scope` command updates only that field                                                |
+| 4   | `LIMIT limit` capped the database at exactly the client limit, so `truncated` never fired       | `run_sql` pushes `LIMIT limit + 1`; the client row loop still truncates at `limit`                      |

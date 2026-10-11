@@ -550,10 +550,11 @@ async fn execute_inner(
                 let scope = Scope::new(fresh.as_deref(), conn.config.driver);
                 check_sql_scope(c, conn.config.driver, &scope, sql).await?;
             }
-            // Bare SELECTs get the row cap pushed into the database so it stops scanning early.
+            // Bare SELECTs get the row cap pushed into the database so it stops scanning early;
+            // one extra row so the client-side `truncated` flag still fires.
             let sql = split_statements(sql)
                 .iter()
-                .map(|st| with_limit(conn.config.driver, st, limit))
+                .map(|st| with_limit(conn.config.driver, st, limit + 1))
                 .collect::<Vec<_>>()
                 .join("\n;\n");
             let started = std::time::Instant::now();
