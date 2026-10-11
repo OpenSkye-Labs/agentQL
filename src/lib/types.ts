@@ -21,6 +21,14 @@ export interface SshConfig {
   auth: SshAuth;
 }
 
+export type Environment = "dev" | "staging" | "production";
+export const ENVIRONMENTS: Environment[] = ["dev", "staging", "production"];
+
+export interface WriteInfo {
+  kind: string;
+  table: string | null;
+}
+
 export interface ConnectionConfig {
   id: string;
   name: string;
@@ -39,6 +47,7 @@ export interface ConnectionConfig {
   ssl_key_path?: string | null;
   ssh?: SshConfig | null;
   read_only: boolean;
+  environment?: Environment | null;
   options: Record<string, string>;
   created_at?: string | null;
   updated_at?: string | null;

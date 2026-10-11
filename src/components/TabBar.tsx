@@ -1,7 +1,7 @@
 import { clsx } from "clsx";
 import { Bot, Database, FileCode2, LayoutDashboard, Plus, Table2, X, Braces, KeySquare } from "lucide-react";
 import { useStore, type Tab } from "../lib/store";
-import { Tooltip, ContextMenu } from "./ui";
+import { Tooltip, ContextMenu, EnvBadge } from "./ui";
 import { mod } from "../lib/format";
 
 const icons: Record<Tab["kind"], React.ReactNode> = {
@@ -84,6 +84,7 @@ export function TabBar() {
                 <span className="truncate flex-1" title={t.kind === "query" ? t.filePath : undefined}>
                   {t.title}
                 </span>
+                <EnvBadge env={conn?.environment} className="shrink-0" />
                 {t.kind !== "welcome" && (
                   <button
                     onClick={(e) => {

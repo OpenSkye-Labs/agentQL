@@ -224,6 +224,15 @@ pub async fn run_query(
     c.run(&sql_text, limit).await
 }
 
+/// Write statements in `sql_text` (kind + target table) for the production confirmation prompt.
+#[tauri::command]
+pub fn classify_sql(
+    driver: crate::config::Driver,
+    sql_text: String,
+) -> Vec<crate::db::sql::WriteInfo> {
+    crate::db::sql::classify_writes(driver, &sql_text)
+}
+
 #[tauri::command]
 pub async fn explain_query(
     st: State<'_, AppState>,

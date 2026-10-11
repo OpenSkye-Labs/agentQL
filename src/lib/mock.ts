@@ -13,6 +13,7 @@ const connections: ConnectionConfig[] = [
     driver: "postgres",
     color: "#3b6cf6",
     group: "Local",
+    environment: "production",
     host: "127.0.0.1",
     port: 5433,
     user: "gotfound",
@@ -40,6 +41,7 @@ const connections: ConnectionConfig[] = [
     driver: "mongodb",
     color: "#1f8f5a",
     group: "Staging",
+    environment: "staging",
     host: "10.0.0.4",
     port: 27017,
     user: "app",
@@ -309,6 +311,12 @@ const handlers: Record<string, Handler> = {
   }),
   count_table: () => 300,
   run_query: (a) => [result(120, String(a.sqlText))],
+  classify_sql: (a) =>
+    String(a.sqlText)
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s && !/^(select|show|explain|with)\b/i.test(s))
+      .map((s) => ({ kind: s.split(/\s+/)[0].toUpperCase(), table: null })),
   explain_query: () => ({
     columns: [{ name: "QUERY PLAN", type_name: "text" }],
     rows: [
