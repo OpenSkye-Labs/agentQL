@@ -3,8 +3,8 @@
 
 use super::value::{mysql_value, pg_value, sqlite_value};
 use super::{
-    Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult, RowChange, TableDetails, TableInfo,
-    TableQuery,
+    CatalogColumn, CatalogForeignKey, Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult,
+    RowChange, SchemaCatalog, TableDetails, TableInfo, TableQuery,
 };
 use crate::config::{ConnectionConfig, ConnectionSecrets, Driver};
 use crate::error::{AppError, Result};
@@ -914,6 +914,30 @@ impl SqlConn {
                     .ok()
                     .and_then(|r| r.into_iter().next())
                     .and_then(|mut r| opt_str(&mut r, "sql"));
+                // `REFERENCES parent` without a column list reports `to` as NULL: the target is the
+                // parent's primary key.
+                for fk in fk_map.values_mut() {
+                    if !fk.ref_columns.iter().any(String::is_empty) {
+                        continue;
+                    }
+                    let info = self
+                        .rows(&format!(
+                            "PRAGMA {pfx}table_info({})",
+                            self.quote_ident(&fk.ref_table)
+                        ))
+                        .await?;
+                    let mut pk: Vec<(i64, String)> = info
+                        .into_iter()
+                        .filter_map(|mut r| {
+                            let n = take_i64(&mut r, "pk");
+                            (n > 0).then(|| (n, take_str(&mut r, "name")))
+                        })
+                        .collect();
+                    pk.sort();
+                    if pk.len() == fk.ref_columns.len() {
+                        fk.ref_columns = pk.into_iter().map(|(_, n)| n).collect();
+                    }
+                }
                 let mut fks: Vec<_> = fk_map.into_values().collect();
                 fks.sort_by(|a, b| a.name.cmp(&b.name));
                 Ok(TableDetails {
@@ -937,6 +961,119 @@ impl SqlConn {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Columns and foreign keys of every table in `schema`, for editor completion.
+    /// ponytail: whole-schema payload in one go; page or lazy-load per table if a schema with
+    /// tens of thousands of columns ever shows up.
+    pub async fn schema_catalog(&self, schema: &str) -> Result<SchemaCatalog> {
+        let s = self.literal(&Value::String(schema.into()));
+        let (cols, foreign_keys) = match self.driver {
+            Driver::Postgres => (
+                self.rows(&format!(
+                    "SELECT c.relname AS tbl, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS data_type \
+                     FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     WHERE n.nspname = {s} AND c.relkind IN ('r','v','m','p','f') AND a.attnum > 0 AND NOT a.attisdropped \
+                     ORDER BY c.relname, a.attnum"
+                ))
+                .await?,
+                self.rows(&format!(
+                    "SELECT c.relname AS tbl, \
+                     (SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS cols, \
+                     rn.nspname AS ref_schema, rc.relname AS ref_table, \
+                     (SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(con.confkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS ref_cols \
+                     FROM pg_constraint con JOIN pg_class c ON c.oid = con.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     JOIN pg_class rc ON rc.oid = con.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace \
+                     WHERE con.contype = 'f' AND n.nspname = {s} ORDER BY c.relname, con.conname"
+                ))
+                .await?
+                .into_iter()
+                .map(|mut r| CatalogForeignKey {
+                    table: take_str(&mut r, "tbl"),
+                    columns: take_names(&mut r, "cols"),
+                    ref_schema: opt_str(&mut r, "ref_schema"),
+                    ref_table: take_str(&mut r, "ref_table"),
+                    ref_columns: take_names(&mut r, "ref_cols"),
+                })
+                .collect(),
+            ),
+            Driver::Mysql | Driver::Mariadb => (
+                self.rows(&format!(
+                    "SELECT TABLE_NAME AS tbl, COLUMN_NAME AS name, COLUMN_TYPE AS data_type \
+                     FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = {s} ORDER BY TABLE_NAME, ORDINAL_POSITION"
+                ))
+                .await?,
+                // One row per key column, folded here: no GROUP_CONCAT, so no group_concat_max_len
+                // truncation and no separator that could appear in a name.
+                self.rows(&format!(
+                    "SELECT TABLE_NAME AS tbl, CONSTRAINT_NAME AS name, COLUMN_NAME AS col, \
+                     REFERENCED_TABLE_SCHEMA AS ref_schema, REFERENCED_TABLE_NAME AS ref_table, REFERENCED_COLUMN_NAME AS ref_col \
+                     FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = {s} AND REFERENCED_TABLE_NAME IS NOT NULL \
+                     ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION"
+                ))
+                .await?
+                .into_iter()
+                .fold(Vec::<(String, CatalogForeignKey)>::new(), |mut acc, mut r| {
+                    let table = take_str(&mut r, "tbl");
+                    let name = take_str(&mut r, "name");
+                    let col = take_str(&mut r, "col");
+                    let ref_col = take_str(&mut r, "ref_col");
+                    match acc.last_mut() {
+                        Some((n, fk)) if *n == name && fk.table == table => {
+                            fk.columns.push(col);
+                            fk.ref_columns.push(ref_col);
+                        }
+                        _ => acc.push((
+                            name,
+                            CatalogForeignKey {
+                                table,
+                                columns: vec![col],
+                                ref_schema: opt_str(&mut r, "ref_schema"),
+                                ref_table: take_str(&mut r, "ref_table"),
+                                ref_columns: vec![ref_col],
+                            },
+                        )),
+                    }
+                    acc
+                })
+                .into_iter()
+                .map(|(_, fk)| fk)
+                .collect(),
+            ),
+            Driver::Sqlite => {
+                // ponytail: one pragma pair per table (local file, cheap); no bulk catalog in SQLite.
+                let mut out = SchemaCatalog::default();
+                for t in self.tables(schema).await? {
+                    let d = self.table_details(schema, &t.name).await?;
+                    out.columns.extend(d.columns.into_iter().map(|c| CatalogColumn {
+                        table: t.name.clone(),
+                        name: c.name,
+                        data_type: c.data_type,
+                    }));
+                    out.foreign_keys
+                        .extend(d.foreign_keys.into_iter().map(|f| CatalogForeignKey {
+                            table: t.name.clone(),
+                            columns: f.columns,
+                            ref_schema: f.ref_schema,
+                            ref_table: f.ref_table,
+                            ref_columns: f.ref_columns,
+                        }));
+                }
+                return Ok(out);
+            }
+            _ => unreachable!(),
+        };
+        Ok(SchemaCatalog {
+            columns: cols
+                .into_iter()
+                .map(|mut r| CatalogColumn {
+                    table: take_str(&mut r, "tbl"),
+                    name: take_str(&mut r, "name"),
+                    data_type: take_str(&mut r, "data_type"),
+                })
+                .collect(),
+            foreign_keys,
+        })
     }
 
     fn synth_ddl(
@@ -1081,6 +1218,14 @@ fn take_bool(r: &mut HashMap<String, Value>, k: &str) -> bool {
         None => false,
     }
 }
+/// Identifier list returned as a Postgres array (decoded to a JSON array).
+fn take_names(r: &mut HashMap<String, Value>, k: &str) -> Vec<String> {
+    match r.remove(k) {
+        Some(Value::Array(a)) => a.into_iter().filter_map(json_str).collect(),
+        _ => vec![],
+    }
+}
+
 fn split_csv(s: Option<String>) -> Vec<String> {
     s.map(|s| {
         s.split(',')

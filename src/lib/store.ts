@@ -1,7 +1,16 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import { api, errMsg } from "./api";
-import type { ChatSession, ConnectionConfig, Dashboard, HistoryEntry, SavedQuery, Settings, TableInfo } from "./types";
+import type {
+  ChatSession,
+  ConnectionConfig,
+  Dashboard,
+  HistoryEntry,
+  SavedQuery,
+  SchemaCatalog,
+  Settings,
+  TableInfo,
+} from "./types";
 import { withVersion } from "./queries";
 
 export type Tab =
@@ -39,6 +48,7 @@ export interface LiveConn {
   version: string | null;
   schemas: string[];
   tables: Record<string, TableInfo[]>; // by schema
+  catalog: Record<string, SchemaCatalog>; // by schema, for editor completion
   databases: string[];
   expanded: Record<string, boolean>;
   loading?: boolean;
@@ -92,6 +102,12 @@ interface State {
 
 let tabSeq = 1;
 let toastSeq = 1;
+/** Latest catalog request per connection+schema, so a slow older response cannot overwrite a newer one. */
+const catalogSeq = new Map<string, number>();
+/** Drop every in-flight catalog response for a connection (refresh, disconnect). */
+const invalidateCatalog = (connId: string) => {
+  for (const [key, n] of catalogSeq) if (key.startsWith(`${connId}/`)) catalogSeq.set(key, n + 1);
+};
 const uid = () => `${Date.now().toString(36)}-${(tabSeq++).toString(36)}`;
 
 const DEFAULT_SETTINGS: Settings = { providers: [], row_limit: 1000, agent_allow_writes: false, theme: "system" };
@@ -159,6 +175,7 @@ export const useStore = create<State>((set, get) => ({
             version: r.server_version,
             schemas,
             tables: {},
+            catalog: {},
             databases,
             expanded: first ? { [first]: true } : {},
           },
@@ -179,6 +196,7 @@ export const useStore = create<State>((set, get) => ({
 
   disconnect: async (id) => {
     await api.disconnect(id).catch(() => {});
+    invalidateCatalog(id);
     set((s) => {
       const live = { ...s.live };
       delete live[id];
@@ -196,6 +214,20 @@ export const useStore = create<State>((set, get) => ({
         if (!l) return {};
         return { live: { ...s.live, [connId]: { ...l, tables: { ...l.tables, [schema]: tables } } } };
       });
+      // Completion catalog is best-effort and must neither delay nor break the sidebar.
+      const key = `${connId}/${schema}`;
+      const seq = (catalogSeq.get(key) ?? 0) + 1;
+      catalogSeq.set(key, seq);
+      void api
+        .schemaCatalog(connId, schema)
+        .then((catalog) =>
+          set((s) => {
+            const l = s.live[connId];
+            if (!l || catalogSeq.get(key) !== seq) return {};
+            return { live: { ...s.live, [connId]: { ...l, catalog: { ...l.catalog, [schema]: catalog } } } };
+          }),
+        )
+        .catch((e) => console.warn("schema catalog", errMsg(e)));
     } catch (e) {
       get().toast(errMsg(e), "error");
     }
@@ -206,7 +238,8 @@ export const useStore = create<State>((set, get) => ({
     if (!l) return;
     try {
       const schemas = await api.listSchemas(connId);
-      set((s) => ({ live: { ...s.live, [connId]: { ...s.live[connId], schemas, tables: {} } } }));
+      invalidateCatalog(connId); // a slow pre-refresh catalog must not land on the cleared state
+      set((s) => ({ live: { ...s.live, [connId]: { ...s.live[connId], schemas, tables: {}, catalog: {} } } }));
       await Promise.all(schemas.filter((sc) => l.expanded[sc]).map((sc) => get().loadTables(connId, sc)));
     } catch (e) {
       get().toast(errMsg(e), "error");
@@ -337,7 +370,7 @@ function writeSavedQueries(mutate: (before: SavedQuery[]) => SavedQuery[]): Prom
 }
 
 export function emptyLive(id: string): LiveConn {
-  return { id, database: "", version: null, schemas: [], tables: {}, databases: [], expanded: {} };
+  return { id, database: "", version: null, schemas: [], tables: {}, catalog: {}, databases: [], expanded: {} };
 }
 
 export function applyTheme(theme: string, fontSize: number | null) {

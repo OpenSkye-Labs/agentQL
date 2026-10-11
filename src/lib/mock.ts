@@ -272,6 +272,25 @@ const handlers: Record<string, Handler> = {
   list_schemas: () => ["public", "audit"],
   list_tables: (a) =>
     a.schema === "public" ? tables : [{ schema: "audit", name: "events", kind: "table", row_estimate: 99120 }],
+  schema_catalog: (a) =>
+    a.schema === "public"
+      ? {
+          columns: tables.flatMap((t) =>
+            columns
+              .map((c, i) => ({ table: t.name, name: c, data_type: types[i] }))
+              .concat(t.name === "Claim" ? [{ table: t.name, name: "candidateId", data_type: "uuid" }] : []),
+          ),
+          foreign_keys: [
+            {
+              table: "Claim",
+              columns: ["candidateId"],
+              ref_schema: "public",
+              ref_table: "Candidate",
+              ref_columns: ["id"],
+            },
+          ],
+        }
+      : { columns: [], foreign_keys: [] },
   table_details: () => ({
     columns: columns.map((c, i) => ({
       name: c,
