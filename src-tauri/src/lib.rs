@@ -101,6 +101,7 @@ pub fn run() {
             commands::app_info,
             commands::read_text_file,
             commands::write_text_file,
+            commands::classify_sql,
             commands::schema_objects,
             commands::save_file,
         ])

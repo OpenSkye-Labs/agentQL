@@ -58,9 +58,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 
 M1 Safety defaults (S)
 
-- [ ] Run-all gets its own shortcut + confirmation when >1 statement
-- [ ] Per-connection environment tag (dev/staging/production), shown in tab bar + status bar
-- [ ] Writes on production connections require a confirmation naming statement kind + table
+- [x] Run-all gets its own shortcut + confirmation when >1 statement
+- [x] Per-connection environment tag (dev/staging/production), shown in tab bar + status bar
+- [x] Writes on production connections require a confirmation naming statement kind + table
+- [ ] Follow-up: production write prompt for Redis commands and Mongo document edits (SQL-only today)
 
 M2 AI trust and audit (M)
 

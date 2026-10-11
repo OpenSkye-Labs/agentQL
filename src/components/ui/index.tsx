@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { Dialog as RDialog, DropdownMenu as RMenu, Tooltip as RTooltip, ContextMenu as RContext } from "radix-ui";
 import { X } from "lucide-react";
+import type { Environment } from "../../lib/types";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -295,6 +296,25 @@ export function Spinner({ className }: { className?: string }) {
         className,
       )}
     />
+  );
+}
+
+const ENV_CLASS: Record<Environment, string> = {
+  dev: "bg-success/15 text-success",
+  staging: "bg-warning/20 text-warning",
+  production: "bg-danger/15 text-danger",
+};
+
+/** Small environment tag (dev / staging / production). Renders nothing when unset. */
+export function EnvBadge({ env, className }: { env?: Environment | null; className?: string }) {
+  if (!env) return null;
+  return (
+    <span
+      className={clsx("rounded px-1 text-[10px] font-medium uppercase tracking-wide", ENV_CLASS[env], className)}
+      title={`Environment: ${env}`}
+    >
+      {env}
+    </span>
   );
 }
 
