@@ -102,6 +102,8 @@ pub fn run() {
             commands::read_text_file,
             commands::write_text_file,
             commands::classify_sql,
+            commands::history_add,
+            commands::set_agent_scope,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
