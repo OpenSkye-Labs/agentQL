@@ -4,6 +4,13 @@ export const THEMES = [
   { id: "system", label: "Follow system" },
   { id: "light", label: "Light" },
   { id: "dark", label: "Dark" },
+  { id: "github-light", label: "GitHub Light" },
+  { id: "github-dark", label: "GitHub Dark" },
+  { id: "solarized-light", label: "Solarized Light" },
+  { id: "solarized-dark", label: "Solarized Dark" },
+  { id: "nord", label: "Nord" },
+  { id: "dracula", label: "Dracula" },
+  { id: "one-dark", label: "One Dark" },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];

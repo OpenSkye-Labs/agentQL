@@ -69,6 +69,7 @@ const orphans = [...themes.keys()].filter((id) => !THEMES.some((t) => t.id === i
 assert.deepEqual(orphans, [], "index.css defines themes missing from THEMES");
 
 assert.equal(resolveTheme("dark"), "dark");
+assert.equal(resolveTheme("nord"), "nord");
 assert.equal(resolveTheme("no-such-theme"), "system");
 assert.equal(resolveTheme(null), "system");
 assert.equal(resolveTheme(undefined), "system");
