@@ -450,10 +450,12 @@ impl SqlConn {
             return Ok(());
         };
         let parts = split_statements(f);
+        // Comment markers only count outside '…' literals (an FK key value may legitimately contain "--").
+        let code = blank_string_literals(f);
         if parts.len() != 1
             || parts[0] != f.trim_end_matches(';').trim()
-            || f.contains("--")
-            || f.contains("/*")
+            || code.contains("--")
+            || code.contains("/*")
         {
             return Err(AppError::Msg(
                 "filter must be a single WHERE expression".into(),
@@ -1064,6 +1066,23 @@ macro_rules! exec_stream {
 }
 use exec_stream;
 
+/// Replace the contents of single-quoted literals (with `''` escapes) by spaces so lexical checks skip them.
+fn blank_string_literals(sql: &str) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut in_str = false;
+    for c in sql.chars() {
+        if c == '\'' {
+            in_str = !in_str;
+            out.push(c);
+        } else if in_str {
+            out.push(' ');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn json_str(v: Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s),
@@ -1309,6 +1328,17 @@ fn first_word(sql: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn filter_allows_comment_markers_inside_literals() {
+        assert!(
+            SqlConn::validate_filter(Some("\"code\" = 'a--b' AND \"x\" = 'it''s /* ok */'"))
+                .is_ok()
+        );
+        assert!(SqlConn::validate_filter(Some("\"id\" = 1 -- drop")).is_err());
+        assert!(SqlConn::validate_filter(Some("\"id\" = 1 /* c */")).is_err());
+        assert!(SqlConn::validate_filter(Some("\"id\" = 1; delete from t")).is_err());
+    }
+
     #[test]
     fn splits_and_classifies() {
         let parts = split_statements(

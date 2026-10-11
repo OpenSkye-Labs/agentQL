@@ -186,3 +186,10 @@ Requirements: all M4 criteria met. Judge: 8/10 (advisory). Findings addressed be
 | 5   | major | "Clear" on a filtered table discarded pending edits without asking  | Same dirty confirm as Apply                                          |
 | 6   | minor | `ADD COLUMN … NOT NULL` without a default fails on populated tables | Added nullable with a backfill note; self-check added                |
 | 7   | minor | Existing diff tab was reactivated without the new schema            | Already fixed from the panel round (diff tabs open fresh)            |
+
+## 2026-10-11 — M4 PR #10 (CodeRabbit, second pass after the dev merge: 2 comments)
+
+| #   | Sev   | Finding                                                                          | Resolution                                                                                          |
+| --- | ----- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 1   | major | SQLite rejects `ALTER TABLE … ADD CONSTRAINT`, so migrations with new FKs failed | SQLite inlines `CONSTRAINT … FOREIGN KEY` in CREATE TABLE (no parent-order check); others unchanged |
+| 2   | minor | `validate_filter` rejected FK key values containing `--` or `/*`                 | Literal contents are blanked before the comment-marker check; unit test added                       |

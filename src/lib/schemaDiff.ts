@@ -1,4 +1,4 @@
-import type { ColumnInfo, SchemaObject } from "./types.ts";
+import type { ColumnInfo, ForeignKeyInfo, SchemaObject } from "./types.ts";
 import { quoteIdent, type QuoteDriver } from "./sql.ts";
 
 export type DiffStatus = "added" | "removed" | "changed" | "same";
@@ -85,17 +85,23 @@ function createTable(driver: QuoteDriver, qualify: Qualify, o: SchemaObject) {
   const lines = d.columns.map((c) => `  ${columnDef(driver, c)}`);
   const pk = d.indexes.find((i) => i.primary)?.columns ?? d.columns.filter((c) => c.is_primary).map((c) => c.name);
   if (pk.length) lines.push(`  PRIMARY KEY (${pk.map(q).join(", ")})`);
+  // SQLite has no ADD CONSTRAINT and does not check that the parent exists at CREATE time: inline the FKs.
+  if (driver === "sqlite") for (const f of d.foreign_keys) lines.push(`  ${fkClause(driver, qualify, o, f)}`);
   const extra = d.indexes.filter((i) => !i.primary).map((i) => oneLine(`-- index ${i.name} (${i.columns.join(", ")})`));
   return [`CREATE TABLE ${qualify(o.table.name)} (\n${lines.join(",\n")}\n);`, ...extra].join("\n");
 }
 
-/** Foreign keys are added after every table exists, so creation order and cycles do not matter. */
-function addForeignKeys(driver: QuoteDriver, qualify: Qualify, o: SchemaObject) {
+function fkClause(driver: QuoteDriver, qualify: Qualify, o: SchemaObject, f: ForeignKeyInfo) {
   const q = (c: string) => quoteIdent(driver, c);
+  const ref = qualify(f.ref_table, f.ref_schema !== o.table.schema ? f.ref_schema : null);
+  return `CONSTRAINT ${q(f.name)} FOREIGN KEY (${f.columns.map(q).join(", ")}) REFERENCES ${ref} (${f.ref_columns.map(q).join(", ")})`;
+}
+
+/** Postgres/MySQL: foreign keys are added after every table exists, so creation order and cycles do not matter. */
+function addForeignKeys(driver: QuoteDriver, qualify: Qualify, o: SchemaObject) {
+  if (driver === "sqlite") return [];
   return o.details.foreign_keys.map(
-    (f) =>
-      `ALTER TABLE ${qualify(o.table.name)} ADD CONSTRAINT ${q(f.name)} FOREIGN KEY (${f.columns.map(q).join(", ")}) ` +
-      `REFERENCES ${qualify(f.ref_table, f.ref_schema !== o.table.schema ? f.ref_schema : null)} (${f.ref_columns.map(q).join(", ")});`,
+    (f) => `ALTER TABLE ${qualify(o.table.name)} ADD ${fkClause(driver, qualify, o, f)};`,
   );
 }
 

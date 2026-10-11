@@ -192,6 +192,12 @@ assert.equal(
     "",
   ].join("\n"),
 );
+// SQLite cannot ADD CONSTRAINT: the foreign key goes inline in CREATE TABLE and no ALTER is emitted.
+{
+  const s = migrationSql("sqlite", "main", compareSchemas([], [withFk]));
+  assert.ok(s.includes('  CONSTRAINT "child_parent_fkey" FOREIGN KEY ("parent_id") REFERENCES "parent" ("id")\n);'), s);
+  assert.ok(!s.includes("ALTER TABLE"), s);
+}
 // References into another schema keep that schema; foreign tables get their own drop statement.
 withFk.details.foreign_keys[0].ref_schema = "shared";
 assert.ok(migrationSql("postgres", "s", compareSchemas([], [withFk])).includes('REFERENCES "shared"."parent" ("id")'));
