@@ -103,6 +103,10 @@ let tabSeq = 1;
 let toastSeq = 1;
 /** Latest catalog request per connection+schema, so a slow older response cannot overwrite a newer one. */
 const catalogSeq = new Map<string, number>();
+/** Drop every in-flight catalog response for a connection (refresh, disconnect). */
+const invalidateCatalog = (connId: string) => {
+  for (const [key, n] of catalogSeq) if (key.startsWith(`${connId}/`)) catalogSeq.set(key, n + 1);
+};
 const uid = () => `${Date.now().toString(36)}-${(tabSeq++).toString(36)}`;
 
 const DEFAULT_SETTINGS: Settings = { providers: [], row_limit: 1000, agent_allow_writes: false, theme: "system" };
@@ -187,6 +191,7 @@ export const useStore = create<State>((set, get) => ({
 
   disconnect: async (id) => {
     await api.disconnect(id).catch(() => {});
+    invalidateCatalog(id);
     set((s) => {
       const live = { ...s.live };
       delete live[id];
@@ -228,6 +233,7 @@ export const useStore = create<State>((set, get) => ({
     if (!l) return;
     try {
       const schemas = await api.listSchemas(connId);
+      invalidateCatalog(connId); // a slow pre-refresh catalog must not land on the cleared state
       set((s) => ({ live: { ...s.live, [connId]: { ...s.live[connId], schemas, tables: {}, catalog: {} } } }));
       await Promise.all(schemas.filter((sc) => l.expanded[sc]).map((sc) => get().loadTables(connId, sc)));
     } catch (e) {

@@ -584,12 +584,12 @@ export function QueryTab({ tab }: { tab: QTab }) {
           </Field>
           <Field
             label="Completion trigger (optional)"
-            hint="Typing this word in the editor offers the query as a snippet."
+            hint="Letters, digits, _ or $ only. Typing this word in the editor offers the query as a snippet."
           >
             <Input
               placeholder="e.g. topn"
               value={saveForm?.trigger ?? ""}
-              onChange={(e) => setSaveForm((f) => f && { ...f, trigger: e.target.value.replace(/\s+/g, "") })}
+              onChange={(e) => setSaveForm((f) => f && { ...f, trigger: e.target.value.replace(/[^\w$]/g, "") })}
             />
           </Field>
         </form>
