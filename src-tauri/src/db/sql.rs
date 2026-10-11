@@ -1214,68 +1214,16 @@ pub fn is_query_like(sql: &str) -> bool {
     )
 }
 
-fn query_is_read_only(q: &sqlparser::ast::Query) -> bool {
-    use sqlparser::ast::SetExpr;
-    fn body_ok(b: &SetExpr) -> bool {
-        match b {
-            SetExpr::Insert(_) | SetExpr::Update(_) => false,
-            SetExpr::Query(inner) => query_is_read_only(inner),
-            SetExpr::SetOperation { left, right, .. } => body_ok(left) && body_ok(right),
-            _ => true,
-        }
-    }
-    // Any SELECT ... INTO / data-modifying CTE makes the whole query a write.
-    let select_into = matches!(q.body.as_ref(), SetExpr::Select(sel) if sel.into.is_some());
-    !select_into
-        && body_ok(&q.body)
-        && q.with
-            .as_ref()
-            .is_none_or(|w| w.cte_tables.iter().all(|c| query_is_read_only(&c.query)))
-}
-
-/// Conservative read-only check used to gate agent tool calls.
+/// Conservative read-only check used to gate agent tool calls: true when nothing in `sql` is classified as a write.
 pub fn is_read_only(driver: Driver, sql: &str) -> bool {
-    use sqlparser::ast::Statement;
-    match sqlparser::parser::Parser::parse_sql(&*dialect(driver), sql) {
-        Ok(stmts) => stmts.iter().all(|s| match s {
-            Statement::Query(q) => query_is_read_only(q),
-            Statement::Explain {
-                analyze, statement, ..
-            } => !*analyze || statement_is_read_only(statement),
-            Statement::Pragma { value, .. } => value.is_none(),
-            Statement::ExplainTable { .. }
-            | Statement::ShowColumns { .. }
-            | Statement::ShowTables { .. }
-            | Statement::ShowCreate { .. }
-            | Statement::ShowFunctions { .. }
-            | Statement::ShowVariable { .. }
-            | Statement::ShowVariables { .. }
-            | Statement::ShowStatus { .. }
-            | Statement::ShowDatabases { .. }
-            | Statement::ShowSchemas { .. }
-            | Statement::ShowViews { .. }
-            | Statement::ShowCollation { .. } => true,
-            _ => false,
-        }),
-        Err(_) => {
-            // Fail closed: only bare metadata commands the parser does not know are allowed through.
-            split_statements(sql).iter().all(|s| {
-                let first = first_word(s);
-                matches!(first.as_str(), "SHOW" | "DESCRIBE" | "DESC") && !s.contains(';')
-            })
-        }
-    }
+    classify_writes(driver, sql).is_empty()
 }
 
-fn statement_is_read_only(s: &sqlparser::ast::Statement) -> bool {
-    use sqlparser::ast::Statement;
-    match s {
-        Statement::Query(q) => query_is_read_only(q),
-        Statement::Explain {
-            analyze, statement, ..
-        } => !*analyze || statement_is_read_only(statement),
-        _ => false,
-    }
+/// A statement that is not read-only: what it does and (when the AST tells us) which table it touches.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct WriteInfo {
+    pub kind: String,
+    pub table: Option<String>,
 }
 
 fn dialect(driver: Driver) -> Box<dyn sqlparser::dialect::Dialect> {
@@ -1284,6 +1232,159 @@ fn dialect(driver: Driver) -> Box<dyn sqlparser::dialect::Dialect> {
         Driver::Mysql | Driver::Mariadb => Box::new(MySqlDialect {}),
         Driver::Sqlite => Box::new(SQLiteDialect {}),
         _ => Box::new(PostgreSqlDialect {}),
+    }
+}
+
+/// Describe every write statement in `sql` (kind + target table) for the read-only gate and the
+/// production confirmation prompt. Classification runs per `split_statements` piece, the same unit
+/// `Sql::run` executes, so the parser and the executor cannot disagree on where a statement ends.
+/// Fails closed: a piece the parser rejects (or parses to nothing) is reported as a write with its
+/// first keyword and no table, except bare metadata commands (SHOW / DESCRIBE).
+pub fn classify_writes(driver: Driver, sql: &str) -> Vec<WriteInfo> {
+    let d = dialect(driver);
+    let unparsed = |s: &str| {
+        let first = first_word(s);
+        if matches!(first.as_str(), "SHOW" | "DESCRIBE" | "DESC") && !s.contains(';') {
+            vec![]
+        } else {
+            vec![WriteInfo {
+                kind: format!("{first} (could not parse)"),
+                table: None,
+            }]
+        }
+    };
+    let mut out: Vec<WriteInfo> = split_statements(sql)
+        .iter()
+        .flat_map(|s| match sqlparser::parser::Parser::parse_sql(&*d, s) {
+            Ok(stmts) if !stmts.is_empty() => stmts.iter().flat_map(describe_writes).collect(),
+            Ok(_) if !has_code(s) => vec![],
+            _ => unparsed(s),
+        })
+        .collect();
+    // MySQL runs `/*! ... */` executable comments that both splitter and parser treat as plain comments.
+    if matches!(driver, Driver::Mysql | Driver::Mariadb) && sql.contains("/*!") {
+        out.insert(
+            0,
+            WriteInfo {
+                kind: "EXECUTABLE COMMENT".into(),
+                table: None,
+            },
+        );
+    }
+    out
+}
+
+fn write_info(kind: &str, table: Option<String>) -> Vec<WriteInfo> {
+    vec![WriteInfo {
+        kind: kind.into(),
+        table,
+    }]
+}
+
+fn names(list: impl IntoIterator<Item = impl ToString>) -> Option<String> {
+    let v: Vec<String> = list.into_iter().map(|n| n.to_string()).collect();
+    (!v.is_empty()).then(|| v.join(", "))
+}
+
+/// Writes hidden inside a query: SELECT INTO (in any set member), data-modifying CTEs.
+fn query_writes(q: &sqlparser::ast::Query) -> Vec<WriteInfo> {
+    use sqlparser::ast::SetExpr;
+    fn body_writes(b: &SetExpr) -> Vec<WriteInfo> {
+        match b {
+            SetExpr::Select(sel) => sel
+                .into
+                .as_ref()
+                .map(|i| write_info("SELECT INTO", Some(i.name.to_string())))
+                .unwrap_or_default(),
+            SetExpr::Insert(st) | SetExpr::Update(st) => describe_writes(st),
+            SetExpr::Query(inner) => query_writes(inner),
+            SetExpr::SetOperation { left, right, .. } => {
+                [body_writes(left), body_writes(right)].concat()
+            }
+            _ => vec![],
+        }
+    }
+    let mut out: Vec<WriteInfo> = q
+        .with
+        .iter()
+        .flat_map(|w| w.cte_tables.iter().flat_map(|c| query_writes(&c.query)))
+        .collect();
+    out.extend(body_writes(&q.body));
+    out
+}
+
+/// Every write a single statement performs; empty when the statement is read-only.
+fn describe_writes(s: &sqlparser::ast::Statement) -> Vec<WriteInfo> {
+    use sqlparser::ast::{FromTable, Statement, TableFactor};
+    fn table_of(t: &TableFactor) -> Option<String> {
+        match t {
+            TableFactor::Table { name, .. } => Some(name.to_string()),
+            _ => None,
+        }
+    }
+    match s {
+        Statement::Query(q) => query_writes(q),
+        Statement::Explain {
+            analyze,
+            statement,
+            options,
+            ..
+        } => {
+            // Postgres `EXPLAIN (ANALYZE, ...)` lands in `options`, not `analyze`; any ANALYZE option counts.
+            let analyzes = *analyze
+                || options
+                    .iter()
+                    .flatten()
+                    .any(|o| o.name.value.eq_ignore_ascii_case("analyze"));
+            if !analyzes {
+                return vec![];
+            }
+            describe_writes(statement)
+                .into_iter()
+                .map(|w| WriteInfo {
+                    kind: format!("EXPLAIN ANALYZE {}", w.kind),
+                    table: w.table,
+                })
+                .collect()
+        }
+        Statement::ExplainTable { .. }
+        | Statement::ShowColumns { .. }
+        | Statement::ShowTables { .. }
+        | Statement::ShowCreate { .. }
+        | Statement::ShowFunctions { .. }
+        | Statement::ShowVariable { .. }
+        | Statement::ShowVariables { .. }
+        | Statement::ShowStatus { .. }
+        | Statement::ShowDatabases { .. }
+        | Statement::ShowSchemas { .. }
+        | Statement::ShowViews { .. }
+        | Statement::ShowCollation { .. } => vec![],
+        Statement::Pragma { value: None, .. } => vec![],
+        Statement::Insert(i) => write_info("INSERT", Some(i.table_name.to_string())),
+        Statement::Update { table, .. } => write_info("UPDATE", table_of(&table.relation)),
+        Statement::Delete(d) => {
+            // MySQL `DELETE t1, t2 FROM ...` names its targets explicitly; otherwise the FROM table is the target.
+            // ponytail: explicit targets are shown as written (aliases not resolved); resolve against FROM if it misleads.
+            let from = match &d.from {
+                FromTable::WithFromKeyword(t) | FromTable::WithoutKeyword(t) => t,
+            };
+            let table =
+                names(&d.tables).or_else(|| from.first().and_then(|t| table_of(&t.relation)));
+            write_info("DELETE", table)
+        }
+        Statement::Merge { table, .. } => write_info("MERGE", table_of(table)),
+        Statement::Truncate { table_names, .. } => {
+            write_info("TRUNCATE", names(table_names.iter().map(|t| &t.name)))
+        }
+        Statement::AlterTable { name, .. } => write_info("ALTER TABLE", Some(name.to_string())),
+        Statement::CreateTable(c) => write_info("CREATE TABLE", Some(c.name.to_string())),
+        Statement::Drop {
+            object_type,
+            names: targets,
+            ..
+        } => write_info(&format!("DROP {object_type}"), names(targets)),
+        // ponytail: everything else is a write named by its first keyword, no table; extend the match when a prompt is too vague.
+        _ => write_info(&first_word(&s.to_string()), None),
     }
 }
 
@@ -1485,6 +1586,107 @@ fn first_word(sql: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn classifies_writes_for_confirmation() {
+        let w = |k: &str, t: Option<&str>| WriteInfo {
+            kind: k.into(),
+            table: t.map(String::from),
+        };
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "select 1; update public.users set a = 1; delete from t where id = 2; \
+                 insert into \"Order\" values (1); drop table x; truncate t2; alter table t3 add c int; \
+                 create table n (id int)"
+            ),
+            vec![
+                w("UPDATE", Some("public.users")),
+                w("DELETE", Some("t")),
+                w("INSERT", Some("\"Order\"")),
+                w("DROP TABLE", Some("x")),
+                w("TRUNCATE", Some("t2")),
+                w("ALTER TABLE", Some("t3")),
+                w("CREATE TABLE", Some("n")),
+            ]
+        );
+        assert!(classify_writes(Driver::Mysql, "SHOW TABLES; select * from t").is_empty());
+        // writes hidden inside queries / explain
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "select 1 into new_t from t; explain analyze update u set a = 1; \
+                 with x as (select 1) insert into t select * from x"
+            ),
+            vec![
+                w("SELECT INTO", Some("new_t")),
+                w("EXPLAIN ANALYZE UPDATE", Some("u")),
+                w("INSERT", Some("t")),
+            ]
+        );
+        // unparseable script: statements are retried one by one, the bad one fails closed
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "select 1; select 1 into new_t from t; select '"
+            ),
+            vec![
+                w("SELECT INTO", Some("new_t")),
+                w("SELECT (could not parse)", None)
+            ]
+        );
+        // several modifying CTEs are all listed; MySQL multi-table delete names its explicit targets
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "with a as (insert into t1 values (1) returning *), b as (update t2 set x = 1 returning *) select 1"
+            ),
+            vec![w("INSERT", Some("t1")), w("UPDATE", Some("t2"))]
+        );
+        assert_eq!(
+            classify_writes(
+                Driver::Mysql,
+                "delete orders from users join orders on orders.user_id = users.id"
+            ),
+            vec![w("DELETE", Some("orders"))]
+        );
+        // every DROP target; Postgres option-style EXPLAIN (ANALYZE); SELECT INTO inside a UNION arm
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "drop table a, b; explain (analyze, buffers) delete from users; explain (costs) delete from users; \
+                 select * into bak from users union select * from old"
+            ),
+            vec![
+                w("DROP TABLE", Some("a, b")),
+                w("EXPLAIN ANALYZE DELETE", Some("users")),
+                w("SELECT INTO", Some("bak")),
+            ]
+        );
+        // classifier and executor split on the same boundaries: a write hidden by a nested comment or a
+        // mid-line `#` is still seen; MySQL executable comments fail closed
+        assert!(
+            !classify_writes(
+                Driver::Postgres,
+                "/* /* */ ; drop table users; /* */ */ select 1"
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            classify_writes(Driver::Mysql, "select 1 # ; drop table users"),
+            vec![w("DROP TABLE", Some("users"))]
+        );
+        assert_eq!(
+            classify_writes(Driver::Mysql, "/*!50000 drop table users */"),
+            vec![w("EXECUTABLE COMMENT", None)]
+        );
+        assert!(classify_writes(Driver::Mysql, "-- just a comment").is_empty());
+        assert!(is_read_only(Driver::Mysql, "SHOW TABLES"));
+        assert!(!is_read_only(
+            Driver::Postgres,
+            "explain (analyze) delete from t"
+        ));
+    }
+
     #[test]
     fn splits_and_classifies() {
         let parts = split_statements(

@@ -60,6 +60,14 @@ Append-only record of shipped behaviour. Newest at the bottom.
   passwords stripped; `src/lib/profiles.ts`) and imports such a file as new connections that still need their
   passwords entered. "File" menu in the query tab opens/saves `.sql` files (`Mod+S`); the path shows next to the
   toolbar and as the tab tooltip. Backend: `read_text_file` (20 MB cap) / `write_text_file` commands.
+- Safety defaults (M1): `Cmd/Ctrl+Shift+Enter` / "Run all" asks for confirmation when the script holds more than one
+  statement (count shown); `Cmd/Ctrl+Enter` still runs only the statement under the cursor. Connections carry an optional
+  **environment** tag (`dev` / `staging` / `production`) set in the connection dialog and shown as a badge in the tab bar and
+  status bar. On `production`, every write from the editor is confirmed with the statement kind and target table
+  (`classify_sql`, backed by the same sqlparser classifier as read-only mode; unparseable scripts fail closed), and grid
+  edits always go through the SQL preview. The preview and the pending-changes bar say the batch runs in one transaction.
+  Known limits: the prompt is SQL-only (Redis/Mongo connections get the badge but no write prompt yet, tracked in TASKS.md),
+  and side effects hidden in functions (`SELECT setval(...)`, `pg_terminate_backend`) are invisible to a static classifier.
 - AI trust and audit (M2): first-use consent card per connection before a remote API provider (Anthropic/OpenAI/compatible
   with a non-localhost base URL) receives any schema or data, stored as `agent_remote_consent_at` on the connection and
   revocable in the connection dialog; CLI providers and localhost base URLs skip it. Per-connection agent scope (`agent_scope`,

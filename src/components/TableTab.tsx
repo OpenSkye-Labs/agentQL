@@ -139,6 +139,10 @@ export function TableTab({ tab }: { tab: TTab }) {
     setPreview(null);
   };
 
+  // Production connections always go through the SQL preview so the user sees kind + table before anything runs.
+  const production = conn?.environment === "production";
+  const previewCount = preview?.length ?? 0;
+  const previewNote = `These ${previewCount} statement${previewCount === 1 ? "" : "s"} run in one transaction and are rolled back together on error.`;
   const showPreview = async () => {
     if (!conn) return;
     try {
@@ -318,16 +322,18 @@ export function TableTab({ tab }: { tab: TTab }) {
               <span className="font-medium">
                 {changes.length} pending change{changes.length > 1 ? "s" : ""}
               </span>
-              <span className="text-muted">Nothing is written until you apply.</span>
+              <span className="text-muted">Nothing is written until you apply; changes run in one transaction.</span>
               <span className="flex-1" />
               <Button size="sm" variant="ghost" onClick={discard}>
                 <Undo2 size={12} /> Discard
               </Button>
-              <Button size="sm" onClick={showPreview}>
-                Preview SQL
-              </Button>
-              <Button size="sm" variant="primary" onClick={apply} disabled={applying}>
-                {applying ? <Spinner /> : <Save size={12} />} Apply
+              {!production && (
+                <Button size="sm" onClick={showPreview}>
+                  Preview SQL
+                </Button>
+              )}
+              <Button size="sm" variant="primary" onClick={production ? showPreview : apply} disabled={applying}>
+                {applying ? <Spinner /> : <Save size={12} />} {production ? "Review & apply" : "Apply"}
               </Button>
             </div>
           ) : (
@@ -395,7 +401,7 @@ export function TableTab({ tab }: { tab: TTab }) {
         open={preview !== null}
         onOpenChange={(o) => !o && setPreview(null)}
         title="Review changes"
-        description="These statements run in one transaction."
+        description={`${production ? `"${conn.name}" is tagged production. ` : ""}${previewNote}`}
         footer={
           <>
             <Button onClick={() => setPreview(null)}>Cancel</Button>

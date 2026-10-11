@@ -39,6 +39,7 @@ fn config(driver: Driver, kv: &HashMap<String, String>) -> ConnectionConfig {
         ssl_key_path: None,
         ssh: None,
         read_only: true,
+        environment: None,
         agent_scope: None,
         agent_remote_consent_at: None,
         options: HashMap::new(),

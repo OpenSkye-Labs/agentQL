@@ -4,7 +4,15 @@ import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { CheckCircle2, FolderOpen, XCircle } from "lucide-react";
 import { api, errMsg } from "../lib/api";
 import { useStore } from "../lib/store";
-import { DRIVERS, isSql, type ConnectionConfig, type ConnectionSecrets, type Driver } from "../lib/types";
+import {
+  DRIVERS,
+  ENVIRONMENTS,
+  isSql,
+  type ConnectionConfig,
+  type ConnectionSecrets,
+  type Driver,
+  type Environment,
+} from "../lib/types";
 import { Button, Dialog, Field, Input, Select, Spinner, Switch } from "./ui";
 
 const COLORS = ["#3b6cf6", "#1f8f5a", "#b7791f", "#d23f3f", "#8b5cf6", "#0e9aa7", "#e05d9c", "#6b7280"];
@@ -30,6 +38,7 @@ function blank(driver: Driver = "postgres"): ConnectionConfig {
     ssl_key_path: null,
     ssh: null,
     read_only: false,
+    environment: null,
     options: {},
   };
 }
@@ -184,7 +193,7 @@ export function ConnectionDialog({
           ))}
         </fieldset>
 
-        <div className="grid grid-cols-[1fr_160px_auto] gap-3 items-start">
+        <div className="grid grid-cols-[1fr_140px_120px_auto] gap-3 items-start">
           <Field label="Name">
             <Input
               value={cfg.name}
@@ -197,8 +206,21 @@ export function ConnectionDialog({
             <Input
               value={cfg.group ?? ""}
               onChange={(e) => set("group", e.target.value)}
-              placeholder="optional, e.g. Production"
+              placeholder="optional, e.g. Team A"
             />
+          </Field>
+          <Field label="Environment" hint={sql ? "Production asks before every write" : "Badge only for this driver"}>
+            <Select
+              value={cfg.environment ?? ""}
+              onChange={(e) => set("environment", (e.target.value || null) as Environment | null)}
+            >
+              <option value="">none</option>
+              {ENVIRONMENTS.map((env) => (
+                <option key={env} value={env}>
+                  {env}
+                </option>
+              ))}
+            </Select>
           </Field>
           <Field label="Color">
             <fieldset className="flex h-8 items-center gap-0.5 -ml-1">
