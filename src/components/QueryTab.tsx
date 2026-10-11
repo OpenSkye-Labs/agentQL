@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { clsx } from "clsx";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -66,7 +66,9 @@ export function QueryTab({ tab }: { tab: QTab }) {
 
   // JOIN / keyword / snippet completion reads the latest data through refs so the editor is configured once.
   const compDeps = useRef({ catalog, savedQueries, driver, quote });
-  compDeps.current = { catalog, savedQueries, driver, quote };
+  useLayoutEffect(() => {
+    compDeps.current = { catalog, savedQueries, driver, quote };
+  });
   const completions = useMemo(
     () =>
       editorCompletions({
