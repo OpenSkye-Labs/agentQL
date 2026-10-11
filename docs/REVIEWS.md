@@ -80,3 +80,13 @@ pie charts cap at 7 slices + Other. Added per-tab error boundaries.
 `keyring` (async-secret-service via zbus) blocks on its own runtime; calling it inside an async Tauri command panicked the
 tokio worker (“Cannot start a runtime from within a runtime”), so `connect` never returned. All keychain calls now run on a
 plain thread (`off_runtime` in config.rs). Added an ignored latency test (`cargo test --lib keyring_latency -- --ignored`).
+
+## Per-PR reviews (ADR-0003)
+
+From PR #6 on, each PR's review rounds live in `docs/reviews/<pr>-<slug>.md`. The maintainer adds the index line after merge.
+
+- [M1 safety defaults](reviews/0007-m1-safety-defaults.md) — PR #7
+- [M2 AI trust and audit](reviews/0009-m2-ai-trust-audit.md) — PR #9
+- [M4 schema tools](reviews/0010-m4-schema-tools.md) — PR #10
+- [M7 editor ergonomics](reviews/0008-m7-editor-ergonomics.md) — PR #8
+- [M8 query versions / portable profiles](reviews/0006-m8-query-versions-profiles.md) — PR #6

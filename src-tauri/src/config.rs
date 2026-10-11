@@ -71,6 +71,14 @@ fn default_ssh_port() -> u16 {
     22
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Environment {
+    Dev,
+    Staging,
+    Production,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionConfig {
     pub id: String,
@@ -108,12 +116,29 @@ pub struct ConnectionConfig {
     pub ssh: Option<SshConfig>,
     #[serde(default)]
     pub read_only: bool,
+    /// `production` makes the UI confirm every SQL write.
+    #[serde(default)]
+    pub environment: Option<Environment>,
     #[serde(default)]
     pub options: HashMap<String, String>,
+    /// Schemas/tables the AI agent may see. `None` = everything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_scope: Option<Vec<ScopeEntry>>,
+    /// When the user allowed sending this connection's schema and data to a remote LLM provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_remote_consent_at: Option<String>,
     #[serde(default)]
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+}
+
+/// One allowed item of the agent scope: a whole schema (`table: None`) or a single table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeEntry {
+    pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<String>,
 }
 
 /// Secrets travel with the config only in memory / over IPC, never to connections.json.
@@ -159,6 +184,9 @@ pub struct Settings {
     pub theme: Option<String>,
     #[serde(default)]
     pub editor_font_size: Option<u8>,
+    /// Vim keybindings in the SQL editor.
+    #[serde(default)]
+    pub editor_vim: bool,
 }
 fn default_row_limit() -> u32 {
     1000
@@ -242,6 +270,26 @@ impl Store {
 
     pub fn settings(&self) -> Settings {
         self.read("settings.json")
+    }
+
+    /// Prepend one entry to the query history (`history.json`, newest first, capped at 500).
+    /// The UI and the agent both append through here so neither overwrites the other.
+    pub fn push_history(&self, entry: serde_json::Value) -> Result<()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _g = LOCK.lock().unwrap();
+        // A file that exists but does not parse must not be replaced by a one-entry list.
+        let mut list: Vec<serde_json::Value> = match std::fs::read(self.path("history.json")) {
+            Ok(data) => serde_json::from_slice(&data).map_err(|e| {
+                AppError::Msg(format!(
+                    "history.json is not valid JSON ({e}); fix or remove it before new entries can be saved"
+                ))
+            })?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+            Err(e) => return Err(e.into()),
+        };
+        list.insert(0, entry);
+        list.truncate(500);
+        self.write("history.json", &list)
     }
 
     pub fn save_settings(&self, s: &Settings) -> Result<()> {

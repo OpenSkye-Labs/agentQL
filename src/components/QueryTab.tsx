@@ -1,23 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { clsx } from "clsx";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Bot, Download, History, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
-import type { SQLNamespace } from "@codemirror/lang-sql";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { Bot, Download, FileText, History, Keyboard, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
+import { snippetCompletion } from "@codemirror/autocomplete";
 import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
-import type { QueryResult } from "../lib/types";
+import type { QueryResult, SavedQuery, WriteInfo } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
+import { buildNamespace, editorCompletions, isSnippet, snippetTemplate } from "../lib/completion";
+import { countStatements } from "../lib/sql";
 import { SqlEditor, type SqlEditorHandle } from "./SqlEditor";
 import { ResultGrid } from "./ResultGrid";
-import { Button, Menu, Spinner, Tooltip, Kbd, Empty } from "./ui";
+import { SHORTCUTS_EVENT } from "./ShortcutsDialog";
+import { Button, Dialog, Field, Input, Menu, Spinner, Tooltip, Kbd, Empty } from "./ui";
+
+const basename = (p: string) => p.split(/[\\/]/).pop() || p;
 
 type QTab = Extract<Tab, { kind: "query" }>;
+
+/** Identifiers can carry newlines/control chars; keep the native prompt on one line per write. */
+const plain = (s: string) => Array.from(s, (c) => (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 ? " " : c)).join("");
 
 export function QueryTab({ tab }: { tab: QTab }) {
   const conn = useConnection(tab.connectionId);
   const live = useStore((s) => s.live[tab.connectionId]);
   const updateTab = useStore((s) => s.updateTab);
+  const openTab = useStore((s) => s.openTab);
   const toast = useStore((s) => s.toast);
   const addHistory = useStore((s) => s.addHistory);
   const saveQuery = useStore((s) => s.saveQuery);
@@ -33,24 +42,55 @@ export function QueryTab({ tab }: { tab: QTab }) {
   );
   const askAssistant = useStore((s) => s.askAssistant);
   const activeTab = useStore((s) => s.activeTab);
+  const vim = useStore((s) => !!s.settings.editor_vim);
   const editor = useRef<SqlEditorHandle>(null);
+  const [saveForm, setSaveForm] = useState<{ name: string; trigger: string } | null>(null);
+  const [saving, setSaving] = useState(false);
   const [results, setResults] = useState<QueryResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [active, setActive] = useState(0);
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const inFlight = useRef(0);
+  const guarding = useRef(false);
+  const savedCurrent = tab.savedId ? allSaved.find((q) => q.id === tab.savedId) : undefined;
 
-  const schema: SQLNamespace | undefined = useMemo(() => {
-    if (!live) return undefined;
-    const ns: SQLNamespace = {};
-    for (const [schemaName, tables] of Object.entries(live.tables)) {
-      for (const t of tables) {
-        ns[t.name] = [];
-        ns[`${schemaName}.${t.name}`] = [];
-      }
-    }
-    return ns;
-  }, [live]);
+  const driver = conn?.driver;
+  const quote = driver === "mysql" || driver === "mariadb" ? "`" : '"';
+  const tables = live?.tables;
+  const catalog = live?.catalog;
+  const schema = useMemo(
+    () => (tables ? buildNamespace(tables, catalog ?? {}, quote) : undefined),
+    [tables, catalog, quote],
+  );
+
+  // JOIN / keyword / snippet completion reads the latest data through refs so the editor is configured once.
+  const compDeps = useRef({ catalog, savedQueries, driver, quote });
+  useLayoutEffect(() => {
+    compDeps.current = { catalog, savedQueries, driver, quote };
+  });
+  const completions = useMemo(
+    () =>
+      editorCompletions({
+        catalog: () => compDeps.current.catalog ?? {},
+        postgres: () => compDeps.current.driver === "postgres",
+        quote: () => compDeps.current.quote,
+        snippets: () =>
+          compDeps.current.savedQueries
+            .filter((q) => q.trigger)
+            .map((q) =>
+              isSnippet(q.sql)
+                ? snippetCompletion(snippetTemplate(q.sql), {
+                    label: q.trigger!,
+                    detail: q.name,
+                    type: "text",
+                    boost: 3,
+                  })
+                : { label: q.trigger!, detail: q.name, type: "text", boost: 3, apply: q.sql },
+            ),
+      }),
+    [],
+  );
 
   const run = useCallback(
     async (sqlText: string, explain?: "plain" | "analyze") => {
@@ -103,6 +143,55 @@ export function QueryTab({ tab }: { tab: QTab }) {
     [conn, tab.id, tab.title, updateTab, addHistory],
   );
 
+  const confirmAndRun = useCallback(
+    async (sqlText: string, opts: { all?: boolean; explain?: "plain" | "analyze" }) => {
+      if (!conn) return;
+      const lines: string[] = [];
+      // Count what is about to execute (selection or whole script), not which button was pressed.
+      const n = countStatements(sqlText);
+      if (n > 1) lines.push(`Run ${opts.all ? "all " : ""}${n} statements?`);
+      if (conn.environment === "production" && opts.explain !== "plain") {
+        const docBefore = editor.current?.getValue();
+        let writes: WriteInfo[];
+        try {
+          writes = await api.classifySql(conn.driver, sqlText);
+        } catch (e) {
+          toast(`Could not classify statements, not running on production: ${errMsg(e)}`, "error");
+          return;
+        }
+        // The editor stayed editable during the IPC round trip: never prompt for, or run, SQL the user no longer sees.
+        if (editor.current?.getValue() !== docBefore || useStore.getState().activeTab !== tab.id) {
+          toast("Editor changed while checking the statements; run again.", "error");
+          return;
+        }
+        if (writes.length)
+          lines.push(
+            `"${conn.name}" is tagged PRODUCTION. This will run:`,
+            ...writes.map((w) => `  • ${plain(w.kind)}${w.table ? ` on ${plain(w.table)}` : ""}`),
+          );
+      }
+      // ponytail: native confirm(), same as the delete prompts elsewhere; swap for <Dialog> if it needs styling.
+      if (lines.length && !confirm(lines.join("\n"))) return;
+      run(sqlText, opts.explain);
+    },
+    [conn, run, toast, tab.id],
+  );
+
+  // M1 safety: confirm "run all" when the script has several statements, and every write on a production connection.
+  const runGuarded = useCallback(
+    async (sqlText: string, opts: { all?: boolean; explain?: "plain" | "analyze" } = {}) => {
+      if (!sqlText.trim() || !conn || inFlight.current || guarding.current) return;
+      // Hold the guard across classification + confirmation so a second shortcut press cannot queue a duplicate run.
+      guarding.current = true;
+      try {
+        await confirmAndRun(sqlText, opts);
+      } finally {
+        guarding.current = false;
+      }
+    },
+    [conn, confirmAndRun],
+  );
+
   // Insert SQL coming from the chat panel into the active query tab.
   useEffect(() => {
     const onInsert = (e: Event) => {
@@ -140,6 +229,76 @@ export function QueryTab({ tab }: { tab: QTab }) {
 
   const askAgent = (prompt: string) => askAssistant(prompt);
 
+  const sqlFilter = [{ name: "SQL", extensions: ["sql"] }];
+  const openFile = async () => {
+    try {
+      const path = await openDialog({ multiple: false, filters: sqlFilter });
+      if (!path) return;
+      const sql = await api.readTextFile(path);
+      const patch = { sql, filePath: path, title: basename(path), savedId: undefined };
+      // Never clobber unsaved text: a non-empty tab opens the file next to it.
+      if ((editor.current?.getValue() ?? "").trim())
+        openTab({ kind: "query", connectionId: tab.connectionId, ...patch, id: undefined });
+      else updateTab(tab.id, patch);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const saveFile = async (as = false) => {
+    try {
+      let path = as ? null : (tab.filePath ?? null);
+      if (!path) path = await saveDialog({ defaultPath: tab.filePath ?? "query.sql", filters: sqlFilter });
+      if (!path) return;
+      await api.writeTextFile(path, editor.current?.getValue() ?? "");
+      updateTab(tab.id, { filePath: path, title: basename(path) });
+      toast(`Saved ${basename(path)}`, "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  /** Save to the store; re-saving an existing query records the previous text as a version. */
+  const persistNamed = async (q: SavedQuery) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await saveQuery(q);
+      updateTab(tab.id, { savedId: q.id, title: q.name });
+      setSaveForm(null);
+      toast(`Saved "${q.name}"`, "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  /** Re-save the query this tab was loaded from (name, trigger and connection kept). */
+  const saveNamed = (existing: SavedQuery) => {
+    const sql = editor.current?.getValue() ?? "";
+    if (sql.trim()) void persistNamed({ ...existing, sql });
+  };
+  /** Save dialog submit: a new saved query (optionally a snippet trigger). */
+  const submitSave = () => {
+    const sql = editor.current?.getValue() ?? "";
+    if (!saveForm || !conn || !saveForm.name.trim() || !sql.trim()) return;
+    void persistNamed({
+      id: crypto.randomUUID(),
+      connection_id: conn.id,
+      name: saveForm.name.trim(),
+      sql,
+      trigger: saveForm.trigger.trim() || null,
+      created_at: new Date().toISOString(),
+    });
+  };
+  // Mod+S (global shortcut in App.tsx) saves whatever this tab is bound to: its .sql file, else its
+  // saved query, else a new file.
+  const onSave = useRef<() => void>(() => {});
+  onSave.current = () => void (tab.filePath ? saveFile() : savedCurrent ? saveNamed(savedCurrent) : saveFile());
+  useEffect(() => {
+    const h = () => activeTab === tab.id && onSave.current();
+    window.addEventListener("agentql:save", h);
+    return () => window.removeEventListener("agentql:save", h);
+  }, [activeTab, tab.id]);
+
   if (!conn) return <Empty title="Connection removed" />;
   const current = results?.[active];
 
@@ -154,14 +313,18 @@ export function QueryTab({ tab }: { tab: QTab }) {
           <Button
             size="sm"
             variant="primary"
-            onClick={() => run(editor.current?.getRunnable() ?? "")}
+            onClick={() => runGuarded(editor.current?.getRunnable() ?? "")}
             disabled={running}
           >
             {running ? <Spinner className="border-t-accent-fg" /> : <Play size={13} />} Run
           </Button>
         </Tooltip>
         <Tooltip label={`Run everything (${mod}+Shift+Enter)`}>
-          <Button size="sm" onClick={() => run(editor.current?.getValue() ?? "")} disabled={running}>
+          <Button
+            size="sm"
+            onClick={() => runGuarded(editor.current?.getValue() ?? "", { all: true })}
+            disabled={running}
+          >
             Run all
           </Button>
         </Tooltip>
@@ -172,10 +335,13 @@ export function QueryTab({ tab }: { tab: QTab }) {
             </Button>
           }
           items={[
-            { label: "Explain plan", onSelect: () => run(editor.current?.getRunnable() ?? "", "plain") },
+            {
+              label: "Explain plan",
+              onSelect: () => runGuarded(editor.current?.getRunnable() ?? "", { explain: "plain" }),
+            },
             {
               label: "Explain analyze (runs the query)",
-              onSelect: () => run(editor.current?.getRunnable() ?? "", "analyze"),
+              onSelect: () => runGuarded(editor.current?.getRunnable() ?? "", { explain: "analyze" }),
             },
           ]}
           align="start"
@@ -206,6 +372,38 @@ export function QueryTab({ tab }: { tab: QTab }) {
             <Bot size={13} />
           </Button>
         </Tooltip>
+        <Menu
+          trigger={
+            <Button size="sm" variant="ghost">
+              <FileText size={13} /> File
+            </Button>
+          }
+          items={[
+            { label: "Open .sql file…", onSelect: () => void openFile() },
+            {
+              label: tab.filePath ? `Save ${basename(tab.filePath)}` : "Save as .sql…",
+              shortcut: `${mod}+S`,
+              onSelect: () => void saveFile(),
+            },
+            ...(tab.filePath ? [{ label: "Save as…", onSelect: () => void saveFile(true) }] : []),
+          ]}
+          align="start"
+        />
+        {tab.filePath && (
+          <span className="min-w-0 max-w-[280px] truncate text-[11px] text-muted" title={tab.filePath}>
+            {tab.filePath}
+          </span>
+        )}
+        <Tooltip label={`Keyboard shortcuts (${mod}+Shift+/)`}>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label="Keyboard shortcuts"
+            onClick={() => window.dispatchEvent(new Event(SHORTCUTS_EVENT))}
+          >
+            <Keyboard size={13} />
+          </Button>
+        </Tooltip>
         <span className="flex-1" />
         <Menu
           trigger={
@@ -217,6 +415,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
             history.length
               ? history.slice(0, 15).map((h) => ({
                   label: `${h.ok ? "✓" : "✗"} ${h.sql.replace(/\s+/g, " ").slice(0, 60)}`,
+                  icon: h.source === "agent" ? <Bot size={13} /> : <span className="w-[13px]" />,
                   onSelect: () => updateTab(tab.id, { sql: h.sql }),
                 }))
               : [{ label: "No history yet", disabled: true }]
@@ -229,32 +428,73 @@ export function QueryTab({ tab }: { tab: QTab }) {
             </Button>
           }
           items={[
-            {
-              label: "Save current query…",
-              onSelect: () => {
-                const sql = editor.current?.getValue() ?? "";
-                const name = prompt("Name this query", tab.title === "Query" ? "" : tab.title);
-                if (name && sql.trim())
-                  void saveQuery({
-                    id: crypto.randomUUID(),
-                    connection_id: conn.id,
-                    name,
-                    sql,
-                    created_at: new Date().toISOString(),
-                  });
-              },
-            },
+            savedCurrent
+              ? { label: `Save "${savedCurrent.name}"`, onSelect: () => saveNamed(savedCurrent) }
+              : {
+                  label: "Save current query…",
+                  onSelect: () => setSaveForm({ name: tab.title === "Query" ? "" : tab.title, trigger: "" }),
+                },
+            ...(savedCurrent
+              ? [
+                  { label: "Save as new…", onSelect: () => setSaveForm({ name: "", trigger: "" }) },
+                  {
+                    label: `Versions (${savedCurrent.versions?.length ?? 0})…`,
+                    onSelect: () => setVersionsOpen(true),
+                  },
+                ]
+              : []),
             ...(savedQueries.length
               ? [
                   { separator: true, label: "" },
                   ...savedQueries.map((q) => ({
-                    label: q.name,
-                    onSelect: () => updateTab(tab.id, { sql: q.sql, title: q.name }),
+                    label: q.trigger ? `${q.name} · ${q.trigger}` : q.name,
+                    onSelect: () => {
+                      const bind = { title: q.name, savedId: q.id, filePath: undefined };
+                      // `${1:x}` placeholders become Tab stops; anything else loads verbatim.
+                      if (isSnippet(q.sql)) {
+                        editor.current?.loadSnippet(snippetTemplate(q.sql));
+                        updateTab(tab.id, bind);
+                      } else updateTab(tab.id, { sql: q.sql, ...bind });
+                    },
                   })),
                 ]
               : []),
           ]}
         />
+        <Dialog
+          open={versionsOpen}
+          onOpenChange={setVersionsOpen}
+          title={`Versions of "${savedCurrent?.name ?? ""}"`}
+          description="Earlier edits, newest first. Restore puts a version in the editor; Saved › Save keeps it."
+        >
+          {savedCurrent?.versions?.length ? (
+            <ul className="flex flex-col gap-2">
+              {savedCurrent.versions.map((v, i) => (
+                <li key={v.ts + i} className="rounded-md border border-border bg-sunken p-2">
+                  <div className="flex items-center gap-2 text-xs text-muted">
+                    <span>{new Date(v.ts).toLocaleString()}</span>
+                    <span className="flex-1" />
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        updateTab(tab.id, { sql: v.sql });
+                        setVersionsOpen(false);
+                        toast("Version restored into the editor. Save to keep it.", "info");
+                      }}
+                    >
+                      Restore
+                    </Button>
+                  </div>
+                  <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[11px] selectable">
+                    {v.sql}
+                  </pre>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Empty title="No earlier versions yet" hint="Versions are recorded each time you save this query." />
+          )}
+        </Dialog>
         <Menu
           trigger={
             <Button size="sm" variant="ghost" disabled={!current || current.rows.length === 0}>
@@ -277,8 +517,10 @@ export function QueryTab({ tab }: { tab: QTab }) {
             onChange={(sql) => updateTab(tab.id, { sql })}
             driver={conn.driver}
             schema={schema}
-            onRun={() => run(editor.current?.getRunnable() ?? "")}
-            onRunAll={() => run(editor.current?.getValue() ?? "")}
+            onRun={() => runGuarded(editor.current?.getRunnable() ?? "")}
+            onRunAll={() => runGuarded(editor.current?.getValue() ?? "", { all: true })}
+            vim={vim}
+            completions={completions}
             placeholder={`Write ${conn.driver === "postgres" ? "PostgreSQL" : conn.driver} here. ${mod}+Enter runs the statement under the cursor.`}
           />
         </Panel>
@@ -374,6 +616,48 @@ export function QueryTab({ tab }: { tab: QTab }) {
           </div>
         </Panel>
       </PanelGroup>
+      <Dialog
+        open={saveForm !== null}
+        onOpenChange={(o) => !o && setSaveForm(null)}
+        title="Save query"
+        description={"Numbered placeholders like ${1:table} or ${2} become Tab stops when the query is loaded."}
+        width="max-w-md"
+        footer={
+          <>
+            <Button onClick={() => setSaveForm(null)}>Cancel</Button>
+            <Button variant="primary" type="submit" form="save-query-form" disabled={saving || !saveForm?.name.trim()}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="save-query-form"
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitSave();
+          }}
+        >
+          <Field label="Name">
+            <Input
+              autoFocus
+              value={saveForm?.name ?? ""}
+              onChange={(e) => setSaveForm((f) => f && { ...f, name: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="Completion trigger (optional)"
+            hint="Letters, digits, _ or $ only. Typing this word in the editor offers the query as a snippet."
+          >
+            <Input
+              placeholder="e.g. topn"
+              value={saveForm?.trigger ?? ""}
+              onChange={(e) => setSaveForm((f) => f && { ...f, trigger: e.target.value.replace(/[^\w$]/g, "") })}
+            />
+          </Field>
+        </form>
+      </Dialog>
     </div>
   );
 }

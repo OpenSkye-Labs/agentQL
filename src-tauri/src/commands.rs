@@ -5,7 +5,9 @@ use crate::ai::{self, AgentEvent, ChatSession, Ctx};
 use crate::config::{ConnectionConfig, ConnectionSecrets, Settings};
 use crate::db::mongo::MongoFind;
 use crate::db::redis::ScanResult;
-use crate::db::{Live, QueryResult, RowChange, TableDetails, TableInfo, TableQuery};
+use crate::db::{
+    Live, QueryResult, RowChange, SchemaCatalog, SchemaObject, TableDetails, TableInfo, TableQuery,
+};
 use crate::error::{AppError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -224,6 +226,15 @@ pub async fn run_query(
     c.run(&sql_text, limit).await
 }
 
+/// Write statements in `sql_text` (kind + target table) for the production confirmation prompt.
+#[tauri::command]
+pub fn classify_sql(
+    driver: crate::config::Driver,
+    sql_text: String,
+) -> Vec<crate::db::sql::WriteInfo> {
+    crate::db::sql::classify_writes(driver, &sql_text)
+}
+
 #[tauri::command]
 pub async fn explain_query(
     st: State<'_, AppState>,
@@ -283,6 +294,38 @@ pub async fn table_details(
     sql(&s).await?.table_details(&schema, &table).await
 }
 
+#[tauri::command]
+pub async fn schema_objects(
+    st: State<'_, AppState>,
+    id: String,
+    schema: String,
+) -> Result<Vec<SchemaObject>> {
+    let s = st.manager.get(&id).await?;
+    sql(&s).await?.schema_objects(&schema).await
+}
+
+/// Write base64-encoded bytes to a path the user picked in a save dialog (SVG/PNG exports).
+/// The dialog runs in the webview, so the path is re-checked here: absolute and an export extension only.
+#[tauri::command]
+pub async fn save_file(path: String, data: String) -> Result<()> {
+    use base64::Engine as _;
+    let p = std::path::Path::new(&path);
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    if !p.is_absolute() || !matches!(ext.as_deref(), Some("svg" | "png")) {
+        return Err(AppError::Msg(
+            "export path must be an absolute .svg or .png file".into(),
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| AppError::Msg(e.to_string()))?;
+    std::fs::write(&path, bytes)?;
+    Ok(())
+}
+
 #[derive(Serialize)]
 pub struct TablePage {
     pub result: QueryResult,
@@ -298,7 +341,7 @@ pub async fn fetch_table(
 ) -> Result<TablePage> {
     let s = st.manager.get(&id).await?;
     let c = sql(&s).await?;
-    crate::db::sql::SqlConn::validate_filter(query.filter.as_deref())?;
+    c.validate_filter(query.filter.as_deref())?;
     let sql_text = c.select_sql(&query);
     let result = c.run_one_read_only(&sql_text, query.limit.max(1)).await?;
     // The exact count is fetched separately (`count_table`) so big tables render immediately.
@@ -313,7 +356,7 @@ pub async fn fetch_table(
 pub async fn count_table(st: State<'_, AppState>, id: String, query: TableQuery) -> Result<i64> {
     let s = st.manager.get(&id).await?;
     let c = sql(&s).await?;
-    crate::db::sql::SqlConn::validate_filter(query.filter.as_deref())?;
+    c.validate_filter(query.filter.as_deref())?;
     c.count(&query).await
 }
 
@@ -421,6 +464,79 @@ pub async fn export_rows(
         }
     }
     Ok(rows.len())
+}
+
+/// Read a text file the user picked in a dialog (.sql, profile JSON). Capped so a stray
+/// multi-GB pick cannot stall the webview.
+// ponytail: like `export_rows`, the path is whatever the (first-party) webview sends; gate it on a
+// backend-held set of dialog-returned paths or tauri-plugin-fs scopes if the webview ever renders
+// third-party HTML.
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String> {
+    blocking(move || {
+        const MAX: u64 = 20 * 1024 * 1024;
+        let len = std::fs::metadata(&path)?.len();
+        if len > MAX {
+            return Err(AppError::Msg(format!(
+                "file is {} MB; the editor opens files up to 20 MB",
+                len / (1024 * 1024)
+            )));
+        }
+        let text = String::from_utf8(std::fs::read(&path)?).map_err(|_| {
+            AppError::Msg("file is not UTF-8 text (UTF-16 files are not supported)".into())
+        })?;
+        // Editors on Windows often write a BOM; it is invisible in the editor and breaks the first statement.
+        Ok(text.trim_start_matches('\u{feff}').to_string())
+    })
+    .await
+}
+
+/// Writes next to the target and renames, so a failed save leaves the previous file intact.
+// ponytail: a dangling symlink is replaced by a regular file; resolve `read_link` chains if that matters.
+#[tauri::command]
+pub async fn write_text_file(path: String, contents: String) -> Result<()> {
+    blocking(move || {
+        // Follow a symlink so the target gets the text and the link survives.
+        let dest = std::fs::canonicalize(&path).unwrap_or_else(|_| std::path::PathBuf::from(&path));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let name = dest
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
+        let tmp = dest.with_file_name(format!(".{name}.{}.{nonce}.tmp", std::process::id()));
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let write = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = opts.open(&tmp)?;
+            f.write_all(contents.as_bytes())?;
+            f.sync_all()?;
+            // Keep the destination's mode instead of the private temp mode.
+            if let Ok(meta) = std::fs::metadata(&dest) {
+                std::fs::set_permissions(&tmp, meta.permissions())?;
+            }
+            std::fs::rename(&tmp, &dest)
+        };
+        write().map_err(|e| {
+            std::fs::remove_file(&tmp).ok();
+            AppError::Msg(format!("saving {}: {e}", dest.display()))
+        })
+    })
+    .await
+}
+
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| AppError::Msg(e.to_string()))?
 }
 
 // ----------------------------------------------------------------- redis
@@ -615,6 +731,12 @@ pub fn has_provider_key(st: State<'_, AppState>, provider_id: String) -> bool {
         .is_some_and(|k| !k.is_empty())
 }
 
+/// "dark" / "light" when the OS preference is known natively, `None` to use the WebView's media query.
+#[tauri::command]
+pub async fn system_theme() -> Result<Option<&'static str>> {
+    blocking(|| Ok(crate::os_theme::detect())).await
+}
+
 #[tauri::command]
 pub fn detect_clis() -> Value {
     json!({ "claude": ai::providers::which("claude"), "codex": ai::providers::which("codex") })
@@ -641,6 +763,30 @@ pub fn kv_set(st: State<'_, AppState>, name: String, value: Value) -> Result<()>
         return Err(AppError::Msg("invalid store name".into()));
     }
     st.store.write(&format!("{name}.json"), &value)
+}
+
+/// Update only the agent scope of a connection, so a stale config in the UI cannot clobber
+/// other fields (e.g. a consent granted meanwhile).
+#[tauri::command]
+pub fn set_agent_scope(
+    st: State<'_, AppState>,
+    id: String,
+    scope: Option<Vec<crate::config::ScopeEntry>>,
+) -> Result<()> {
+    let mut list = st.store.connections();
+    let conn = list
+        .iter_mut()
+        .find(|c| c.id == id)
+        .ok_or_else(|| AppError::Msg("connection not found".into()))?;
+    conn.agent_scope = scope;
+    conn.updated_at = Some(chrono::Utc::now().to_rfc3339());
+    st.store.save_connections(&list)
+}
+
+/// Prepend one query-history entry (the UI's own runs); agent runs go through the same store call.
+#[tauri::command]
+pub fn history_add(st: State<'_, AppState>, entry: Value) -> Result<()> {
+    st.store.push_history(entry)
 }
 
 // ----------------------------------------------------------------- ai
@@ -775,7 +921,7 @@ pub async fn run_chart(
     req: ChartRequest,
 ) -> Result<QueryResult> {
     let c = ctx(&app, &st);
-    ai::tools::run_chart_source(&c, &req.connection_id, &req.source).await
+    ai::tools::run_chart_source(&c, &req.connection_id, &req.source, None).await
 }
 
 #[tauri::command]
@@ -828,4 +974,14 @@ pub async fn install_update(app: AppHandle) -> Result<()> {
         .await
         .map_err(|e| e.to_string())?;
     app.restart();
+}
+
+#[tauri::command]
+pub async fn schema_catalog(
+    st: State<'_, AppState>,
+    id: String,
+    schema: String,
+) -> Result<SchemaCatalog> {
+    let s = st.manager.get(&id).await?;
+    sql(&s).await?.schema_catalog(&schema).await
 }

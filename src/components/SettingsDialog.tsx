@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { clsx } from "clsx";
 import { Plus, Trash2, CheckCircle2, AlertCircle } from "lucide-react";
 import { api, errMsg } from "../lib/api";
+import { mod } from "../lib/format";
 import { useStore } from "../lib/store";
+import { THEMES, resolveTheme } from "../lib/themes";
 import type { LlmProvider, ProviderKind, Settings } from "../lib/types";
 import { Button, Dialog, Field, Input, Select, Switch } from "./ui";
 
@@ -153,13 +155,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <>
               <Field label="Theme">
                 <Select
-                  value={draft.theme ?? "system"}
-                  onChange={(e) => update({ theme: e.target.value as Settings["theme"] })}
+                  value={resolveTheme(draft.theme)}
+                  onChange={(e) => update({ theme: resolveTheme(e.target.value) })}
                   className="w-48"
                 >
-                  <option value="system">Follow system</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
+                  {THEMES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
                 </Select>
               </Field>
               <Field
@@ -183,6 +187,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   }
                 />
               </Field>
+              <Switch
+                checked={!!draft.editor_vim}
+                onChange={(v) => update({ editor_vim: v })}
+                label="Vim keymap in the SQL editor"
+                description={`Modal editing (hjkl, dd, ciw…). ${mod}+Enter still runs the statement.`}
+              />
             </>
           )}
           {tab === "ai" && (

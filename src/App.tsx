@@ -14,8 +14,11 @@ const RedisTab = lazy(() => import("./components/RedisTab").then((m) => ({ defau
 const MongoTab = lazy(() => import("./components/MongoTab").then((m) => ({ default: m.MongoTab })));
 const DashboardTab = lazy(() => import("./components/DashboardTab").then((m) => ({ default: m.DashboardTab })));
 const ChatPanel = lazy(() => import("./components/ChatPanel").then((m) => ({ default: m.ChatPanel })));
+const ErdTab = lazy(() => import("./components/ErdTab").then((m) => ({ default: m.ErdTab })));
+const SchemaDiffTab = lazy(() => import("./components/SchemaDiffTab").then((m) => ({ default: m.SchemaDiffTab })));
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { SHORTCUTS_EVENT, ShortcutsDialog } from "./components/ShortcutsDialog";
 import { StatusBar } from "./components/StatusBar";
 import { Toasts } from "./components/Toasts";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -53,6 +56,11 @@ export default function App() {
           e.preventDefault();
           s.closeTab(active.id);
         }
+      } else if (e.key === "s" && !e.shiftKey) {
+        if (active?.kind === "query") {
+          e.preventDefault();
+          window.dispatchEvent(new Event("agentql:save"));
+        }
       } else if (e.key === "k" || e.key === "j") {
         e.preventDefault();
         s.setChatOpen(!s.chatOpen);
@@ -62,6 +70,10 @@ export default function App() {
       } else if (e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
+      } else if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+        // Mod+/ alone is CodeMirror's comment toggle, so the reference lives on Mod+Shift+/.
+        e.preventDefault();
+        window.dispatchEvent(new Event(SHORTCUTS_EVENT));
       } else if (/^[1-9]$/.test(e.key)) {
         const idx = Number(e.key) - 1;
         if (s.tabs[idx]) {
@@ -106,6 +118,8 @@ export default function App() {
                         {t.kind === "redis" && <RedisTab tab={t} />}
                         {t.kind === "mongo" && <MongoTab tab={t} />}
                         {t.kind === "dashboard" && <DashboardTab tab={t} />}
+                        {t.kind === "erd" && <ErdTab tab={t} />}
+                        {t.kind === "diff" && <SchemaDiffTab tab={t} />}
                       </Suspense>
                     </ErrorBoundary>
                   </div>
@@ -134,6 +148,7 @@ export default function App() {
           onOpenChange={(o) => setConnDialog((d) => ({ ...d, open: o }))}
         />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <ShortcutsDialog />
       </div>
     </TooltipProvider>
   );

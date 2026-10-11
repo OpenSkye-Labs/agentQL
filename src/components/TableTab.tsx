@@ -3,8 +3,9 @@ import { clsx } from "clsx";
 import { ChevronLeft, ChevronRight, Filter, Plus, RefreshCw, Save, Trash2, Undo2, Copy, Bot } from "lucide-react";
 import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
-import type { Cell, QueryResult, RowChange, TableDetails } from "../lib/types";
+import type { Cell, ForeignKeyInfo, QueryResult, RowChange, TableDetails } from "../lib/types";
 import { fmtCount, fmtDuration } from "../lib/format";
+import { keyFilter } from "../lib/sql";
 import { ResultGrid, type GridEdit } from "./ResultGrid";
 import { Button, Dialog, Input, Select, Spinner, Tooltip, Empty } from "./ui";
 
@@ -15,12 +16,15 @@ export function TableTab({ tab }: { tab: TTab }) {
   const conn = useConnection(tab.connectionId);
   const toast = useStore((s) => s.toast);
   const openTab = useStore((s) => s.openTab);
+  const updateTab = useStore((s) => s.updateTab);
   const askAssistant = useStore((s) => s.askAssistant);
   const [view, setView] = useState<"data" | "structure">("data");
   const [details, setDetails] = useState<TableDetails | null>(null);
   const [page, setPage] = useState<{ result: QueryResult; total: number | null; sql: string } | null>(null);
-  const [filter, setFilter] = useState("");
-  const [filterDraft, setFilterDraft] = useState("");
+  // The filter lives on the tab so an FK jump can re-target an already open table.
+  const filter = tab.filter ?? "";
+  const setFilter = (f: string) => updateTab(tab.id, { filter: f });
+  const [filterDraft, setFilterDraft] = useState(filter);
   const [sort, setSort] = useState<{ column: string; desc: boolean } | null>(null);
   const [limit, setLimit] = useState(250);
   const [offset, setOffset] = useState(0);
@@ -77,6 +81,11 @@ export function TableTab({ tab }: { tab: TTab }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setFilterDraft(filter);
+    setOffset(0);
+  }, [filter]);
 
   useEffect(() => {
     if (!conn) return;
@@ -139,6 +148,10 @@ export function TableTab({ tab }: { tab: TTab }) {
     setPreview(null);
   };
 
+  // Production connections always go through the SQL preview so the user sees kind + table before anything runs.
+  const production = conn?.environment === "production";
+  const previewCount = preview?.length ?? 0;
+  const previewNote = `These ${previewCount} statement${previewCount === 1 ? "" : "s"} run in one transaction and are rolled back together on error.`;
   const showPreview = async () => {
     if (!conn) return;
     try {
@@ -146,6 +159,34 @@ export function TableTab({ tab }: { tab: TTab }) {
     } catch (e) {
       toast(errMsg(e), "error");
     }
+  };
+
+  // Publish dirtiness so FK jumps into this tab can ask before load() discards the edits.
+  const dirty = changes.length > 0;
+  useEffect(() => {
+    if (!!tab.dirty !== dirty) updateTab(tab.id, { dirty });
+  }, [dirty, tab.dirty, tab.id, updateTab]);
+
+  const followFk = (fk: ForeignKeyInfo, key: Record<string, Cell>) => {
+    if (!conn) return;
+    const f = keyFilter(conn.driver, key);
+    if (!f) return;
+    const schema = fk.ref_schema ?? tab.schema;
+    const st = useStore.getState();
+    const target = st.tabs.find(
+      (t) => t.kind === "table" && t.connectionId === conn.id && t.schema === schema && t.table === fk.ref_table,
+    );
+    if (target?.kind === "table" && target.dirty && !confirm(`Discard pending changes in ${fk.ref_table}?`)) return;
+    const info = st.live[conn.id]?.tables[schema]?.find((t) => t.name === fk.ref_table);
+    openTab({
+      kind: "table",
+      connectionId: conn.id,
+      title: fk.ref_table,
+      schema,
+      table: fk.ref_table,
+      tableKind: info?.kind ?? "table",
+      filter: f,
+    });
   };
 
   const apply = async () => {
@@ -200,6 +241,7 @@ export function TableTab({ tab }: { tab: TTab }) {
               className="ml-2 flex flex-1 items-center gap-1"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (dirty && !confirm(`Discard pending changes in ${tab.table}?`)) return;
                 setOffset(0);
                 setFilter(filterDraft.trim());
               }}
@@ -220,6 +262,7 @@ export function TableTab({ tab }: { tab: TTab }) {
                   size="sm"
                   variant="ghost"
                   onClick={() => {
+                    if (dirty && !confirm(`Discard pending changes in ${tab.table}?`)) return;
                     setFilter("");
                     setFilterDraft("");
                     setOffset(0);
@@ -303,6 +346,8 @@ export function TableTab({ tab }: { tab: TTab }) {
                   );
                 }}
                 primaryKeys={pks}
+                foreignKeys={details?.foreign_keys}
+                onFollowFk={followFk}
               />
             ) : (
               <div className="flex h-full items-center justify-center gap-2 text-xs text-muted">
@@ -318,16 +363,18 @@ export function TableTab({ tab }: { tab: TTab }) {
               <span className="font-medium">
                 {changes.length} pending change{changes.length > 1 ? "s" : ""}
               </span>
-              <span className="text-muted">Nothing is written until you apply.</span>
+              <span className="text-muted">Nothing is written until you apply; changes run in one transaction.</span>
               <span className="flex-1" />
               <Button size="sm" variant="ghost" onClick={discard}>
                 <Undo2 size={12} /> Discard
               </Button>
-              <Button size="sm" onClick={showPreview}>
-                Preview SQL
-              </Button>
-              <Button size="sm" variant="primary" onClick={apply} disabled={applying}>
-                {applying ? <Spinner /> : <Save size={12} />} Apply
+              {!production && (
+                <Button size="sm" onClick={showPreview}>
+                  Preview SQL
+                </Button>
+              )}
+              <Button size="sm" variant="primary" onClick={production ? showPreview : apply} disabled={applying}>
+                {applying ? <Spinner /> : <Save size={12} />} {production ? "Review & apply" : "Apply"}
               </Button>
             </div>
           ) : (
@@ -395,7 +442,7 @@ export function TableTab({ tab }: { tab: TTab }) {
         open={preview !== null}
         onOpenChange={(o) => !o && setPreview(null)}
         title="Review changes"
-        description="These statements run in one transaction."
+        description={`${production ? `"${conn.name}" is tagged production. ` : ""}${previewNote}`}
         footer={
           <>
             <Button onClick={() => setPreview(null)}>Cancel</Button>

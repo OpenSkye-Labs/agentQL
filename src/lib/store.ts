@@ -1,14 +1,51 @@
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
 import { api, errMsg } from "./api";
-import type { ChatSession, ConnectionConfig, Dashboard, HistoryEntry, SavedQuery, Settings, TableInfo } from "./types";
+import type {
+  ChatSession,
+  ConnectionConfig,
+  Dashboard,
+  HistoryEntry,
+  SavedQuery,
+  SchemaCatalog,
+  Settings,
+  TableInfo,
+} from "./types";
+import { withVersion } from "./queries";
+import { resolveTheme } from "./themes";
 
 export type Tab =
-  | { id: string; kind: "query"; connectionId: string; title: string; sql: string; pinned?: boolean }
-  | { id: string; kind: "table"; connectionId: string; title: string; schema: string; table: string; tableKind: string }
+  | {
+      id: string;
+      kind: "query";
+      connectionId: string;
+      title: string;
+      sql: string;
+      pinned?: boolean;
+      /** Saved query this tab was loaded from; "Save" updates it and records a version. */
+      savedId?: string;
+      /** On-disk .sql file this tab was opened from or saved to. */
+      filePath?: string;
+    }
+  | {
+      id: string;
+      kind: "table";
+      connectionId: string;
+      title: string;
+      schema: string;
+      table: string;
+      tableKind: string;
+      /** WHERE clause body applied to the grid (set by FK jumps, kept in sync by the tab). */
+      filter?: string;
+      /** Unapplied grid edits exist (published by TableTab so a jump can ask before discarding them). */
+      dirty?: boolean;
+    }
   | { id: string; kind: "chat"; connectionId: string; title: string; sessionId: string }
   | { id: string; kind: "dashboard"; connectionId: string; title: string; dashboardId: string }
   | { id: string; kind: "redis"; connectionId: string; title: string }
   | { id: string; kind: "mongo"; connectionId: string; title: string; db: string; collection: string }
+  | { id: string; kind: "erd"; connectionId: string; title: string; schema: string }
+  | { id: string; kind: "diff"; connectionId: string; title: string; schema?: string }
   | { id: string; kind: "welcome"; connectionId: null; title: string };
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -26,6 +63,7 @@ export interface LiveConn {
   version: string | null;
   schemas: string[];
   tables: Record<string, TableInfo[]>; // by schema
+  catalog: Record<string, SchemaCatalog>; // by schema, for editor completion
   databases: string[];
   expanded: Record<string, boolean>;
   loading?: boolean;
@@ -79,6 +117,12 @@ interface State {
 
 let tabSeq = 1;
 let toastSeq = 1;
+/** Latest catalog request per connection+schema, so a slow older response cannot overwrite a newer one. */
+const catalogSeq = new Map<string, number>();
+/** Drop every in-flight catalog response for a connection (refresh, disconnect). */
+const invalidateCatalog = (connId: string) => {
+  for (const [key, n] of catalogSeq) if (key.startsWith(`${connId}/`)) catalogSeq.set(key, n + 1);
+};
 const uid = () => `${Date.now().toString(36)}-${(tabSeq++).toString(36)}`;
 
 const DEFAULT_SETTINGS: Settings = { providers: [], row_limit: 1000, agent_allow_writes: false, theme: "system" };
@@ -116,7 +160,17 @@ export const useStore = create<State>((set, get) => ({
       history: history ?? [],
       secretStorage,
     });
-    applyTheme(settings.theme ?? "system", settings.editor_font_size ?? null);
+    applyTheme(settings.theme, settings.editor_font_size ?? null);
+    // "Follow system" re-reads the OS preference when the window regains focus.
+    // ponytail: focus polling, subscribe to the XDG portal's SettingChanged if live switching matters.
+    window.addEventListener("focus", () => {
+      const s = get().settings;
+      if (resolveTheme(s.theme) === "system") applyTheme(s.theme, s.editor_font_size ?? null);
+    });
+    // Statements the agent runs are appended by the backend; mirror them into the list.
+    void listen<HistoryEntry>("history:added", ({ payload }) =>
+      set((s) => ({ history: [payload, ...s.history].slice(0, 500) })),
+    );
   },
 
   refreshConnections: async () => set({ connections: await api.listConnections() }),
@@ -142,6 +196,7 @@ export const useStore = create<State>((set, get) => ({
             version: r.server_version,
             schemas,
             tables: {},
+            catalog: {},
             databases,
             expanded: first ? { [first]: true } : {},
           },
@@ -162,6 +217,7 @@ export const useStore = create<State>((set, get) => ({
 
   disconnect: async (id) => {
     await api.disconnect(id).catch(() => {});
+    invalidateCatalog(id);
     set((s) => {
       const live = { ...s.live };
       delete live[id];
@@ -179,6 +235,20 @@ export const useStore = create<State>((set, get) => ({
         if (!l) return {};
         return { live: { ...s.live, [connId]: { ...l, tables: { ...l.tables, [schema]: tables } } } };
       });
+      // Completion catalog is best-effort and must neither delay nor break the sidebar.
+      const key = `${connId}/${schema}`;
+      const seq = (catalogSeq.get(key) ?? 0) + 1;
+      catalogSeq.set(key, seq);
+      void api
+        .schemaCatalog(connId, schema)
+        .then((catalog) =>
+          set((s) => {
+            const l = s.live[connId];
+            if (!l || catalogSeq.get(key) !== seq) return {};
+            return { live: { ...s.live, [connId]: { ...l, catalog: { ...l.catalog, [schema]: catalog } } } };
+          }),
+        )
+        .catch((e) => console.warn("schema catalog", errMsg(e)));
     } catch (e) {
       get().toast(errMsg(e), "error");
     }
@@ -189,7 +259,8 @@ export const useStore = create<State>((set, get) => ({
     if (!l) return;
     try {
       const schemas = await api.listSchemas(connId);
-      set((s) => ({ live: { ...s.live, [connId]: { ...s.live[connId], schemas, tables: {} } } }));
+      invalidateCatalog(connId); // a slow pre-refresh catalog must not land on the cleared state
+      set((s) => ({ live: { ...s.live, [connId]: { ...s.live[connId], schemas, tables: {}, catalog: {} } } }));
       await Promise.all(schemas.filter((sc) => l.expanded[sc]).map((sc) => get().loadTables(connId, sc)));
     } catch (e) {
       get().toast(errMsg(e), "error");
@@ -216,6 +287,8 @@ export const useStore = create<State>((set, get) => ({
           return t.kind === "dashboard" && t.dashboardId === tab.dashboardId;
         case "chat":
           return t.kind === "chat" && t.sessionId === tab.sessionId;
+        case "erd":
+          return t.kind === "erd" && t.schema === tab.schema;
         case "redis":
           return true;
         default:
@@ -223,6 +296,8 @@ export const useStore = create<State>((set, get) => ({
       }
     });
     if (existing) {
+      // Re-opening a table with a filter (FK jump) re-targets the already open tab.
+      if (tab.kind === "table" && tab.filter !== undefined) get().updateTab(existing.id, { filter: tab.filter });
       set({ activeTab: existing.id });
       return existing.id;
     }
@@ -254,7 +329,7 @@ export const useStore = create<State>((set, get) => ({
   saveSettings: async (settings) => {
     await api.saveSettings(settings);
     set({ settings });
-    applyTheme(settings.theme ?? "system", settings.editor_font_size ?? null);
+    applyTheme(settings.theme, settings.editor_font_size ?? null);
   },
 
   saveDashboard: async (d) => {
@@ -270,22 +345,18 @@ export const useStore = create<State>((set, get) => ({
     set({ dashboards: list });
     for (const t of get().tabs) if (t.kind === "dashboard" && t.dashboardId === id) get().closeTab(t.id);
   },
-  saveQuery: async (q) => {
-    const list = get()
-      .savedQueries.filter((x) => x.id !== q.id)
-      .concat(q);
-    await api.kvSet("saved_queries", list);
-    set({ savedQueries: list });
-  },
-  deleteSavedQuery: async (id) => {
-    const list = get().savedQueries.filter((x) => x.id !== id);
-    await api.kvSet("saved_queries", list);
-    set({ savedQueries: list });
-  },
+  saveQuery: (q) =>
+    writeSavedQueries((before) => {
+      const next = withVersion(
+        before.find((x) => x.id === q.id),
+        q,
+      );
+      return before.filter((x) => x.id !== q.id).concat(next);
+    }),
+  deleteSavedQuery: (id) => writeSavedQueries((before) => before.filter((x) => x.id !== id)),
   addHistory: async (h) => {
-    const list = [h, ...get().history].slice(0, 500);
-    set({ history: list });
-    await api.kvSet("history", list).catch(() => {});
+    set((s) => ({ history: [h, ...s.history].slice(0, 500) }));
+    await api.historyAdd(h).catch(() => {});
   },
   clearHistory: async () => {
     set({ history: [] });
@@ -302,14 +373,47 @@ export const useStore = create<State>((set, get) => ({
   },
 }));
 
-export function emptyLive(id: string): LiveConn {
-  return { id, database: "", version: null, schemas: [], tables: {}, databases: [], expanded: {} };
+// Every saved-query write rewrites the whole list, so they run one at a time: each mutation
+// starts from the state the previous one left, is shown immediately, and rolls back to the last
+// persisted list if its write fails.
+let savedQueue: Promise<unknown> = Promise.resolve();
+function writeSavedQueries(mutate: (before: SavedQuery[]) => SavedQuery[]): Promise<void> {
+  const run = async () => {
+    const before = useStore.getState().savedQueries;
+    const list = mutate(before);
+    useStore.setState({ savedQueries: list });
+    try {
+      await api.kvSet("saved_queries", list);
+    } catch (e) {
+      useStore.setState({ savedQueries: before });
+      throw e;
+    }
+  };
+  const p = savedQueue.then(run, run);
+  savedQueue = p.catch(() => {});
+  return p;
 }
 
-export function applyTheme(theme: string, fontSize: number | null) {
+export function emptyLive(id: string): LiveConn {
+  return { id, database: "", version: null, schemas: [], tables: {}, catalog: {}, databases: [], expanded: {} };
+}
+
+let themeSeq = 0;
+/** Sets `data-theme` on <html>. "system" asks the backend for the OS preference (WebKitGTK's media query does
+ *  not see it) and, when unknown or on failure, leaves `data-theme` unset so the CSS media query decides. */
+export function applyTheme(theme: string | null | undefined, fontSize: number | null) {
   const root = document.documentElement;
-  if (theme === "light" || theme === "dark") root.dataset.theme = theme;
-  else delete root.dataset.theme;
+  const id = resolveTheme(theme);
+  const seq = ++themeSeq;
+  if (id !== "system") root.dataset.theme = id;
+  else {
+    const set = (os: string | null) => {
+      if (seq !== themeSeq) return; // the user picked another theme meanwhile
+      if (os) root.dataset.theme = os;
+      else delete root.dataset.theme;
+    };
+    void api.systemTheme().then(set, () => set(null));
+  }
   root.style.setProperty("--editor-font-size", `${fontSize ?? 13}px`);
 }
 

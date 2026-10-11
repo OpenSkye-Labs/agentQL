@@ -1,4 +1,5 @@
-import { Bot, Database, KeyRound, Plug, Sparkles, Table2 } from "lucide-react";
+import { Bot, KeyRound, Plug, Sparkles, Table2 } from "lucide-react";
+import icon from "../../assets/brand/icon.svg";
 import { Button, Kbd } from "./ui";
 import { useStore } from "../lib/store";
 import { mod } from "../lib/format";
@@ -10,9 +11,7 @@ export function Welcome({ onNewConnection }: { onNewConnection: () => void }) {
     <div className="flex h-full items-center justify-center p-8 overflow-auto scroll">
       <div className="w-full max-w-2xl">
         <div className="flex items-center gap-3 mb-6">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-accent-fg shadow">
-            <Database size={22} />
-          </div>
+          <img src={icon} alt="" aria-hidden="true" className="h-11 w-11 rounded-xl shadow" />
           <div>
             <h1 className="text-xl font-semibold">AgentQL</h1>
             <p className="text-sm text-muted">A native database client with an agent that understands your data.</p>

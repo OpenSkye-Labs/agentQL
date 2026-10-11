@@ -1,7 +1,19 @@
 import { clsx } from "clsx";
-import { Bot, Database, FileCode2, LayoutDashboard, Plus, Table2, X, Braces, KeySquare } from "lucide-react";
+import {
+  Bot,
+  Database,
+  FileCode2,
+  GitCompare,
+  LayoutDashboard,
+  Network,
+  Plus,
+  Table2,
+  X,
+  Braces,
+  KeySquare,
+} from "lucide-react";
 import { useStore, type Tab } from "../lib/store";
-import { Tooltip, ContextMenu } from "./ui";
+import { Tooltip, ContextMenu, EnvBadge } from "./ui";
 import { mod } from "../lib/format";
 
 const icons: Record<Tab["kind"], React.ReactNode> = {
@@ -11,6 +23,8 @@ const icons: Record<Tab["kind"], React.ReactNode> = {
   dashboard: <LayoutDashboard size={13} />,
   redis: <KeySquare size={13} />,
   mongo: <Braces size={13} />,
+  erd: <Network size={13} />,
+  diff: <GitCompare size={13} />,
   welcome: <Database size={13} />,
 };
 
@@ -81,7 +95,10 @@ export function TabBar() {
                   />
                 )}
                 <span className="shrink-0 text-faint">{icons[t.kind]}</span>
-                <span className="truncate flex-1">{t.title}</span>
+                <span className="truncate flex-1" title={t.kind === "query" ? t.filePath : undefined}>
+                  {t.title}
+                </span>
+                <EnvBadge env={conn?.environment} className="shrink-0" />
                 {t.kind !== "welcome" && (
                   <button
                     onClick={(e) => {

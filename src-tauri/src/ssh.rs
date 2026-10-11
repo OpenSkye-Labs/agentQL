@@ -180,9 +180,19 @@ async fn authenticate_with_agent(
     user: &str,
 ) -> std::result::Result<russh::client::AuthResult, AppError> {
     use russh::keys::agent::client::AgentClient;
+    #[cfg(unix)]
     let mut agent = AgentClient::connect_env()
         .await
         .map_err(|e| AppError::Msg(format!("ssh-agent unavailable: {e}")))?;
+    // ponytail: Windows OpenSSH agent only; add Pageant (`connect_pageant`) as a fallback if PuTTY users ask.
+    #[cfg(windows)]
+    let mut agent = AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent")
+        .await
+        .map_err(|e| {
+            AppError::Msg(format!(
+                "ssh-agent unavailable (is the OpenSSH Authentication Agent service running?): {e}"
+            ))
+        })?;
     let identities = agent
         .request_identities()
         .await

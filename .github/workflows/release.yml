@@ -51,6 +51,18 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # release-please already wrote the changelog into the release; tauri-action would overwrite it with
+      # releaseBody and also copies releaseBody into latest.json (what the in-app update dialog shows).
+      - name: Read release notes
+        id: notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          body=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
+          { echo 'body<<NOTES_EOF'; echo "${body:-Download the installer for your platform from the assets below.}"; echo 'NOTES_EOF'; } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,7 +71,7 @@ jobs:
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseName: "AgentQL ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}"
-          releaseBody: "Download the installer for your platform from the assets below."
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           uploadUpdaterJson: true

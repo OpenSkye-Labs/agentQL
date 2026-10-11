@@ -1,3 +1,5 @@
+import type { ThemeId } from "./themes";
+
 export type Driver = "postgres" | "mysql" | "mariadb" | "sqlite" | "redis" | "mongodb";
 
 export const DRIVERS: { id: Driver; label: string; port: number; sql: boolean }[] = [
@@ -21,6 +23,20 @@ export interface SshConfig {
   auth: SshAuth;
 }
 
+/** One allowed item of the agent scope: a whole schema (no table) or a single table. */
+export interface ScopeEntry {
+  schema: string;
+  table?: string;
+}
+
+export type Environment = "dev" | "staging" | "production";
+export const ENVIRONMENTS: Environment[] = ["dev", "staging", "production"];
+
+export interface WriteInfo {
+  kind: string;
+  table: string | null;
+}
+
 export interface ConnectionConfig {
   id: string;
   name: string;
@@ -39,7 +55,12 @@ export interface ConnectionConfig {
   ssl_key_path?: string | null;
   ssh?: SshConfig | null;
   read_only: boolean;
+  environment?: Environment | null;
   options: Record<string, string>;
+  /** Schemas/tables the AI agent may see; absent = everything. */
+  agent_scope?: ScopeEntry[] | null;
+  /** When the user allowed sending this connection's schema and data to a remote LLM provider. */
+  agent_remote_consent_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -97,11 +118,34 @@ export interface ForeignKeyInfo {
   ref_table: string;
   ref_columns: string[];
 }
+export interface CatalogColumn {
+  table: string;
+  name: string;
+  data_type: string;
+}
+export interface CatalogForeignKey {
+  table: string;
+  columns: string[];
+  ref_schema: string | null;
+  ref_table: string;
+  ref_columns: string[];
+}
+/** Every column and foreign key of one schema (editor completion). */
+export interface SchemaCatalog {
+  columns: CatalogColumn[];
+  foreign_keys: CatalogForeignKey[];
+}
 export interface TableDetails {
   columns: ColumnInfo[];
   indexes: IndexInfo[];
   foreign_keys: ForeignKeyInfo[];
   ddl: string | null;
+}
+
+/** One table or view with everything the backend introspects about it. */
+export interface SchemaObject {
+  table: TableInfo;
+  details: TableDetails;
 }
 
 export interface TableQuery {
@@ -166,8 +210,9 @@ export interface Settings {
   default_provider?: string | null;
   row_limit: number;
   agent_allow_writes: boolean;
-  theme?: "light" | "dark" | "system" | null;
+  theme?: ThemeId | null;
   editor_font_size?: number | null;
+  editor_vim?: boolean;
 }
 
 export type Block =
@@ -196,7 +241,7 @@ export type AgentEvent =
   | { kind: "text_delta"; text: string }
   | { kind: "tool_call"; id: string; name: string; input: unknown }
   | { kind: "tool_result"; id: string; content: string; is_error: boolean; display: unknown }
-  | { kind: "approval_request"; id: string; description: string; statement: string }
+  | { kind: "approval_request"; id: string; approval_kind: "write" | "consent"; description: string; statement: string }
   | { kind: "status"; text: string }
   | { kind: "done"; session: ChatSession }
   | { kind: "error"; message: string };
@@ -223,13 +268,26 @@ export interface Dashboard {
   updated_at: string;
 }
 
+export interface QueryVersion {
+  sql: string;
+  ts: string;
+}
+
 export interface SavedQuery {
   id: string;
   connection_id: string | null;
   name: string;
+  /** May contain CodeMirror snippet placeholders: `${1:table}`, `${2}`; Tab moves between them. */
   sql: string;
+  /** Typing this word in the editor offers the query as a snippet completion. */
+  trigger?: string | null;
   created_at: string;
+  updated_at?: string;
+  /** Previous edits, newest first, capped at MAX_QUERY_VERSIONS. */
+  versions?: QueryVersion[];
 }
+
+export const MAX_QUERY_VERSIONS = 20;
 
 export interface HistoryEntry {
   id: string;
@@ -239,4 +297,7 @@ export interface HistoryEntry {
   duration_ms: number;
   ok: boolean;
   rows?: number;
+  /** Set when the AI agent ran the statement. */
+  source?: "agent";
+  session_id?: string;
 }

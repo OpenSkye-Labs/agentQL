@@ -3,8 +3,8 @@
 
 use super::value::{mysql_value, pg_value, sqlite_value};
 use super::{
-    Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult, RowChange, TableDetails, TableInfo,
-    TableQuery,
+    CatalogColumn, CatalogForeignKey, Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult,
+    RowChange, SchemaCatalog, SchemaObject, TableDetails, TableInfo, TableQuery,
 };
 use crate::config::{ConnectionConfig, ConnectionSecrets, Driver};
 use crate::error::{AppError, Result};
@@ -179,40 +179,78 @@ impl SqlConn {
     }
 
     pub async fn run_one(&self, sql: &str, limit: u32) -> Result<QueryResult> {
-        self.run_one_opts(sql, limit, false).await
+        self.run_one_opts(sql, limit, false, None).await
     }
 
     /// Execute a single statement inside a database-enforced read-only context
     /// (READ ONLY transaction / `PRAGMA query_only`), so even `SELECT nextval()`
     /// or stray semicolons cannot write.
     pub async fn run_one_read_only(&self, sql: &str, limit: u32) -> Result<QueryResult> {
-        self.run_one_opts(sql, limit, true).await
+        self.run_one_opts(sql, limit, true, None).await
     }
 
     pub async fn run_read_only(&self, sql: &str, limit: u32) -> Result<Vec<QueryResult>> {
+        self.run_with_search_path(sql, limit, true, None).await
+    }
+
+    /// `run` / `run_read_only` with the Postgres `search_path` pinned for the duration of each
+    /// statement (`SET LOCAL` inside the transaction), so unqualified names resolve to the schema
+    /// the agent scope check used, whatever the pooled session's `search_path` was changed to.
+    /// Ignored on other drivers: their scoped callers require schema-qualified names instead.
+    pub async fn run_with_search_path(
+        &self,
+        sql: &str,
+        limit: u32,
+        read_only: bool,
+        search_path: Option<&str>,
+    ) -> Result<Vec<QueryResult>> {
         let mut out = vec![];
         for stmt in split_statements(sql) {
-            out.push(self.run_one_read_only(&stmt, limit).await?);
+            out.push(
+                self.run_one_opts(&stmt, limit, read_only, search_path)
+                    .await?,
+            );
         }
         Ok(out)
     }
 
-    async fn run_one_opts(&self, sql: &str, limit: u32, read_only: bool) -> Result<QueryResult> {
+    async fn run_one_opts(
+        &self,
+        sql: &str,
+        limit: u32,
+        read_only: bool,
+        search_path: Option<&str>,
+    ) -> Result<QueryResult> {
         let start = Instant::now();
-        let mut res = match (&self.pool, read_only) {
-            (Pool::Pg(p), false) => exec_stream!(p, sql, limit, pg_value)?,
-            (Pool::My(p), false) => exec_stream!(p, sql, limit, mysql_value)?,
-            (Pool::Lite(p), false) => exec_stream!(p, sql, limit, sqlite_value)?,
-            (Pool::Pg(p), true) => {
+        let mut res = match (&self.pool, read_only, search_path) {
+            (Pool::Pg(p), false, None) => exec_stream!(p, sql, limit, pg_value)?,
+            (Pool::My(p), false, _) => exec_stream!(p, sql, limit, mysql_value)?,
+            (Pool::Lite(p), false, _) => exec_stream!(p, sql, limit, sqlite_value)?,
+            (Pool::Pg(p), _, _) => {
                 let mut tx = p.begin().await?;
-                sqlx::query("SET TRANSACTION READ ONLY")
+                if read_only {
+                    sqlx::query("SET TRANSACTION READ ONLY")
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                if let Some(schema) = search_path {
+                    sqlx::query(&format!(
+                        "SET LOCAL search_path TO {}",
+                        self.quote_ident(schema)
+                    ))
                     .execute(&mut *tx)
                     .await?;
+                }
                 let r = exec_stream!(&mut *tx, sql, limit, pg_value);
-                let _ = tx.rollback().await;
+                match (&r, read_only) {
+                    (Ok(_), false) => tx.commit().await?,
+                    _ => {
+                        let _ = tx.rollback().await;
+                    }
+                }
                 r?
             }
-            (Pool::My(p), true) => {
+            (Pool::My(p), true, _) => {
                 // START TRANSACTION is not preparable on MySQL; SET TRANSACTION (next txn only) + begin() is.
                 let mut conn = p.acquire().await?;
                 sqlx::query("SET TRANSACTION READ ONLY")
@@ -223,7 +261,7 @@ impl SqlConn {
                 let _ = tx.rollback().await;
                 r?
             }
-            (Pool::Lite(p), true) => {
+            (Pool::Lite(p), true, _) => {
                 let mut conn = p.acquire().await?;
                 sqlx::query("PRAGMA query_only = 1")
                     .execute(&mut *conn)
@@ -237,16 +275,42 @@ impl SqlConn {
         };
         if res.columns.is_empty() && res.rows.is_empty() && is_query_like(sql) {
             // Zero-row SELECT: still show the headers.
-            res.columns = self.describe_columns(sql).await.unwrap_or_default();
+            res.columns = self
+                .describe_columns(sql, search_path)
+                .await
+                .unwrap_or_default();
         }
         res.duration_ms = start.elapsed().as_millis();
         res.statement = sql.to_string();
         Ok(res)
     }
 
-    async fn describe_columns(&self, sql: &str) -> Result<Vec<Column>> {
-        Ok(match &self.pool {
-            Pool::Pg(p) => p
+    /// Column metadata for a statement; `search_path` pins the Postgres schema the same way
+    /// `run_one_opts` did, so the headers describe the query that actually ran.
+    async fn describe_columns(&self, sql: &str, search_path: Option<&str>) -> Result<Vec<Column>> {
+        let to_columns = |cols: &[sqlx::postgres::PgColumn]| -> Vec<Column> {
+            cols.iter()
+                .map(|c| Column {
+                    name: c.name().to_string(),
+                    type_name: c.type_info().name().to_string(),
+                })
+                .collect()
+        };
+        Ok(match (&self.pool, search_path) {
+            (Pool::Pg(p), Some(schema)) => {
+                let mut tx = p.begin().await?;
+                sqlx::query(&format!(
+                    "SET LOCAL search_path TO {}",
+                    self.quote_ident(schema)
+                ))
+                .execute(&mut *tx)
+                .await?;
+                let d = (&mut *tx).describe(sql).await;
+                let _ = tx.rollback().await;
+                to_columns(d?.columns())
+            }
+            (Pool::Pg(p), None) => to_columns(p.describe(sql).await?.columns()),
+            (Pool::My(p), _) => p
                 .describe(sql)
                 .await?
                 .columns()
@@ -256,17 +320,7 @@ impl SqlConn {
                     type_name: c.type_info().name().to_string(),
                 })
                 .collect(),
-            Pool::My(p) => p
-                .describe(sql)
-                .await?
-                .columns()
-                .iter()
-                .map(|c| Column {
-                    name: c.name().to_string(),
-                    type_name: c.type_info().name().to_string(),
-                })
-                .collect(),
-            Pool::Lite(p) => p
+            (Pool::Lite(p), _) => p
                 .describe(sql)
                 .await?
                 .columns()
@@ -445,15 +499,25 @@ impl SqlConn {
     // ---------------------------------------------------------------- browsing
 
     /// A browse filter must be exactly one expression: no extra statements or trailing comments.
-    pub fn validate_filter(filter: Option<&str>) -> Result<()> {
+    pub fn validate_filter(&self, filter: Option<&str>) -> Result<()> {
+        Self::validate_filter_for(self.driver, filter)
+    }
+
+    pub fn validate_filter_for(driver: Driver, filter: Option<&str>) -> Result<()> {
         let Some(f) = filter.map(str::trim).filter(|f| !f.is_empty()) else {
             return Ok(());
         };
-        let parts = split_statements(f);
+        // Comment markers and statement breaks only count outside '…' literals (an FK key value may
+        // legitimately contain "--" or ";"). Only MySQL/MariaDB treat a backslash as an escape inside a
+        // literal; on Postgres/SQLite `'a\'` is closed. Blanking literals first keeps `split_statements`
+        // (which escapes backslashes for every dialect) from mis-splitting such keys.
+        let backslash = matches!(driver, Driver::Mysql | Driver::Mariadb);
+        let code = blank_string_literals(f, backslash);
+        let parts = split_statements(&code);
         if parts.len() != 1
-            || parts[0] != f.trim_end_matches(';').trim()
-            || f.contains("--")
-            || f.contains("/*")
+            || parts[0] != code.trim_end_matches(';').trim()
+            || code.contains("--")
+            || code.contains("/*")
         {
             return Err(AppError::Msg(
                 "filter must be a single WHERE expression".into(),
@@ -616,6 +680,24 @@ impl SqlConn {
                 .collect()),
             _ => unreachable!(),
         }
+    }
+
+    /// Where an unqualified table name resolves first (Postgres `current_schema()`, the MySQL
+    /// database, SQLite `main`).
+    pub async fn current_schema(&self) -> Result<String> {
+        let sql = match self.driver {
+            Driver::Postgres => "SELECT current_schema() AS name",
+            Driver::Mysql | Driver::Mariadb => "SELECT DATABASE() AS name",
+            _ => return Ok("main".into()),
+        };
+        Ok(self
+            .rows(sql)
+            .await?
+            .into_iter()
+            .next()
+            .and_then(|mut r| r.remove("name"))
+            .and_then(json_str)
+            .unwrap_or_default())
     }
 
     pub async fn tables(&self, schema: &str) -> Result<Vec<TableInfo>> {
@@ -896,8 +978,52 @@ impl SqlConn {
                     .ok()
                     .and_then(|r| r.into_iter().next())
                     .and_then(|mut r| opt_str(&mut r, "sql"));
+                // `REFERENCES parent` without a column list reports `to` as NULL: the target is the
+                // parent's primary key.
+                for fk in fk_map.values_mut() {
+                    if !fk.ref_columns.iter().any(String::is_empty) {
+                        continue;
+                    }
+                    let info = self
+                        .rows(&format!(
+                            "PRAGMA {pfx}table_info({})",
+                            self.quote_ident(&fk.ref_table)
+                        ))
+                        .await?;
+                    let mut pk: Vec<(i64, String)> = info
+                        .into_iter()
+                        .filter_map(|mut r| {
+                            let n = take_i64(&mut r, "pk");
+                            (n > 0).then(|| (n, take_str(&mut r, "name")))
+                        })
+                        .collect();
+                    pk.sort();
+                    if pk.len() == fk.ref_columns.len() {
+                        fk.ref_columns = pk.into_iter().map(|(_, n)| n).collect();
+                    }
+                }
                 let mut fks: Vec<_> = fk_map.into_values().collect();
                 fks.sort_by(|a, b| a.name.cmp(&b.name));
+                // `REFERENCES parent` without a column list reports `to` as NULL: resolve it to parent's PK.
+                for fk in fks
+                    .iter_mut()
+                    .filter(|fk| fk.ref_columns.iter().any(String::is_empty))
+                {
+                    let mut pk: Vec<(i64, String)> = self
+                        .rows(&format!(
+                            "PRAGMA {pfx}table_info({})",
+                            self.quote_ident(&fk.ref_table)
+                        ))
+                        .await?
+                        .into_iter()
+                        .filter_map(|mut r| {
+                            let n = take_i64(&mut r, "pk");
+                            (n > 0).then(|| (n, take_str(&mut r, "name")))
+                        })
+                        .collect();
+                    pk.sort();
+                    fk.ref_columns = pk.into_iter().map(|(_, n)| n).collect();
+                }
                 Ok(TableDetails {
                     columns: cols
                         .into_iter()
@@ -919,6 +1045,131 @@ impl SqlConn {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Every table/view in `schema` with columns, indexes, FKs and DDL.
+    // ponytail: N+1 introspection (a few queries per table); switch to bulk information_schema
+    // queries if schemas with hundreds of tables feel slow.
+    pub async fn schema_objects(&self, schema: &str) -> Result<Vec<SchemaObject>> {
+        let mut out = vec![];
+        for table in self.tables(schema).await? {
+            let details = self.table_details(schema, &table.name).await?;
+            out.push(SchemaObject { table, details });
+        }
+        Ok(out)
+    }
+
+    /// Columns and foreign keys of every table in `schema`, for editor completion.
+    /// ponytail: whole-schema payload in one go; page or lazy-load per table if a schema with
+    /// tens of thousands of columns ever shows up.
+    pub async fn schema_catalog(&self, schema: &str) -> Result<SchemaCatalog> {
+        let s = self.literal(&Value::String(schema.into()));
+        let (cols, foreign_keys) = match self.driver {
+            Driver::Postgres => (
+                self.rows(&format!(
+                    "SELECT c.relname AS tbl, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS data_type \
+                     FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     WHERE n.nspname = {s} AND c.relkind IN ('r','v','m','p','f') AND a.attnum > 0 AND NOT a.attisdropped \
+                     ORDER BY c.relname, a.attnum"
+                ))
+                .await?,
+                self.rows(&format!(
+                    "SELECT c.relname AS tbl, \
+                     (SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS cols, \
+                     rn.nspname AS ref_schema, rc.relname AS ref_table, \
+                     (SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(con.confkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS ref_cols \
+                     FROM pg_constraint con JOIN pg_class c ON c.oid = con.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     JOIN pg_class rc ON rc.oid = con.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace \
+                     WHERE con.contype = 'f' AND n.nspname = {s} ORDER BY c.relname, con.conname"
+                ))
+                .await?
+                .into_iter()
+                .map(|mut r| CatalogForeignKey {
+                    table: take_str(&mut r, "tbl"),
+                    columns: take_names(&mut r, "cols"),
+                    ref_schema: opt_str(&mut r, "ref_schema"),
+                    ref_table: take_str(&mut r, "ref_table"),
+                    ref_columns: take_names(&mut r, "ref_cols"),
+                })
+                .collect(),
+            ),
+            Driver::Mysql | Driver::Mariadb => (
+                self.rows(&format!(
+                    "SELECT TABLE_NAME AS tbl, COLUMN_NAME AS name, COLUMN_TYPE AS data_type \
+                     FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = {s} ORDER BY TABLE_NAME, ORDINAL_POSITION"
+                ))
+                .await?,
+                // One row per key column, folded here: no GROUP_CONCAT, so no group_concat_max_len
+                // truncation and no separator that could appear in a name.
+                self.rows(&format!(
+                    "SELECT TABLE_NAME AS tbl, CONSTRAINT_NAME AS name, COLUMN_NAME AS col, \
+                     REFERENCED_TABLE_SCHEMA AS ref_schema, REFERENCED_TABLE_NAME AS ref_table, REFERENCED_COLUMN_NAME AS ref_col \
+                     FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = {s} AND REFERENCED_TABLE_NAME IS NOT NULL \
+                     ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION"
+                ))
+                .await?
+                .into_iter()
+                .fold(Vec::<(String, CatalogForeignKey)>::new(), |mut acc, mut r| {
+                    let table = take_str(&mut r, "tbl");
+                    let name = take_str(&mut r, "name");
+                    let col = take_str(&mut r, "col");
+                    let ref_col = take_str(&mut r, "ref_col");
+                    match acc.last_mut() {
+                        Some((n, fk)) if *n == name && fk.table == table => {
+                            fk.columns.push(col);
+                            fk.ref_columns.push(ref_col);
+                        }
+                        _ => acc.push((
+                            name,
+                            CatalogForeignKey {
+                                table,
+                                columns: vec![col],
+                                ref_schema: opt_str(&mut r, "ref_schema"),
+                                ref_table: take_str(&mut r, "ref_table"),
+                                ref_columns: vec![ref_col],
+                            },
+                        )),
+                    }
+                    acc
+                })
+                .into_iter()
+                .map(|(_, fk)| fk)
+                .collect(),
+            ),
+            Driver::Sqlite => {
+                // ponytail: one pragma pair per table (local file, cheap); no bulk catalog in SQLite.
+                let mut out = SchemaCatalog::default();
+                for t in self.tables(schema).await? {
+                    let d = self.table_details(schema, &t.name).await?;
+                    out.columns.extend(d.columns.into_iter().map(|c| CatalogColumn {
+                        table: t.name.clone(),
+                        name: c.name,
+                        data_type: c.data_type,
+                    }));
+                    out.foreign_keys
+                        .extend(d.foreign_keys.into_iter().map(|f| CatalogForeignKey {
+                            table: t.name.clone(),
+                            columns: f.columns,
+                            ref_schema: f.ref_schema,
+                            ref_table: f.ref_table,
+                            ref_columns: f.ref_columns,
+                        }));
+                }
+                return Ok(out);
+            }
+            _ => unreachable!(),
+        };
+        Ok(SchemaCatalog {
+            columns: cols
+                .into_iter()
+                .map(|mut r| CatalogColumn {
+                    table: take_str(&mut r, "tbl"),
+                    name: take_str(&mut r, "name"),
+                    data_type: take_str(&mut r, "data_type"),
+                })
+                .collect(),
+            foreign_keys,
+        })
     }
 
     fn synth_ddl(
@@ -1032,6 +1283,36 @@ macro_rules! exec_stream {
 }
 use exec_stream;
 
+/// Replace the contents of single-quoted literals by spaces so lexical checks skip them.
+/// `''` stays inside the literal; with `backslash` (MySQL dialects) so does a backslash-escaped character.
+/// `backslash` is the dialect default (MySQL); a Postgres `E'…'` escape string enables it per literal.
+fn blank_string_literals(sql: &str, backslash: bool) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut in_str = false;
+    let mut esc = backslash;
+    let mut prev = [' ', ' ']; // the two characters before the current one
+    let mut chars = sql.chars();
+    while let Some(c) = chars.next() {
+        if c == '\'' {
+            if !in_str {
+                let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '"' || c == '`';
+                esc = backslash || (matches!(prev[1], 'E' | 'e') && !is_ident(prev[0]));
+            }
+            in_str = !in_str;
+            out.push(c);
+        } else if in_str {
+            out.push(' ');
+            if esc && c == '\\' && chars.next().is_some() {
+                out.push(' ');
+            }
+        } else {
+            out.push(c);
+        }
+        prev = [prev[1], c];
+    }
+    out
+}
+
 fn json_str(v: Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s),
@@ -1063,6 +1344,14 @@ fn take_bool(r: &mut HashMap<String, Value>, k: &str) -> bool {
         None => false,
     }
 }
+/// Identifier list returned as a Postgres array (decoded to a JSON array).
+fn take_names(r: &mut HashMap<String, Value>, k: &str) -> Vec<String> {
+    match r.remove(k) {
+        Some(Value::Array(a)) => a.into_iter().filter_map(json_str).collect(),
+        _ => vec![],
+    }
+}
+
 fn split_csv(s: Option<String>) -> Vec<String> {
     s.map(|s| {
         s.split(',')
@@ -1196,74 +1485,404 @@ pub fn is_query_like(sql: &str) -> bool {
     )
 }
 
-fn query_is_read_only(q: &sqlparser::ast::Query) -> bool {
-    use sqlparser::ast::SetExpr;
-    fn body_ok(b: &SetExpr) -> bool {
-        match b {
-            SetExpr::Insert(_) | SetExpr::Update(_) => false,
-            SetExpr::Query(inner) => query_is_read_only(inner),
-            SetExpr::SetOperation { left, right, .. } => body_ok(left) && body_ok(right),
-            _ => true,
-        }
-    }
-    // Any SELECT ... INTO / data-modifying CTE makes the whole query a write.
-    let select_into = matches!(q.body.as_ref(), SetExpr::Select(sel) if sel.into.is_some());
-    !select_into
-        && body_ok(&q.body)
-        && q.with
-            .as_ref()
-            .is_none_or(|w| w.cte_tables.iter().all(|c| query_is_read_only(&c.query)))
+/// Conservative read-only check used to gate agent tool calls: true when nothing in `sql` is classified as a write.
+pub fn is_read_only(driver: Driver, sql: &str) -> bool {
+    classify_writes(driver, sql).is_empty()
 }
 
-/// Conservative read-only check used to gate agent tool calls.
-pub fn is_read_only(driver: Driver, sql: &str) -> bool {
-    use sqlparser::ast::Statement;
-    use sqlparser::dialect::{Dialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
-    let dialect: Box<dyn Dialect> = match driver {
+/// A statement that is not read-only: what it does and (when the AST tells us) which table it touches.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct WriteInfo {
+    pub kind: String,
+    pub table: Option<String>,
+}
+
+fn dialect(driver: Driver) -> Box<dyn sqlparser::dialect::Dialect> {
+    use sqlparser::dialect::{MySqlDialect, PostgreSqlDialect, SQLiteDialect};
+    match driver {
         Driver::Mysql | Driver::Mariadb => Box::new(MySqlDialect {}),
         Driver::Sqlite => Box::new(SQLiteDialect {}),
         _ => Box::new(PostgreSqlDialect {}),
-    };
-    match sqlparser::parser::Parser::parse_sql(&*dialect, sql) {
-        Ok(stmts) => stmts.iter().all(|s| match s {
-            Statement::Query(q) => query_is_read_only(q),
-            Statement::Explain {
-                analyze, statement, ..
-            } => !*analyze || statement_is_read_only(statement),
-            Statement::Pragma { value, .. } => value.is_none(),
-            Statement::ExplainTable { .. }
-            | Statement::ShowColumns { .. }
-            | Statement::ShowTables { .. }
-            | Statement::ShowCreate { .. }
-            | Statement::ShowFunctions { .. }
-            | Statement::ShowVariable { .. }
-            | Statement::ShowVariables { .. }
-            | Statement::ShowStatus { .. }
-            | Statement::ShowDatabases { .. }
-            | Statement::ShowSchemas { .. }
-            | Statement::ShowViews { .. }
-            | Statement::ShowCollation { .. } => true,
-            _ => false,
-        }),
-        Err(_) => {
-            // Fail closed: only bare metadata commands the parser does not know are allowed through.
-            split_statements(sql).iter().all(|s| {
-                let first = first_word(s);
-                matches!(first.as_str(), "SHOW" | "DESCRIBE" | "DESC") && !s.contains(';')
-            })
-        }
     }
 }
 
-fn statement_is_read_only(s: &sqlparser::ast::Statement) -> bool {
-    use sqlparser::ast::Statement;
-    match s {
-        Statement::Query(q) => query_is_read_only(q),
-        Statement::Explain {
-            analyze, statement, ..
-        } => !*analyze || statement_is_read_only(statement),
-        _ => false,
+/// Describe every write statement in `sql` (kind + target table) for the read-only gate and the
+/// production confirmation prompt. Classification runs per `split_statements` piece, the same unit
+/// `Sql::run` executes, so the parser and the executor cannot disagree on where a statement ends.
+/// Fails closed: a piece the parser rejects (or parses to nothing) is reported as a write with its
+/// first keyword and no table, except bare metadata commands (SHOW / DESCRIBE).
+pub fn classify_writes(driver: Driver, sql: &str) -> Vec<WriteInfo> {
+    let d = dialect(driver);
+    let unparsed = |s: &str| {
+        let first = first_word(s);
+        if matches!(first.as_str(), "SHOW" | "DESCRIBE" | "DESC") && !s.contains(';') {
+            vec![]
+        } else {
+            vec![WriteInfo {
+                kind: format!("{first} (could not parse)"),
+                table: None,
+            }]
+        }
+    };
+    let mut out: Vec<WriteInfo> = split_statements(sql)
+        .iter()
+        .flat_map(|s| match sqlparser::parser::Parser::parse_sql(&*d, s) {
+            Ok(stmts) if !stmts.is_empty() => stmts.iter().flat_map(describe_writes).collect(),
+            Ok(_) if !has_code(s) => vec![],
+            _ => unparsed(s),
+        })
+        .collect();
+    // MySQL runs `/*! ... */` executable comments that both splitter and parser treat as plain comments.
+    if matches!(driver, Driver::Mysql | Driver::Mariadb) && sql.contains("/*!") {
+        out.insert(
+            0,
+            WriteInfo {
+                kind: "EXECUTABLE COMMENT".into(),
+                table: None,
+            },
+        );
     }
+    out
+}
+
+fn write_info(kind: &str, table: Option<String>) -> Vec<WriteInfo> {
+    vec![WriteInfo {
+        kind: kind.into(),
+        table,
+    }]
+}
+
+fn names(list: impl IntoIterator<Item = impl ToString>) -> Option<String> {
+    let v: Vec<String> = list.into_iter().map(|n| n.to_string()).collect();
+    (!v.is_empty()).then(|| v.join(", "))
+}
+
+/// Writes hidden inside a query: SELECT INTO (in any set member), data-modifying CTEs.
+fn query_writes(q: &sqlparser::ast::Query) -> Vec<WriteInfo> {
+    use sqlparser::ast::SetExpr;
+    fn body_writes(b: &SetExpr) -> Vec<WriteInfo> {
+        match b {
+            SetExpr::Select(sel) => sel
+                .into
+                .as_ref()
+                .map(|i| write_info("SELECT INTO", Some(i.name.to_string())))
+                .unwrap_or_default(),
+            SetExpr::Insert(st) | SetExpr::Update(st) => describe_writes(st),
+            SetExpr::Query(inner) => query_writes(inner),
+            SetExpr::SetOperation { left, right, .. } => {
+                [body_writes(left), body_writes(right)].concat()
+            }
+            _ => vec![],
+        }
+    }
+    let mut out: Vec<WriteInfo> = q
+        .with
+        .iter()
+        .flat_map(|w| w.cte_tables.iter().flat_map(|c| query_writes(&c.query)))
+        .collect();
+    out.extend(body_writes(&q.body));
+    out
+}
+
+/// Every write a single statement performs; empty when the statement is read-only.
+fn describe_writes(s: &sqlparser::ast::Statement) -> Vec<WriteInfo> {
+    use sqlparser::ast::{FromTable, Statement, TableFactor};
+    fn table_of(t: &TableFactor) -> Option<String> {
+        match t {
+            TableFactor::Table { name, .. } => Some(name.to_string()),
+            _ => None,
+        }
+    }
+    match s {
+        Statement::Query(q) => query_writes(q),
+        Statement::Explain {
+            analyze,
+            statement,
+            options,
+            ..
+        } => {
+            // Postgres `EXPLAIN (ANALYZE, ...)` lands in `options`, not `analyze`; any ANALYZE option counts.
+            let analyzes = *analyze
+                || options
+                    .iter()
+                    .flatten()
+                    .any(|o| o.name.value.eq_ignore_ascii_case("analyze"));
+            if !analyzes {
+                return vec![];
+            }
+            describe_writes(statement)
+                .into_iter()
+                .map(|w| WriteInfo {
+                    kind: format!("EXPLAIN ANALYZE {}", w.kind),
+                    table: w.table,
+                })
+                .collect()
+        }
+        Statement::ExplainTable { .. }
+        | Statement::ShowColumns { .. }
+        | Statement::ShowTables { .. }
+        | Statement::ShowCreate { .. }
+        | Statement::ShowFunctions { .. }
+        | Statement::ShowVariable { .. }
+        | Statement::ShowVariables { .. }
+        | Statement::ShowStatus { .. }
+        | Statement::ShowDatabases { .. }
+        | Statement::ShowSchemas { .. }
+        | Statement::ShowViews { .. }
+        | Statement::ShowCollation { .. } => vec![],
+        Statement::Pragma { value: None, .. } => vec![],
+        Statement::Insert(i) => write_info("INSERT", Some(i.table_name.to_string())),
+        Statement::Update { table, .. } => write_info("UPDATE", table_of(&table.relation)),
+        Statement::Delete(d) => {
+            // MySQL `DELETE t1, t2 FROM ...` names its targets explicitly; otherwise the FROM table is the target.
+            // ponytail: explicit targets are shown as written (aliases not resolved); resolve against FROM if it misleads.
+            let from = match &d.from {
+                FromTable::WithFromKeyword(t) | FromTable::WithoutKeyword(t) => t,
+            };
+            let table =
+                names(&d.tables).or_else(|| from.first().and_then(|t| table_of(&t.relation)));
+            write_info("DELETE", table)
+        }
+        Statement::Merge { table, .. } => write_info("MERGE", table_of(table)),
+        Statement::Truncate { table_names, .. } => {
+            write_info("TRUNCATE", names(table_names.iter().map(|t| &t.name)))
+        }
+        Statement::AlterTable { name, .. } => write_info("ALTER TABLE", Some(name.to_string())),
+        Statement::CreateTable(c) => write_info("CREATE TABLE", Some(c.name.to_string())),
+        Statement::Drop {
+            object_type,
+            names: targets,
+            ..
+        } => write_info(&format!("DROP {object_type}"), names(targets)),
+        // ponytail: everything else is a write named by its first keyword, no table; extend the match when a prompt is too vague.
+        _ => write_info(&first_word(&s.to_string()), None),
+    }
+}
+
+/// Append `LIMIT n` to a single statement that parses as a plain query without its own
+/// LIMIT / OFFSET / FETCH / locking clause. Everything else comes back untouched, so the
+/// agent's `run_sql` never turns valid SQL into invalid SQL.
+pub fn with_limit(driver: Driver, stmt: &str, limit: u32) -> String {
+    use sqlparser::ast::{SetExpr, Statement};
+    let Ok(parsed) = sqlparser::parser::Parser::parse_sql(&*dialect(driver), stmt) else {
+        return stmt.to_string();
+    };
+    match parsed.as_slice() {
+        [Statement::Query(q)]
+            if q.limit.is_none()
+                && q.limit_by.is_empty()
+                && q.offset.is_none()
+                && q.fetch.is_none()
+                && q.locks.is_empty()
+                && q.for_clause.is_none()
+                && !matches!(q.body.as_ref(), SetExpr::Select(s) if s.into.is_some()) =>
+        {
+            // On its own line: the statement may end in a `--` comment.
+            format!(
+                "{}\nLIMIT {limit}",
+                stmt.trim_end().trim_end_matches(';').trim_end()
+            )
+        }
+        _ => stmt.to_string(),
+    }
+}
+
+/// What a piece of SQL touches: tables as `(schema, table)` and every function it calls (lowercased).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SqlRefs {
+    pub tables: Vec<(Option<String>, String)>,
+    pub functions: Vec<String>,
+    /// Statements whose targets the visitor does not report (SHOW, DESCRIBE, PRAGMA, ...).
+    pub opaque: Vec<String>,
+    /// Query bodies and table factors the collector does not understand (`TABLE x`, PIVOT, JSON_TABLE, ...).
+    /// Scoped runs refuse them: a construct that is not modelled cannot be checked.
+    pub unsupported: Vec<String>,
+}
+
+/// Every table the SQL reads or writes, with identifiers normalised the way the database resolves
+/// them (Postgres folds unquoted names to lowercase; MySQL and SQLite keep them). CTE names are
+/// skipped only where they are lexically visible, table-valued functions always (they are reported
+/// under `functions`). `None` when the text does not parse, so callers can fail closed.
+pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
+    use sqlparser::ast::{
+        Expr, Ident, ObjectName, Query, SetExpr, Statement, TableFactor, Visit, Visitor,
+    };
+    use std::ops::ControlFlow;
+    /// One `WITH` clause: its names become visible one by one (all at once when RECURSIVE).
+    struct Frame {
+        owner: *const Query,
+        recursive: bool,
+        names: Vec<String>,
+        bodies: Vec<*const Query>,
+        visible: usize,
+    }
+    #[derive(Default)]
+    struct Collector {
+        driver_folds: bool,
+        frames: Vec<Frame>,
+        /// The `name` nodes of table-valued functions, so only those exact nodes are skipped.
+        function_names: Vec<*const ObjectName>,
+        functions: Vec<String>,
+        relations: Vec<ObjectName>,
+        opaque: Vec<String>,
+        unsupported: Vec<String>,
+    }
+    /// Function names as the database resolves them: quotes dropped, lowercased.
+    fn function_key(n: &ObjectName) -> String {
+        n.0.iter()
+            .map(|i| i.value.to_lowercase())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+    impl Collector {
+        /// Every body kind is named so a sqlparser upgrade that adds one fails to compile here
+        /// instead of slipping past the scope check. Set-operation arms are bodies too, not queries.
+        fn check_body(&mut self, body: &SetExpr) {
+            match body {
+                SetExpr::Select(_) | SetExpr::Query(_) | SetExpr::Values(_) => {}
+                SetExpr::Insert(_) | SetExpr::Update(_) => {}
+                SetExpr::SetOperation { left, right, .. } => {
+                    self.check_body(left);
+                    self.check_body(right);
+                }
+                // `TABLE x`: the parser keeps only the raw words, so quoting (and thus case folding)
+                // is lost and the name cannot be matched against the catalog reliably.
+                SetExpr::Table(_) => self.unsupported.push("TABLE statements".into()),
+            }
+        }
+        fn norm(&self, i: &Ident) -> String {
+            if i.quote_style.is_none() && self.driver_folds {
+                i.value.to_lowercase()
+            } else {
+                i.value.clone()
+            }
+        }
+    }
+    impl Visitor for Collector {
+        type Break = ();
+        fn pre_visit_query(&mut self, q: &Query) -> ControlFlow<()> {
+            self.check_body(&q.body);
+            // Entering CTE body i of a non-recursive WITH: only earlier CTEs are visible.
+            if let Some(f) = self.frames.last_mut()
+                && !f.recursive
+                && let Some(i) = f.bodies.iter().position(|b| std::ptr::eq(*b, q))
+            {
+                f.visible = i;
+            }
+            if let Some(w) = &q.with {
+                let names: Vec<String> = w
+                    .cte_tables
+                    .iter()
+                    .map(|c| self.norm(&c.alias.name))
+                    .collect();
+                self.frames.push(Frame {
+                    owner: q,
+                    recursive: w.recursive,
+                    visible: if w.recursive { names.len() } else { 0 },
+                    bodies: w
+                        .cte_tables
+                        .iter()
+                        .map(|c| &*c.query as *const Query)
+                        .collect(),
+                    names,
+                });
+            }
+            ControlFlow::Continue(())
+        }
+        fn post_visit_query(&mut self, q: &Query) -> ControlFlow<()> {
+            if self.frames.last().is_some_and(|f| std::ptr::eq(f.owner, q)) {
+                self.frames.pop();
+            }
+            if let Some(f) = self.frames.last_mut()
+                && !f.recursive
+                && let Some(i) = f.bodies.iter().position(|b| std::ptr::eq(*b, q))
+            {
+                f.visible = i + 1;
+            }
+            ControlFlow::Continue(())
+        }
+        fn pre_visit_table_factor(&mut self, tf: &TableFactor) -> ControlFlow<()> {
+            match tf {
+                // `FROM fn(...)`: the name is visited as a relation, so remember the node to skip it.
+                TableFactor::Table {
+                    name,
+                    args: Some(_),
+                    ..
+                } => {
+                    self.function_names.push(name);
+                    self.functions.push(function_key(name));
+                }
+                // `LATERAL fn(...)`: a distinct factor whose name is not visited as a relation.
+                TableFactor::Function { name, .. } => self.functions.push(function_key(name)),
+                TableFactor::Table { .. }
+                | TableFactor::Derived { .. }
+                | TableFactor::NestedJoin { .. }
+                | TableFactor::UNNEST { .. } => {}
+                TableFactor::TableFunction { .. } => self.unsupported.push("TABLE(...)".into()),
+                TableFactor::JsonTable { .. } => self.unsupported.push("JSON_TABLE".into()),
+                TableFactor::OpenJsonTable { .. } => self.unsupported.push("OPENJSON".into()),
+                TableFactor::Pivot { .. } => self.unsupported.push("PIVOT".into()),
+                TableFactor::Unpivot { .. } => self.unsupported.push("UNPIVOT".into()),
+                TableFactor::MatchRecognize { .. } => {
+                    self.unsupported.push("MATCH_RECOGNIZE".into())
+                }
+            }
+            ControlFlow::Continue(())
+        }
+        fn pre_visit_statement(&mut self, st: &Statement) -> ControlFlow<()> {
+            if !matches!(
+                st,
+                Statement::Query(_)
+                    | Statement::Insert(_)
+                    | Statement::Update { .. }
+                    | Statement::Delete(_)
+                    | Statement::Explain { .. }
+            ) {
+                let text = st.to_string();
+                let head: Vec<&str> = text.split_whitespace().take(2).collect();
+                self.opaque.push(head.join(" "));
+            }
+            ControlFlow::Continue(())
+        }
+        fn pre_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
+            if let Expr::Function(f) = e {
+                self.functions.push(function_key(&f.name));
+            }
+            ControlFlow::Continue(())
+        }
+        fn pre_visit_relation(&mut self, r: &ObjectName) -> ControlFlow<()> {
+            let is_cte = r.0.len() == 1
+                && self.frames.iter().any(|f| {
+                    let n = self.norm(&r.0[0]);
+                    f.names[..f.visible].contains(&n)
+                });
+            let is_function = self.function_names.iter().any(|n| std::ptr::eq(*n, r));
+            if !is_cte && !is_function {
+                self.relations.push(r.clone());
+            }
+            ControlFlow::Continue(())
+        }
+    }
+    let stmts = sqlparser::parser::Parser::parse_sql(&*dialect(driver), sql).ok()?;
+    let mut c = Collector {
+        driver_folds: driver == Driver::Postgres,
+        ..Default::default()
+    };
+    let _ = stmts.visit(&mut c);
+    Some(SqlRefs {
+        tables: c
+            .relations
+            .iter()
+            .map(|r| {
+                let mut parts: Vec<String> = r.0.iter().map(|i| c.norm(i)).collect();
+                let table = parts.pop().unwrap_or_default();
+                (parts.pop(), table)
+            })
+            .collect(),
+        functions: c.functions,
+        opaque: c.opaque,
+        unsupported: c.unsupported,
+    })
 }
 
 fn first_word(sql: &str) -> String {
@@ -1277,6 +1896,129 @@ fn first_word(sql: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn filter_allows_comment_markers_inside_literals() {
+        let pg = |f| SqlConn::validate_filter_for(Driver::Postgres, Some(f));
+        let my = |f| SqlConn::validate_filter_for(Driver::Mysql, Some(f));
+        assert!(pg("\"code\" = 'a--b' AND \"x\" = 'it''s /* ok */'").is_ok());
+        // Backslash escapes only exist in MySQL dialects; on Postgres `'a\'` is a closed literal + comment.
+        assert!(my("\"x\" = 'a\\' -- '").is_ok());
+        assert!(pg("\"x\" = 'a\\' -- '").is_err());
+        // Semicolons inside literals never split, whatever the splitter thinks of the backslash.
+        assert!(pg("\"x\" = 'a\\'';b'").is_ok());
+        assert!(my("\"x\" = 'a\\';b'").is_ok());
+        assert!(pg("\"x\" = 'a'; delete from t").is_err());
+        // Postgres escape strings do use backslashes: E'\'' is one quote, not a closed literal.
+        assert!(pg("\"x\" = E'a\\'b'").is_ok());
+        assert!(pg("\"x\" = E'\\'' ; delete from t; --'").is_err());
+        assert!(pg("\"x\" = e'\\'' ; delete from t; --'").is_err());
+        assert!(pg("\"some\" = 'E'; delete from t").is_err()); // a literal E is not a prefix
+        assert!(pg("\"id\" = 1 -- drop").is_err());
+        assert!(pg("\"id\" = 1 /* c */").is_err());
+        assert!(pg("\"id\" = 1; delete from t").is_err());
+    }
+
+    #[test]
+    fn classifies_writes_for_confirmation() {
+        let w = |k: &str, t: Option<&str>| WriteInfo {
+            kind: k.into(),
+            table: t.map(String::from),
+        };
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "select 1; update public.users set a = 1; delete from t where id = 2; \
+                 insert into \"Order\" values (1); drop table x; truncate t2; alter table t3 add c int; \
+                 create table n (id int)"
+            ),
+            vec![
+                w("UPDATE", Some("public.users")),
+                w("DELETE", Some("t")),
+                w("INSERT", Some("\"Order\"")),
+                w("DROP TABLE", Some("x")),
+                w("TRUNCATE", Some("t2")),
+                w("ALTER TABLE", Some("t3")),
+                w("CREATE TABLE", Some("n")),
+            ]
+        );
+        assert!(classify_writes(Driver::Mysql, "SHOW TABLES; select * from t").is_empty());
+        // writes hidden inside queries / explain
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "select 1 into new_t from t; explain analyze update u set a = 1; \
+                 with x as (select 1) insert into t select * from x"
+            ),
+            vec![
+                w("SELECT INTO", Some("new_t")),
+                w("EXPLAIN ANALYZE UPDATE", Some("u")),
+                w("INSERT", Some("t")),
+            ]
+        );
+        // unparseable script: statements are retried one by one, the bad one fails closed
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "select 1; select 1 into new_t from t; select '"
+            ),
+            vec![
+                w("SELECT INTO", Some("new_t")),
+                w("SELECT (could not parse)", None)
+            ]
+        );
+        // several modifying CTEs are all listed; MySQL multi-table delete names its explicit targets
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "with a as (insert into t1 values (1) returning *), b as (update t2 set x = 1 returning *) select 1"
+            ),
+            vec![w("INSERT", Some("t1")), w("UPDATE", Some("t2"))]
+        );
+        assert_eq!(
+            classify_writes(
+                Driver::Mysql,
+                "delete orders from users join orders on orders.user_id = users.id"
+            ),
+            vec![w("DELETE", Some("orders"))]
+        );
+        // every DROP target; Postgres option-style EXPLAIN (ANALYZE); SELECT INTO inside a UNION arm
+        assert_eq!(
+            classify_writes(
+                Driver::Postgres,
+                "drop table a, b; explain (analyze, buffers) delete from users; explain (costs) delete from users; \
+                 select * into bak from users union select * from old"
+            ),
+            vec![
+                w("DROP TABLE", Some("a, b")),
+                w("EXPLAIN ANALYZE DELETE", Some("users")),
+                w("SELECT INTO", Some("bak")),
+            ]
+        );
+        // classifier and executor split on the same boundaries: a write hidden by a nested comment or a
+        // mid-line `#` is still seen; MySQL executable comments fail closed
+        assert!(
+            !classify_writes(
+                Driver::Postgres,
+                "/* /* */ ; drop table users; /* */ */ select 1"
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            classify_writes(Driver::Mysql, "select 1 # ; drop table users"),
+            vec![w("DROP TABLE", Some("users"))]
+        );
+        assert_eq!(
+            classify_writes(Driver::Mysql, "/*!50000 drop table users */"),
+            vec![w("EXECUTABLE COMMENT", None)]
+        );
+        assert!(classify_writes(Driver::Mysql, "-- just a comment").is_empty());
+        assert!(is_read_only(Driver::Mysql, "SHOW TABLES"));
+        assert!(!is_read_only(
+            Driver::Postgres,
+            "explain (analyze) delete from t"
+        ));
+    }
+
     #[test]
     fn splits_and_classifies() {
         let parts = split_statements(
@@ -1307,8 +2049,173 @@ mod tests {
             Driver::Postgres,
             "WITH x AS (select 1) FROBNICATE"
         ));
-        assert!(SqlConn::validate_filter(Some("id = 1")).is_ok());
-        assert!(SqlConn::validate_filter(Some("0; DELETE FROM t; --")).is_err());
-        assert!(SqlConn::validate_filter(Some("name = 'a;b'")).is_ok());
+        assert!(SqlConn::validate_filter_for(Driver::Postgres, Some("id = 1")).is_ok());
+        assert!(
+            SqlConn::validate_filter_for(Driver::Postgres, Some("0; DELETE FROM t; --")).is_err()
+        );
+        assert!(SqlConn::validate_filter_for(Driver::Postgres, Some("name = 'a;b'")).is_ok());
+    }
+
+    #[test]
+    fn limit_and_scope_helpers() {
+        let pg = Driver::Postgres;
+        assert_eq!(
+            with_limit(pg, "select * from t -- note", 50),
+            "select * from t -- note\nLIMIT 50"
+        );
+        assert_eq!(
+            with_limit(pg, "with x as (select 1) select * from x;", 5),
+            "with x as (select 1) select * from x\nLIMIT 5"
+        );
+        for untouched in [
+            "select * from t limit 10",
+            "select * from t offset 5",
+            "select * from t for update",
+            "delete from t",
+            "select * from t where",
+            "select * into t2 from t",
+        ] {
+            assert_eq!(with_limit(pg, untouched, 7), untouched, "{untouched}");
+        }
+        assert_eq!(
+            with_limit(Driver::Mysql, "select * from `t`", 3),
+            "select * from `t`\nLIMIT 3"
+        );
+
+        let t = |sql: &str| referenced_tables(pg, sql).unwrap().tables;
+        assert_eq!(
+            t("select a.id from public.users a join orders o on o.uid = a.id"),
+            vec![
+                (Some("public".into()), "users".into()),
+                (None, "orders".into())
+            ]
+        );
+        assert_eq!(
+            t("with recent as (select * from events) select * from recent, generate_series(1, 3)"),
+            vec![(None, "events".into())]
+        );
+        assert_eq!(
+            t("insert into audit.log (a) select a from src"),
+            vec![(Some("audit".into()), "log".into()), (None, "src".into())]
+        );
+        assert_eq!(t("select 1"), Vec::<(Option<String>, String)>::new());
+        assert!(referenced_tables(pg, "select * from").is_none());
+        // CTE names only shadow where they are visible.
+        assert_eq!(
+            t("with secret as (select 1) select * from secret; select * from secret"),
+            vec![(None, "secret".into())]
+        );
+        assert_eq!(
+            t("with a as (select * from a), b as (select * from a) select * from b"),
+            vec![(None, "a".into())]
+        );
+        assert_eq!(
+            t("with recursive a as (select 1 union select * from a) select * from a"),
+            Vec::<(Option<String>, String)>::new()
+        );
+        assert_eq!(
+            t("select * from (with x as (select 1) select * from x) y, x"),
+            vec![(None, "x".into())]
+        );
+        // Identifier folding follows the dialect.
+        assert_eq!(
+            t(r#"select * from Public."Users", users"#),
+            vec![
+                (Some("public".into()), "Users".into()),
+                (None, "users".into())
+            ]
+        );
+        assert_eq!(
+            referenced_tables(Driver::Mysql, "select * from App.Users")
+                .unwrap()
+                .tables,
+            vec![(Some("App".into()), "Users".into())]
+        );
+        // Table functions are skipped only at their own node; calls are reported.
+        assert_eq!(
+            t("select * from generate_series(1, 1); select * from generate_series"),
+            vec![(None, "generate_series".into())]
+        );
+        assert_eq!(
+            referenced_tables(
+                pg,
+                "select query_to_xml('select 1', true, false, ''), Upper(x) from t"
+            )
+            .unwrap()
+            .functions,
+            vec!["query_to_xml", "upper"]
+        );
+        assert_eq!(
+            referenced_tables(pg, r#"select "query_to_xml"('select 1', true, false, '')"#)
+                .unwrap()
+                .functions,
+            vec!["query_to_xml"]
+        );
+        assert_eq!(
+            referenced_tables(Driver::Sqlite, "select * from pragma_table_info('t')")
+                .unwrap()
+                .functions,
+            vec!["pragma_table_info"]
+        );
+        // Statements the visitor cannot see into are reported so scoped runs can refuse them.
+        let r = referenced_tables(Driver::Mysql, "show create table x.t; show tables").unwrap();
+        assert!(r.tables.is_empty());
+        assert_eq!(r.opaque, vec!["SHOW CREATE", "SHOW TABLES"]);
+        assert!(
+            referenced_tables(pg, "explain select * from t")
+                .unwrap()
+                .opaque
+                .is_empty()
+        );
+    }
+
+    /// Every way a scoped agent could reach a table the parsed table list does not show.
+    #[test]
+    fn scope_fails_closed() {
+        let pg = Driver::Postgres;
+        let r = |sql: &str| {
+            referenced_tables(pg, sql).unwrap_or_else(|| panic!("did not parse: {sql}"))
+        };
+        // `TABLE x` is a query body without a FROM (reachable in CTEs, subqueries and set operations);
+        // the parser drops identifier quoting, so it is refused rather than matched.
+        assert!(referenced_tables(pg, "TABLE other.secrets").is_none());
+        for sql in [
+            "with x as (table other.secrets) select * from x",
+            "select * from (table other.secrets) t",
+            "select 1 union all table other.secrets",
+        ] {
+            let refs = r(sql);
+            assert_eq!(refs.unsupported, vec!["TABLE statements"], "{sql}");
+            assert!(refs.tables.is_empty(), "{sql}");
+        }
+        // LATERAL function calls are a distinct table factor and must hit the function blocklist.
+        assert_eq!(
+            r("select * from lateral pg_read_file('/etc/passwd') f").functions,
+            vec!["pg_read_file"]
+        );
+        let lat = r("select * from t, lateral jsonb_each(t.doc) x");
+        assert_eq!(lat.tables, vec![(None, "t".into())]);
+        assert_eq!(lat.functions, vec!["jsonb_each"]);
+        assert!(lat.unsupported.is_empty());
+        // search_path changes are either opaque statements or a flagged function call.
+        assert_eq!(
+            r("SET search_path TO other").opaque,
+            vec!["SET search_path"]
+        );
+        assert_eq!(
+            r("select set_config('search_path', 'other', false)").functions,
+            vec!["set_config"]
+        );
+        // Table factors the collector does not understand are reported, not passed.
+        assert_eq!(
+            r("select * from t pivot (sum(x) for y in ('a'))").unsupported,
+            vec!["PIVOT"]
+        );
+        // The everyday shapes stay clean.
+        assert!(
+            r("select * from (select 1) d, unnest(array[1]) u, (t join s on t.id = s.id)")
+                .unsupported
+                .is_empty()
+        );
     }
 }

@@ -2,7 +2,7 @@
  * In-page fake of the Tauri IPC surface for visual QA in a plain browser (`?mock=1`, dev only).
  * No network, no backend: every command answers from the sample data below.
  */
-import type { ChatSession, ConnectionConfig, QueryResult, Settings, TableInfo } from "./types";
+import type { ChatSession, ConnectionConfig, QueryResult, ScopeEntry, Settings, TableInfo } from "./types";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -13,6 +13,7 @@ const connections: ConnectionConfig[] = [
     driver: "postgres",
     color: "#3b6cf6",
     group: "Local",
+    environment: "production",
     host: "127.0.0.1",
     port: 5433,
     user: "gotfound",
@@ -40,6 +41,7 @@ const connections: ConnectionConfig[] = [
     driver: "mongodb",
     color: "#1f8f5a",
     group: "Staging",
+    environment: "staging",
     host: "10.0.0.4",
     port: 27017,
     user: "app",
@@ -67,8 +69,8 @@ const tables: TableInfo[] = [
 ].map(([name, n]) => ({ schema: "public", name: String(name), kind: "table", row_estimate: Number(n) }));
 tables.push({ schema: "public", name: "v_recent_claims", kind: "view", row_estimate: null });
 
-const columns = ["id", "name", "email", "status", "score", "tags", "createdAt", "meta"];
-const types = ["uuid", "text", "text", "text", "numeric", "text[]", "timestamptz", "jsonb"];
+const columns = ["id", "name", "email", "status", "score", "tags", "createdAt", "meta", "personId"];
+const types = ["uuid", "text", "text", "text", "numeric", "text[]", "timestamptz", "jsonb", "uuid"];
 const names = [
   "Ada Lovelace",
   "Grace Hopper",
@@ -92,6 +94,9 @@ function rows(n: number) {
       .replace("T", " ")
       .replace("Z", "+00"),
     { source: ["import", "api", "manual"][i % 3], attempts: i % 7 },
+    i % 9 === 0
+      ? null
+      : `8c2d${(2000 + (i % 40)).toString(16)}-1b3e-4c5d-8e9f-${(200000000000 + (i % 40) * 104729).toString().slice(0, 12)}`,
   ]);
 }
 const result = (n: number, stmt = 'SELECT * FROM "Candidate"'): QueryResult => ({
@@ -270,6 +275,25 @@ const handlers: Record<string, Handler> = {
   list_schemas: () => ["public", "audit"],
   list_tables: (a) =>
     a.schema === "public" ? tables : [{ schema: "audit", name: "events", kind: "table", row_estimate: 99120 }],
+  schema_catalog: (a) =>
+    a.schema === "public"
+      ? {
+          columns: tables.flatMap((t) =>
+            columns
+              .map((c, i) => ({ table: t.name, name: c, data_type: types[i] }))
+              .concat(t.name === "Claim" ? [{ table: t.name, name: "candidateId", data_type: "uuid" }] : []),
+          ),
+          foreign_keys: [
+            {
+              table: "Claim",
+              columns: ["candidateId"],
+              ref_schema: "public",
+              ref_table: "Candidate",
+              ref_columns: ["id"],
+            },
+          ],
+        }
+      : { columns: [], foreign_keys: [] },
   table_details: () => ({
     columns: columns.map((c, i) => ({
       name: c,
@@ -302,6 +326,64 @@ const handlers: Record<string, Handler> = {
     ],
     ddl: 'CREATE TABLE "public"."Candidate" (\n  "id" uuid NOT NULL DEFAULT gen_random_uuid(),\n  "name" text NOT NULL,\n  "email" text,\n  "status" text,\n  "score" numeric,\n  "tags" text[],\n  "createdAt" timestamptz DEFAULT now(),\n  "meta" jsonb,\n  PRIMARY KEY ("id")\n);',
   }),
+  schema_objects: (a) => {
+    // A small graph so the ER diagram has something to lay out.
+    const fks: Record<string, [string, string][]> = {
+      Candidate: [["personId", "Person"]],
+      Claim: [
+        ["candidateId", "Candidate"],
+        ["tenantId", "Tenant"],
+      ],
+      Mention: [
+        ["personId", "Person"],
+        ["searchId", "Search"],
+      ],
+      Search: [["tenantId", "Tenant"]],
+      FaceObservation: [["personId", "Person"]],
+      NameCandidate: [["candidateId", "Candidate"]],
+      EngineHit: [["searchId", "Search"]],
+      ChatMessage: [["tenantId", "Tenant"]],
+      ApiClient: [["tenantId", "Tenant"]],
+    };
+    const col = (name: string, data_type: string, is_primary = false, position = 1) => ({
+      name,
+      data_type,
+      nullable: !is_primary,
+      default: null,
+      is_primary,
+      position,
+      comment: null,
+      extra: null,
+    });
+    return (a.schema === "public" ? tables : [{ schema: "audit", name: "events", kind: "table", row_estimate: 1 }]).map(
+      (t) => {
+        const refs = fks[t.name] ?? [];
+        const columns = [
+          col("id", "uuid", true, 1),
+          col("name", "text", false, 2),
+          ...refs.map(([c], i) => col(c, "uuid", false, 3 + i)),
+          col("createdAt", "timestamptz", false, 3 + refs.length),
+        ];
+        const ddl = `CREATE TABLE "${t.schema}"."${t.name}" (\n${columns.map((c) => `  "${c.name}" ${c.data_type}`).join(",\n")}\n);`;
+        return {
+          table: t,
+          details: {
+            columns,
+            indexes: [{ name: `${t.name}_pkey`, columns: ["id"], unique: true, primary: true, definition: null }],
+            foreign_keys: refs.map(([c, ref]) => ({
+              name: `${t.name}_${c}_fkey`,
+              columns: [c],
+              ref_schema: t.schema,
+              ref_table: ref,
+              ref_columns: ["id"],
+            })),
+            ddl,
+          },
+        };
+      },
+    );
+  },
+  save_file: () => null,
   fetch_table: (a) => ({
     result: result((a.query as { limit: number }).limit),
     total: null,
@@ -309,6 +391,12 @@ const handlers: Record<string, Handler> = {
   }),
   count_table: () => 300,
   run_query: (a) => [result(120, String(a.sqlText))],
+  classify_sql: (a) =>
+    String(a.sqlText)
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s && !/^(select|show|explain|with)\b/i.test(s))
+      .map((s) => ({ kind: s.split(/\s+/)[0].toUpperCase(), table: null })),
   explain_query: () => ({
     columns: [{ name: "QUERY PLAN", type_name: "text" }],
     rows: [
@@ -380,6 +468,7 @@ const handlers: Record<string, Handler> = {
   }),
   get_settings: () => settings,
   save_settings: () => null,
+  system_theme: () => null,
   set_provider_key: () => null,
   has_provider_key: () => false,
   detect_clis: () => ({ claude: "/home/you/.local/bin/claude", codex: "/home/you/.local/bin/codex" }),
@@ -413,6 +502,14 @@ const handlers: Record<string, Handler> = {
           ]
         : [],
   kv_set: () => null,
+  read_text_file: () => "select 1;\n",
+  write_text_file: () => null,
+  history_add: () => null,
+  set_agent_scope: (a) => {
+    const c = connections.find((x) => x.id === a.id);
+    if (c) c.agent_scope = (a.scope as ScopeEntry[] | null) ?? null;
+    return null;
+  },
   ai_list_sessions: () => [{ ...session, messages: [] }],
   ai_get_session: () => session,
   ai_create_session: () => ({ ...session, id: "s2", title: "New chat", messages: [] }),

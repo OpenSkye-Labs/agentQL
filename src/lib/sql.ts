@@ -1,5 +1,5 @@
-/** Find the `;`-delimited statement containing `pos` (ignores quotes/comments reasonably). */
-export function statementAt(doc: string, pos: number): string {
+/** Offsets of `;`-delimited statement boundaries in `doc` (ignores quotes, dollar quotes and comments). */
+export function statementBounds(doc: string): number[] {
   const bounds: number[] = [0];
   let i = 0;
   let quote: string | null = null;
@@ -9,7 +9,13 @@ export function statementAt(doc: string, pos: number): string {
       if (c === quote) quote = null;
       else if (c === "\\") i++;
     } else if (c === "'" || c === '"' || c === "`") quote = c;
-    else if (c === "-" && doc[i + 1] === "-") {
+    else if (c === "$") {
+      // Postgres dollar quoting: $$ … $$ or $tag$ … $tag$ (same rule as the backend splitter)
+      const m = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(doc.slice(i));
+      // No closing tag (e.g. MySQL `$$` identifier): treat `$` as an ordinary character, like the backend.
+      const end = m ? doc.indexOf(m[0], i + m[0].length) : -1;
+      if (m && end !== -1) i = end + m[0].length - 1;
+    } else if (c === "-" && doc[i + 1] === "-") {
       while (i < doc.length && doc[i] !== "\n") i++;
     } else if (c === "/" && doc[i + 1] === "*") {
       const end = doc.indexOf("*/", i + 2);
@@ -18,6 +24,20 @@ export function statementAt(doc: string, pos: number): string {
     i++;
   }
   bounds.push(doc.length);
+  return bounds;
+}
+
+/** Start offset of the statement containing `pos`. */
+export function statementStart(doc: string, pos: number): number {
+  const bounds = statementBounds(doc);
+  let start = 0;
+  for (const b of bounds.slice(0, -1)) if (b <= pos) start = b; // last entry is the doc-end sentinel
+  return start;
+}
+
+/** Find the `;`-delimited statement containing `pos`. */
+export function statementAt(doc: string, pos: number): string {
+  const bounds = statementBounds(doc);
   for (let b = 0; b < bounds.length - 1; b++) {
     const start = bounds[b];
     const end = bounds[b + 1];
@@ -33,4 +53,52 @@ export function statementAt(doc: string, pos: number): string {
     }
   }
   return doc.trim();
+}
+
+/** Driver id as stored on the connection (`Driver` from types.ts); unknown values quote like Postgres. */
+export type QuoteDriver = string;
+
+/** Quote an identifier the way the driver expects (mirrors `SqlConn::quote_ident`). */
+export function quoteIdent(driver: QuoteDriver, name: string): string {
+  return driver === "mysql" || driver === "mariadb"
+    ? `\`${name.replace(/`/g, "``")}\``
+    : `"${name.replace(/"/g, '""')}"`;
+}
+
+/** Render a grid cell as a SQL literal for a WHERE clause (strings, numbers, booleans; others as text). */
+export function sqlLiteral(driver: QuoteDriver, v: unknown): string {
+  if (v === null || v === undefined) return "NULL";
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : `'${v}'`;
+  if (typeof v === "boolean") return driver === "sqlite" ? (v ? "1" : "0") : v ? "TRUE" : "FALSE";
+  if (typeof v === "object" && "$bytes" in v && typeof v.$bytes === "string") {
+    const b64 = v.$bytes.replace(/[^A-Za-z0-9+/=]/g, "");
+    if (driver === "postgres") return `decode('${b64}', 'base64')`;
+    if (driver === "mysql" || driver === "mariadb") return `FROM_BASE64('${b64}')`;
+    const hex = Array.from(atob(b64), (ch) => ch.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+    return `X'${hex}'`;
+  }
+  // ponytail: arrays/objects compare as their JSON text; Postgres array keys would need `'{…}'` syntax.
+  const s = typeof v === "string" ? v : JSON.stringify(v);
+  let esc = s.replace(/'/g, "''");
+  if (driver === "mysql" || driver === "mariadb") esc = esc.replace(/\\/g, "\\\\");
+  return `'${esc}'`;
+}
+
+/** `"a" = 1 AND "b" = 'x'` for an FK jump; null when any key part is NULL (no row can match). */
+export function keyFilter(driver: QuoteDriver, key: Record<string, unknown>): string | null {
+  const parts = Object.entries(key);
+  if (parts.length === 0 || parts.some(([, v]) => v === null || v === undefined)) return null;
+  return parts.map(([c, v]) => `${quoteIdent(driver, c)} = ${sqlLiteral(driver, v)}`).join(" AND ");
+}
+
+/** Number of non-empty statements in `doc`. */
+// ponytail: comments-only chunks count as statements; fine for a "run all N?" prompt, use a lexer if it misleads.
+export function countStatements(doc: string): number {
+  const bounds = statementBounds(doc);
+  return bounds.slice(0, -1).filter((start, b) =>
+    doc
+      .slice(start, bounds[b + 1])
+      .replace(/;/g, "")
+      .trim(),
+  ).length;
 }

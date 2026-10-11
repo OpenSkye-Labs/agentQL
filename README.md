@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo.svg">
+    <img src="assets/brand/logo-dark.svg" alt="AgentQL" width="420">
+  </picture>
+</p>
+
 # AgentQL
 
 [![CI](https://github.com/OpenSkye-Labs/agentQL/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/OpenSkye-Labs/agentQL/actions/workflows/ci.yml)

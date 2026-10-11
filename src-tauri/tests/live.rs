@@ -28,6 +28,9 @@ fn cfg(driver: Driver, port: u16, user: &str, database: &str) -> ConnectionConfi
         ssl_key_path: None,
         ssh: None,
         read_only: false,
+        environment: None,
+        agent_scope: None,
+        agent_remote_consent_at: None,
         options: HashMap::new(),
         created_at: None,
         updated_at: None,
@@ -325,4 +328,57 @@ async fn mongo() {
     mg.run_command("demo", &json!({"drop": "smoke"}))
         .await
         .unwrap();
+}
+
+/// Needs no container: SQLite resolves `REFERENCES parent` (no column list) to the parent's primary key
+/// in both `table_details` and the schema-wide catalog used by editor completion.
+#[tokio::test]
+async fn sqlite_catalog_implicit_fk_target() {
+    // Unique file per run so parallel or repeated runs never share (or race on) one database.
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "agentql-catalog-{}-{nonce}.sqlite",
+        std::process::id()
+    ));
+    let mut c = cfg(Driver::Sqlite, 0, "", "");
+    c.id = format!("catalog-{nonce}");
+    c.file_path = Some(path.to_string_lossy().into_owned());
+    let m = Manager::new(std::env::temp_dir().as_path());
+    let sess = m
+        .connect(c.clone(), &ConnectionSecrets::default())
+        .await
+        .unwrap();
+    let Live::Sql(db) = &sess.live else { panic!() };
+    db.run(
+        "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT); \
+         CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER REFERENCES customers, \
+         other_id INTEGER REFERENCES customers(id))",
+        10,
+    )
+    .await
+    .unwrap();
+    let cat = db.schema_catalog("main").await.unwrap();
+    let mut targets: Vec<(String, String)> = cat
+        .foreign_keys
+        .iter()
+        .map(|f| (f.columns.join(","), f.ref_columns.join(",")))
+        .collect();
+    targets.sort();
+    assert_eq!(
+        targets,
+        vec![
+            ("customer_id".to_string(), "id".to_string()),
+            ("other_id".to_string(), "id".to_string())
+        ]
+    );
+    assert_eq!(
+        cat.columns.iter().filter(|c| c.table == "orders").count(),
+        3
+    );
+    drop(sess);
+    m.disconnect(&c.id).await;
+    std::fs::remove_file(&path).expect("remove the test database");
 }

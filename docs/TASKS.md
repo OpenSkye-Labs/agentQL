@@ -58,16 +58,17 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 
 M1 Safety defaults (S)
 
-- [ ] Run-all gets its own shortcut + confirmation when >1 statement
-- [ ] Per-connection environment tag (dev/staging/production), shown in tab bar + status bar
-- [ ] Writes on production connections require a confirmation naming statement kind + table
+- [x] Run-all gets its own shortcut + confirmation when >1 statement
+- [x] Per-connection environment tag (dev/staging/production), shown in tab bar + status bar
+- [x] Writes on production connections require a confirmation naming statement kind + table
+- [ ] Follow-up: production write prompt for Redis commands and Mongo document edits (SQL-only today)
 
 M2 AI trust and audit (M)
 
-- [ ] First-use consent per connection before schema/data goes to a remote provider
-- [ ] Per-connection scope picker (schemas/tables the agent may see)
-- [ ] Agent-executed statements recorded in query history tagged `agent` with session id
-- [ ] `run_sql` appends `LIMIT row_limit` to bare SELECTs
+- [x] First-use consent per connection before schema/data goes to a remote provider
+- [x] Per-connection scope picker (schemas/tables the agent may see)
+- [x] Agent-executed statements recorded in query history tagged `agent` with session id
+- [x] `run_sql` appends `LIMIT row_limit` to bare SELECTs
 
 M3 Data dictionary (M)
 
@@ -78,9 +79,9 @@ M3 Data dictionary (M)
 
 M4 Schema tools (M)
 
-- [ ] Foreign-key click-through in the grid
-- [ ] ER diagram per schema (auto-layout, pan/zoom, export SVG/PNG)
-- [ ] Schema diff between two connections/databases, copy as migration
+- [x] Foreign-key click-through in the grid
+- [x] ER diagram per schema (auto-layout, pan/zoom, export SVG/PNG)
+- [x] Schema diff between two connections/databases, copy as migration
 
 M5 Scale (M)
 
@@ -95,15 +96,15 @@ M6 Connectivity (M)
 
 M7 Editor ergonomics (S–M)
 
-- [ ] Alias-aware completion, JOIN suggestions from FKs, completion checklist in TESTING.md
-- [ ] Vim keymap toggle + shortcut reference dialog
-- [ ] Snippets with placeholders
+- [x] Alias-aware completion, JOIN suggestions from FKs, completion checklist in TESTING.md
+- [x] Vim keymap toggle + shortcut reference dialog
+- [x] Snippets with placeholders
 
 M8 Query versioning and portable profiles (S)
 
-- [ ] Saved query version history
-- [ ] Export/import connection profiles without secrets
-- [ ] Open/save .sql files from the editor
+- [x] Saved query version history
+- [x] Export/import connection profiles without secrets
+- [x] Open/save .sql files from the editor
 
 M9 Linux tier-1 and performance proof (S)
 

@@ -27,10 +27,21 @@ reviews:
         Rust 2024 edition, Tauri 2. Commands return Result<T, AppError>. Flag anything that could execute a
         database write without the in-app approval flow, leak secrets into connections.json or logs, or
         bypass READ ONLY transactions on read-only connections. Prefer the smallest change that works.
+        Also flag: blocking file/keychain/process I/O inside async commands (must use spawn_blocking);
+        writes that can destroy the previous file on failure (require temp-file + rename); config or history
+        files wiped when they fail to parse; SQL handled by substring search instead of the tokenizer
+        (comments and quotes change meaning); result caps that fetch exactly `limit` rows and lose the
+        truncation signal; dialect-specific DDL emitted for the wrong engine (SQLite ADD CONSTRAINT, NOT NULL
+        without default, MySQL GROUP_CONCAT truncation).
     - path: "src/**/*.{ts,tsx}"
       instructions: |
         React 19 + TypeScript, zustand store, Tailwind v4. Flag stale-response races in async effects,
         missing error handling on invoke calls, and accessibility regressions (labels, keyboard access).
+        Also flag: async actions that do not snapshot tab/editor/sequence state and re-check it when the
+        result arrives; side effects inside setState updater functions; success toasts shown before the
+        awaited operation succeeded; native dialog, clipboard and file calls without a rejection branch;
+        destructive actions (clear, restore, overwrite) without confirmation; data serialised for export
+        without going through a dedicated secret-free type.
     - path: ".github/workflows/**"
       instructions: |
         All actions must stay pinned to full commit SHAs with a version comment. Flag any untrusted input

@@ -49,7 +49,31 @@ docs/             PLAN.md, ARCHITECTURE.md, TASKS.md, FEATURES.md, REVIEWS.md
 - Agent tool calls that write go through an in-app approval (`agent_allow_writes` setting + per-call approval).
 - Deliberate simplifications are marked with a `ponytail:` comment naming the ceiling and the upgrade path.
 - Every feature or decision is recorded in `docs/` (TASKS.md board, FEATURES.md log). Keep them current.
-- Code is reviewed with Codex (`codex exec review --uncommitted`); findings and fixes go to `docs/REVIEWS.md`.
+- Code is reviewed with Codex (`codex exec review --uncommitted`); findings and fixes go to a per-PR file under
+  `docs/reviews/` (ADR-0003; `docs/REVIEWS.md` holds the pre-PR history and an index the maintainer updates after merge).
+
+## Engineering rules (distilled from review findings, see docs/adr/)
+
+- **Async results can be stale.** Any effect or store action that awaits (`invoke`, fetch, dialog) must snapshot
+  what it depends on (tab id, editor text, a `seq` counter) and bail if that changed when the result arrives.
+  Never put side effects inside a `setState` updater; persist from an effect after the state commits.
+- **Every failure path does something.** `invoke`, native dialogs, clipboard and file I/O all reject; handle it
+  with a toast or a visible state, and never show a success toast before the operation succeeded.
+- **Never destroy data on a failed write.** Write to a temp file and rename; a config/history file that fails to
+  parse is renamed to `*.corrupt`, not wiped. Confirm before any action that discards pending edits.
+- **Blocking I/O never runs on the tokio runtime.** File, keychain and child-process work in commands goes
+  through `tauri::async_runtime::spawn_blocking` (the keychain hang and the file-save review were both this).
+- **SQL text is parsed, not substring-matched.** Comments and quotes change meaning: `--` or `/*` inside a quoted
+  value is data; a statement ending in a `--` comment cannot be joined with `;\n`; use the tokenizer.
+- **Dialects differ in DDL.** SQLite has no `ADD CONSTRAINT`, `ADD COLUMN ... NOT NULL` needs a default, MySQL
+  `GROUP_CONCAT` truncates at `group_concat_max_len`. Generated SQL is tested per driver.
+- **Limits signal truncation.** When capping results, fetch `limit + 1` so the UI can say "truncated" instead of
+  silently showing a full-looking page.
+- **Secrets are stripped by type, not by field list.** Anything serialised outside the keychain goes through a
+  dedicated public type so a new secret field cannot leak by omission.
+- **Shared logs are append-only and conflict-prone.** Review logs live one file per PR under `docs/reviews/`
+  (ADR-0003); FEATURES.md and TASKS.md entries stay short and are merged, never rewritten. When a log file
+  conflicts on merge, keep both sides; never drop the other branch's entries.
 
 ## Workflow
 

@@ -4,16 +4,22 @@ import type {
   ChatSession,
   ConnectionConfig,
   ConnectionSecrets,
+  Driver,
+  HistoryEntry,
   MongoFind,
   MongoPage,
   QueryResult,
   RowChange,
   ScanResult,
+  SchemaCatalog,
+  ScopeEntry,
+  SchemaObject,
   Settings,
   TableDetails,
   TableInfo,
   TablePage,
   TableQuery,
+  WriteInfo,
 } from "./types";
 
 export interface ConnectResult {
@@ -39,6 +45,7 @@ export const api = {
 
   // sql
   runQuery: (id: string, sqlText: string, limit?: number) => invoke<QueryResult[]>("run_query", { id, sqlText, limit }),
+  classifySql: (driver: Driver, sqlText: string) => invoke<WriteInfo[]>("classify_sql", { driver, sqlText }),
   explainQuery: (id: string, sqlText: string, analyze: boolean) =>
     invoke<QueryResult>("explain_query", { id, sqlText, analyze }),
   listDatabases: (id: string) => invoke<string[]>("list_databases", { id }),
@@ -46,6 +53,7 @@ export const api = {
   listTables: (id: string, schema: string) => invoke<TableInfo[]>("list_tables", { id, schema }),
   tableDetails: (id: string, schema: string, table: string) =>
     invoke<TableDetails>("table_details", { id, schema, table }),
+  schemaCatalog: (id: string, schema: string) => invoke<SchemaCatalog>("schema_catalog", { id, schema }),
   fetchTable: (id: string, query: TableQuery) => invoke<TablePage>("fetch_table", { id, query }),
   countTable: (id: string, query: TableQuery) => invoke<number>("count_table", { id, query }),
   previewChanges: (
@@ -65,6 +73,9 @@ export const api = {
   sshForgetHost: (host: string, port: number) => invoke<void>("ssh_forget_host", { host, port }),
   exportRows: (path: string, format: "csv" | "json" | "sql", columns: string[], rows: Cell[][]) =>
     invoke<number>("export_rows", { path, format, columns, rows }),
+  schemaObjects: (id: string, schema: string) => invoke<SchemaObject[]>("schema_objects", { id, schema }),
+  /** `data` is base64. */
+  saveFile: (path: string, data: string) => invoke<void>("save_file", { path, data }),
 
   // redis
   redisScan: (id: string, cursor: string, pattern: string, count = 200) =>
@@ -100,9 +111,14 @@ export const api = {
   installUpdate: () => invoke<void>("install_update"),
   setProviderKey: (providerId: string, key: string | null) => invoke<void>("set_provider_key", { providerId, key }),
   hasProviderKey: (providerId: string) => invoke<boolean>("has_provider_key", { providerId }),
+  systemTheme: () => invoke<"dark" | "light" | null>("system_theme"),
   detectClis: () => invoke<{ claude: string | null; codex: string | null }>("detect_clis"),
   kvGet: <T>(name: string) => invoke<T | null>("kv_get", { name }),
   kvSet: (name: string, value: unknown) => invoke<void>("kv_set", { name, value }),
+  readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  writeTextFile: (path: string, contents: string) => invoke<void>("write_text_file", { path, contents }),
+  historyAdd: (entry: HistoryEntry) => invoke<void>("history_add", { entry }),
+  setAgentScope: (id: string, scope: ScopeEntry[] | null) => invoke<void>("set_agent_scope", { id, scope }),
 
   // ai
   aiListSessions: (connectionId?: string) => invoke<ChatSession[]>("ai_list_sessions", { connectionId }),
