@@ -1,5 +1,17 @@
 import { clsx } from "clsx";
-import { Bot, Database, FileCode2, LayoutDashboard, Plus, Table2, X, Braces, KeySquare } from "lucide-react";
+import {
+  Bot,
+  Database,
+  FileCode2,
+  GitCompare,
+  LayoutDashboard,
+  Network,
+  Plus,
+  Table2,
+  X,
+  Braces,
+  KeySquare,
+} from "lucide-react";
 import { useStore, type Tab } from "../lib/store";
 import { Tooltip, ContextMenu, EnvBadge } from "./ui";
 import { mod } from "../lib/format";
@@ -11,6 +23,8 @@ const icons: Record<Tab["kind"], React.ReactNode> = {
   dashboard: <LayoutDashboard size={13} />,
   redis: <KeySquare size={13} />,
   mongo: <Braces size={13} />,
+  erd: <Network size={13} />,
+  diff: <GitCompare size={13} />,
   welcome: <Database size={13} />,
 };
 

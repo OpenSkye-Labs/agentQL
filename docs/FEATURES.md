@@ -82,6 +82,8 @@ Append-only record of shipped behaviour. Newest at the bottom.
   edits always go through the SQL preview. The preview and the pending-changes bar say the batch runs in one transaction.
   Known limits: the prompt is SQL-only (Redis/Mongo connections get the badge but no write prompt yet, tracked in TASKS.md),
   and side effects hidden in functions (`SELECT setval(...)`, `pg_terminate_backend`) are invisible to a static classifier.
+- Engineering rules distilled from 39 CodeRabbit findings across PRs #4-#10 added to CLAUDE.md and to `.coderabbit.yaml`
+  path instructions; ADRs started in `docs/adr/` (branching + releases, vector brand assets, per-PR review logs).
 - AI trust and audit (M2): first-use consent card per connection before a remote API provider (Anthropic/OpenAI/compatible
   with a non-localhost base URL) receives any schema or data, stored as `agent_remote_consent_at` on the connection and
   revocable in the connection dialog; CLI providers and localhost base URLs skip it. Per-connection agent scope (`agent_scope`,
@@ -95,3 +97,18 @@ Append-only record of shipped behaviour. Newest at the bottom.
   parser-side collector does not model (PIVOT, JSON_TABLE, ...) are refused while a scope is set, as is `set_config()`.
   On Postgres the resolved schema for unqualified names is pinned at execution with `SET LOCAL search_path` inside the
   statement's transaction (run_sql, explain_sql, charts); on MySQL/SQLite scoped SQL must schema-qualify table names.
+- Foreign-key click-through (M4): in a table tab, cells of FK columns show a jump arrow on hover (and an "Open referenced
+  row in …" context-menu item) that opens the referenced table filtered to that key (`"id" = …`). The filter now lives on
+  the tab, so jumping into an already open table re-targets it; tabs with pending edits ask before discarding them.
+  SQLite FKs declared without a target column list resolve to the parent's primary key.
+- ER diagram (M4): "ER diagram" on a schema's context menu opens a tab that introspects every table (`schema_objects`),
+  lays them out with dagre (left-to-right ranks) and draws them as plain SVG: PK columns highlighted, FK columns marked,
+  edges from the FK column to the referenced table. Wheel zooms around the cursor, drag pans, hovering a table lights up
+  its relations, clicking opens the table tab. Export writes SVG (theme colours inlined) or PNG (2x) via the save dialog.
+- Schema diff (M4): "Schema diff…" on a connection (or "Compare schema…" on a schema) opens a tab with two
+  (connection, schema) pickers over the connected SQL databases. Compare introspects both sides, matches objects by name,
+  lists them as added / removed / changed / unchanged and shows a line diff of the DDL (schema qualification and MySQL
+  AUTO_INCREMENT counters normalised away). "Copy as migration" writes SQL that moves A towards B: CREATE TABLE
+  synthesised from the metadata, drop statements for tables, views and materialized views, ADD / DROP COLUMN, and
+  review comments for type changes, indexes, foreign keys and views. Two databases on one Postgres server need two
+  connections.

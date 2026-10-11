@@ -99,6 +99,13 @@ pub struct TableDetails {
     pub ddl: Option<String>,
 }
 
+/// One table or view with everything we introspect about it (ER diagram, schema diff).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaObject {
+    pub table: TableInfo,
+    pub details: TableDetails,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TableQuery {
     pub schema: Option<String>,

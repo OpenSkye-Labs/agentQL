@@ -22,8 +22,10 @@ import {
   Trash2,
   Upload,
   FileCode2,
+  GitCompare,
   Layers,
   LayoutDashboard,
+  Network,
 } from "lucide-react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useStore, type LiveConn } from "../lib/store";
@@ -32,6 +34,7 @@ import { driverLabel, isSql, type ConnectionConfig, type TableInfo } from "../li
 import { Button, ContextMenu, Menu, Spinner, Tooltip } from "./ui";
 import { fmtCount } from "../lib/format";
 import { exportProfiles, parseProfiles } from "../lib/profiles";
+import { quoteIdent } from "../lib/sql";
 
 type Items = React.ComponentProps<typeof ContextMenu>["items"];
 /** One Radix context menu for the whole tree; rows just publish their items on right-click. */
@@ -252,6 +255,12 @@ function ConnectionNode({
       onSelect: () => askAssistant(`Give me an overview of the ${conn.name} database.`),
     },
     {
+      label: "Schema diff…",
+      icon: <GitCompare size={13} />,
+      disabled: !connected,
+      onSelect: () => openTab({ kind: "diff", connectionId: conn.id, title: "Schema diff" }),
+    },
+    {
       label: "Refresh",
       icon: <RefreshCw size={13} />,
       disabled: !connected,
@@ -442,7 +451,7 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
   const openTab = useStore((s) => s.openTab);
   const askAssistant = useStore((s) => s.askAssistant);
   const f = filter.trim().toLowerCase();
-  const q = (name: string) => (conn.driver === "mysql" || conn.driver === "mariadb" ? `\`${name}\`` : `"${name}"`);
+  const q = (name: string) => quoteIdent(conn.driver, name);
   const qualified = (t: TableInfo) =>
     conn.driver === "sqlite" && t.schema === "main" ? q(t.name) : `${q(t.schema)}.${q(t.name)}`;
 
@@ -462,6 +471,18 @@ function SqlTree({ conn, live, filter }: { conn: ConnectionConfig; live: LiveCon
               meta={tables ? String(tables.length) : undefined}
               expanded={expanded}
               onToggle={() => toggleSchema(conn.id, schema)}
+              menu={[
+                {
+                  label: "ER diagram",
+                  icon: <Network size={13} />,
+                  onSelect: () => openTab({ kind: "erd", connectionId: conn.id, title: `ERD · ${schema}`, schema }),
+                },
+                {
+                  label: "Compare schema…",
+                  icon: <GitCompare size={13} />,
+                  onSelect: () => openTab({ kind: "diff", connectionId: conn.id, title: "Schema diff", schema }),
+                },
+              ]}
             />
             {expanded && (
               <div role="group">
