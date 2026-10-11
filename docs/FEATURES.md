@@ -108,3 +108,4 @@ Append-only record of shipped behaviour. Newest at the bottom.
   synthesised from the metadata, drop statements for tables, views and materialized views, ADD / DROP COLUMN, and
   review comments for type changes, indexes, foreign keys and views. Two databases on one Postgres server need two
   connections.
+- ADR-0003 applied: per-PR review logs under `docs/reviews/`, REVIEWS.md keeps pre-PR history plus an index.
