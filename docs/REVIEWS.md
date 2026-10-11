@@ -224,3 +224,5 @@ Check added.
 | 2   | `SHOW CREATE TABLE` / `SHOW TABLES` carry no visited relation, so a scope let them through      | Statements the visitor cannot see into (SHOW, DESCRIBE, PRAGMA, …) are refused while scoped; test added |
 | 3   | Scope dialog saved the whole stale connection config, could clobber a consent granted meanwhile | Narrow `set_agent_scope` command updates only that field                                                |
 | 4   | `LIMIT limit` capped the database at exactly the client limit, so `truncated` never fired       | `run_sql` pushes `LIMIT limit + 1`; the client row loop still truncates at `limit`                      |
+| 5   | A corrupt `history.json` read as empty, so the next push replaced the whole history             | `push_history` errors when the file exists but does not parse; nothing is overwritten                   |
+| 6   | Mock `set_agent_scope` did not update the in-page connection list                               | Mock handler persists the scope on its connection so a reload shows it                                  |

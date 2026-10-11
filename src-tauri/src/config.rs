@@ -274,7 +274,15 @@ impl Store {
     pub fn push_history(&self, entry: serde_json::Value) -> Result<()> {
         static LOCK: Mutex<()> = Mutex::new(());
         let _g = LOCK.lock().unwrap();
-        let mut list: Vec<serde_json::Value> = self.read("history.json");
+        // A file that exists but does not parse must not be replaced by a one-entry list.
+        let mut list: Vec<serde_json::Value> = match std::fs::read(self.path("history.json")) {
+            Ok(data) => serde_json::from_slice(&data).map_err(|e| {
+                AppError::Msg(format!(
+                    "history.json is not valid JSON ({e}); fix or remove it before new entries can be saved"
+                ))
+            })?,
+            Err(_) => vec![],
+        };
         list.insert(0, entry);
         list.truncate(500);
         self.write("history.json", &list)
