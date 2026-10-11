@@ -65,3 +65,35 @@ least two tables linked by a foreign key (the demo containers above, or `?mock=1
 - MySQL rejects `START TRANSACTION READ ONLY` over the prepared-statement protocol → use `SET TRANSACTION READ ONLY` + `begin()`.
 - RESP2 Redis returns `HGETALL` as a flat array → normalised to an object in `get_key`.
 - SQLite `DECIMAL` has REAL affinity → numbers, not strings (test expectation fixed).
+
+## Performance database (15 GB Postgres)
+
+A local Postgres with real volume for testing grid speed, counts, completion on wide catalogues, ERD layout and
+the agent on a big schema. Needs Docker (on WSL, `DOCKER=docker.exe` talks to Docker Desktop).
+
+```bash
+docker run -d --name agentql-perf-pg -e POSTGRES_PASSWORD=perf -e POSTGRES_DB=perf -p 55433:5432 \
+  -v agentql-perf-pg:/var/lib/postgresql/data --shm-size=1g postgres:16 \
+  -c shared_buffers=1GB -c work_mem=64MB -c maintenance_work_mem=512MB -c max_wal_size=4GB
+until docker exec agentql-perf-pg pg_isready -U postgres >/dev/null 2>&1; do sleep 2; done
+docker exec agentql-perf-pg pgbench -i -s 100 -U postgres perf        # 10 M rows in public.pgbench_accounts, ~2 min
+( mkdir -p ~/datasets/imdb && cd ~/datasets/imdb && \
+  for f in title.basics title.ratings name.basics title.principals; do curl -sSLO https://datasets.imdbws.com/$f.tsv.gz; done )
+bash scripts/perf/imdb-load.sh                                        # from the repo root; ~6 min load + indexes/FKs
+docker exec -i agentql-perf-pg psql -U postgres -d perf < scripts/perf/imdb-verify.sql
+```
+
+The loader **drops and recreates the `imdb` schema** on every run, including anything you added to it.
+
+Connection: Postgres · 127.0.0.1 · 55433 · postgres / perf · database `perf`. Sizes after load (2026-10-11):
+`imdb.title_principals` 102 M rows, `imdb.name_basics` 15.7 M, `imdb.title_basics` 12.9 M, `title_ratings` 1.7 M,
+`public.pgbench_accounts` 10 M; 15 GB on disk. Foreign keys are `NOT VALID` (the public dump has dangling refs).
+
+Things worth timing in the app, cold then warm:
+
+- Open `imdb.title_principals` as a table tab (first page + the deferred `COUNT(*)` estimate).
+- Sort that tab by `nconst`, then filter `category = 'director'`.
+- ERD of the `imdb` schema and of `public`; schema diff `imdb` → `public`.
+- Completion after `p.` in `SELECT p. FROM imdb.title_principals p JOIN imdb.name_basics n ON n.nconst = p.nconst`.
+- Export 1 M rows of `pgbench_accounts` to CSV (memory stays flat?).
+- Ask the agent: "Which directors have the most titles rated above 8 with at least 10k votes?"
