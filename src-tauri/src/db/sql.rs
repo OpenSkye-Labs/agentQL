@@ -453,13 +453,15 @@ impl SqlConn {
         let Some(f) = filter.map(str::trim).filter(|f| !f.is_empty()) else {
             return Ok(());
         };
-        let parts = split_statements(f);
-        // Comment markers only count outside '…' literals (an FK key value may legitimately contain "--").
-        // Only MySQL/MariaDB treat a backslash as an escape inside a literal; on Postgres/SQLite `'a\'` is closed.
+        // Comment markers and statement breaks only count outside '…' literals (an FK key value may
+        // legitimately contain "--" or ";"). Only MySQL/MariaDB treat a backslash as an escape inside a
+        // literal; on Postgres/SQLite `'a\'` is closed. Blanking literals first keeps `split_statements`
+        // (which escapes backslashes for every dialect) from mis-splitting such keys.
         let backslash = matches!(driver, Driver::Mysql | Driver::Mariadb);
         let code = blank_string_literals(f, backslash);
+        let parts = split_statements(&code);
         if parts.len() != 1
-            || parts[0] != f.trim_end_matches(';').trim()
+            || parts[0] != code.trim_end_matches(';').trim()
             || code.contains("--")
             || code.contains("/*")
         {
@@ -1801,6 +1803,10 @@ mod tests {
         // Backslash escapes only exist in MySQL dialects; on Postgres `'a\'` is a closed literal + comment.
         assert!(my("\"x\" = 'a\\' -- '").is_ok());
         assert!(pg("\"x\" = 'a\\' -- '").is_err());
+        // Semicolons inside literals never split, whatever the splitter thinks of the backslash.
+        assert!(pg("\"x\" = 'a\\'';b'").is_ok());
+        assert!(my("\"x\" = 'a\\';b'").is_ok());
+        assert!(pg("\"x\" = 'a'; delete from t").is_err());
         assert!(pg("\"id\" = 1 -- drop").is_err());
         assert!(pg("\"id\" = 1 /* c */").is_err());
         assert!(pg("\"id\" = 1; delete from t").is_err());
