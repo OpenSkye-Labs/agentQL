@@ -281,7 +281,8 @@ impl Store {
                     "history.json is not valid JSON ({e}); fix or remove it before new entries can be saved"
                 ))
             })?,
-            Err(_) => vec![],
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+            Err(e) => return Err(e.into()),
         };
         list.insert(0, entry);
         list.truncate(500);
