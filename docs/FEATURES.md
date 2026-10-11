@@ -113,3 +113,5 @@ Append-only record of shipped behaviour. Newest at the bottom.
   review comments for type changes, indexes, foreign keys and views. Two databases on one Postgres server need two
   connections.
 - ADR-0003 applied: per-PR review logs under `docs/reviews/`, REVIEWS.md keeps pre-PR history plus an index.
+- Codex CLI provider: `exec resume` no longer fails on `--sandbox` (sandbox set via `-c sandbox_mode`), and
+  `approval_policy=never` stops non-interactive Codex from auto-denying the MCP database tools.
