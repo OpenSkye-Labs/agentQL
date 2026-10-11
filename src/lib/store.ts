@@ -12,6 +12,7 @@ import type {
   TableInfo,
 } from "./types";
 import { withVersion } from "./queries";
+import { resolveTheme } from "./themes";
 
 export type Tab =
   | {
@@ -159,7 +160,13 @@ export const useStore = create<State>((set, get) => ({
       history: history ?? [],
       secretStorage,
     });
-    applyTheme(settings.theme ?? "system", settings.editor_font_size ?? null);
+    applyTheme(settings.theme, settings.editor_font_size ?? null);
+    // "Follow system" re-reads the OS preference when the window regains focus.
+    // ponytail: focus polling, subscribe to the XDG portal's SettingChanged if live switching matters.
+    window.addEventListener("focus", () => {
+      const s = get().settings;
+      if (resolveTheme(s.theme) === "system") applyTheme(s.theme, s.editor_font_size ?? null);
+    });
     // Statements the agent runs are appended by the backend; mirror them into the list.
     void listen<HistoryEntry>("history:added", ({ payload }) =>
       set((s) => ({ history: [payload, ...s.history].slice(0, 500) })),
@@ -322,7 +329,7 @@ export const useStore = create<State>((set, get) => ({
   saveSettings: async (settings) => {
     await api.saveSettings(settings);
     set({ settings });
-    applyTheme(settings.theme ?? "system", settings.editor_font_size ?? null);
+    applyTheme(settings.theme, settings.editor_font_size ?? null);
   },
 
   saveDashboard: async (d) => {
@@ -391,10 +398,22 @@ export function emptyLive(id: string): LiveConn {
   return { id, database: "", version: null, schemas: [], tables: {}, catalog: {}, databases: [], expanded: {} };
 }
 
-export function applyTheme(theme: string, fontSize: number | null) {
+let themeSeq = 0;
+/** Sets `data-theme` on <html>. "system" asks the backend for the OS preference (WebKitGTK's media query does
+ *  not see it) and, when unknown or on failure, leaves `data-theme` unset so the CSS media query decides. */
+export function applyTheme(theme: string | null | undefined, fontSize: number | null) {
   const root = document.documentElement;
-  if (theme === "light" || theme === "dark") root.dataset.theme = theme;
-  else delete root.dataset.theme;
+  const id = resolveTheme(theme);
+  const seq = ++themeSeq;
+  if (id !== "system") root.dataset.theme = id;
+  else {
+    const set = (os: string | null) => {
+      if (seq !== themeSeq) return; // the user picked another theme meanwhile
+      if (os) root.dataset.theme = os;
+      else delete root.dataset.theme;
+    };
+    void api.systemTheme().then(set, () => set(null));
+  }
   root.style.setProperty("--editor-font-size", `${fontSize ?? 13}px`);
 }
 

@@ -1,3 +1,5 @@
+import type { ThemeId } from "./themes";
+
 export type Driver = "postgres" | "mysql" | "mariadb" | "sqlite" | "redis" | "mongodb";
 
 export const DRIVERS: { id: Driver; label: string; port: number; sql: boolean }[] = [
@@ -208,7 +210,7 @@ export interface Settings {
   default_provider?: string | null;
   row_limit: number;
   agent_allow_writes: boolean;
-  theme?: "light" | "dark" | "system" | null;
+  theme?: ThemeId | null;
   editor_font_size?: number | null;
   editor_vim?: boolean;
 }

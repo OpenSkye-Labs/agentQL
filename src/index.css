@@ -2,6 +2,18 @@
 
 /* ---- design tokens ---- */
 :root {
+  --radius: 8px;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --editor-font-size: 13px;
+}
+
+/* ---- themes ----
+   One block per theme id in src/lib/themes.ts. Every block defines every token of the light block, and fg/bg
+   plus accent-fg/accent meet WCAG AA: `pnpm check` (src/lib/themes.check.ts) fails otherwise. No data-theme
+   means "Follow system" where the OS preference is only visible to the media query (see applyTheme). */
+:root,
+:root[data-theme="light"] {
   --bg: #f6f7f9;
   --bg-elev: #ffffff;
   --bg-sunken: #eceef2;
@@ -22,38 +34,23 @@
   --null: #7b8290;
   --selection: rgba(59, 108, 246, 0.18);
   --shadow: 0 4px 16px rgba(20, 24, 40, 0.14);
-  --radius: 8px;
-  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
-  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-  --editor-font-size: 13px;
+  --syn-keyword: #a626a4;
+  --syn-string: #50a14f;
+  --syn-number: #986801;
+  --syn-type: #4078f2;
+  /* chart palette (validated categorical order) */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --grid: #e3e5ea;
   color-scheme: light;
 }
-:root[data-theme="dark"],
-:root:not([data-theme="light"]) {
-  @media (prefers-color-scheme: dark) {
-    --bg: #15171c;
-    --bg-elev: #1d2026;
-    --bg-sunken: #101216;
-    --bg-hover: #262a32;
-    --bg-active: #2f343e;
-    --fg: #e6e8ec;
-    --fg-muted: #9aa3b2;
-    --fg-faint: #8b93a3;
-    --border: #2b2f38;
-    --border-strong: #3d424d;
-    --accent: #6c93ff;
-    --accent-fg: #0c1020;
-    --accent-soft: #23304f;
-    --success: #4cc38a;
-    --warning: #e0a94a;
-    --danger: #f2605f;
-    --danger-soft: #3a2224;
-    --null: #7f879a;
-    --selection: rgba(108, 147, 255, 0.25);
-    --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-    color-scheme: dark;
-  }
-}
+/* `dark` and the system fallback below must stay identical (themes.check.ts compares them). */
 :root[data-theme="dark"] {
   --bg: #15171c;
   --bg-elev: #1d2026;
@@ -75,7 +72,59 @@
   --null: #7f879a;
   --selection: rgba(108, 147, 255, 0.25);
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --syn-keyword: #c678dd;
+  --syn-string: #98c379;
+  --syn-number: #d19a66;
+  --syn-type: #61afef;
+  /* dark steps of the chart palette, selected for the dark surface */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --grid: #2b2f38;
   color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #15171c;
+    --bg-elev: #1d2026;
+    --bg-sunken: #101216;
+    --bg-hover: #262a32;
+    --bg-active: #2f343e;
+    --fg: #e6e8ec;
+    --fg-muted: #9aa3b2;
+    --fg-faint: #8b93a3;
+    --border: #2b2f38;
+    --border-strong: #3d424d;
+    --accent: #6c93ff;
+    --accent-fg: #0c1020;
+    --accent-soft: #23304f;
+    --success: #4cc38a;
+    --warning: #e0a94a;
+    --danger: #f2605f;
+    --danger-soft: #3a2224;
+    --null: #7f879a;
+    --selection: rgba(108, 147, 255, 0.25);
+    --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --syn-keyword: #c678dd;
+    --syn-string: #98c379;
+    --syn-number: #d19a66;
+    --syn-type: #61afef;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --grid: #2b2f38;
+    color-scheme: dark;
+  }
 }
 
 @theme inline {
@@ -203,14 +252,14 @@ textarea {
   color: var(--fg) !important;
 }
 .tok-keyword {
-  color: #a626a4;
+  color: var(--syn-keyword);
   font-weight: 600;
 }
 .tok-string {
-  color: #50a14f;
+  color: var(--syn-string);
 }
 .tok-number {
-  color: #986801;
+  color: var(--syn-number);
 }
 .tok-comment {
   color: var(--fg-faint);
@@ -221,23 +270,7 @@ textarea {
 }
 .tok-typeName,
 .tok-propertyName {
-  color: #4078f2;
-}
-:root[data-theme="dark"] .tok-keyword,
-:root:not([data-theme="light"]) .tok-keyword {
-  @media (prefers-color-scheme: dark) {
-    color: #c678dd;
-  }
-}
-:root[data-theme="dark"] .tok-string {
-  color: #98c379;
-}
-:root[data-theme="dark"] .tok-number {
-  color: #d19a66;
-}
-:root[data-theme="dark"] .tok-typeName,
-:root[data-theme="dark"] .tok-propertyName {
-  color: #61afef;
+  color: var(--syn-type);
 }
 
 /* markdown in chat */
@@ -305,43 +338,6 @@ textarea {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
-/* chart palette (validated categorical order; dark steps selected for the dark surface) */
-:root {
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
-  --series-5: #e87ba4;
-  --series-6: #008300;
-  --series-7: #4a3aa7;
-  --series-8: #e34948;
-  --grid: #e3e5ea;
-}
-:root[data-theme="dark"],
-:root:not([data-theme="light"]) {
-  @media (prefers-color-scheme: dark) {
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #008300;
-    --series-7: #9085e9;
-    --series-8: #e66767;
-    --grid: #2b2f38;
-  }
-}
-:root[data-theme="dark"] {
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
-  --series-5: #d55181;
-  --series-6: #008300;
-  --series-7: #9085e9;
-  --series-8: #e66767;
-  --grid: #2b2f38;
-}
 .recharts-tooltip-wrapper {
   outline: none;
 }

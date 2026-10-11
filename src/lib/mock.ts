@@ -468,6 +468,7 @@ const handlers: Record<string, Handler> = {
   }),
   get_settings: () => settings,
   save_settings: () => null,
+  system_theme: () => null,
   set_provider_key: () => null,
   has_provider_key: () => false,
   detect_clis: () => ({ claude: "/home/you/.local/bin/claude", codex: "/home/you/.local/bin/codex" }),

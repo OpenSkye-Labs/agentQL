@@ -4,6 +4,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod mcp;
+pub mod os_theme;
 pub mod ssh;
 
 use std::sync::Arc;
@@ -87,6 +88,7 @@ pub fn run() {
             commands::set_provider_key,
             commands::has_provider_key,
             commands::detect_clis,
+            commands::system_theme,
             commands::kv_get,
             commands::kv_set,
             commands::ai_list_sessions,

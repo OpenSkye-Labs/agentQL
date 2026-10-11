@@ -111,6 +111,7 @@ export const api = {
   installUpdate: () => invoke<void>("install_update"),
   setProviderKey: (providerId: string, key: string | null) => invoke<void>("set_provider_key", { providerId, key }),
   hasProviderKey: (providerId: string) => invoke<boolean>("has_provider_key", { providerId }),
+  systemTheme: () => invoke<"dark" | "light" | null>("system_theme"),
   detectClis: () => invoke<{ claude: string | null; codex: string | null }>("detect_clis"),
   kvGet: <T>(name: string) => invoke<T | null>("kv_get", { name }),
   kvSet: (name: string, value: unknown) => invoke<void>("kv_set", { name, value }),
