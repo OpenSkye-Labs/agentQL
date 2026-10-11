@@ -66,6 +66,31 @@ pub struct ForeignKeyInfo {
     pub ref_columns: Vec<String>,
 }
 
+/// One column of a schema-wide catalog (editor completion).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CatalogColumn {
+    pub table: String,
+    pub name: String,
+    pub data_type: String,
+}
+
+/// One foreign key of a schema-wide catalog (editor JOIN suggestions).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CatalogForeignKey {
+    pub table: String,
+    pub columns: Vec<String>,
+    pub ref_schema: Option<String>,
+    pub ref_table: String,
+    pub ref_columns: Vec<String>,
+}
+
+/// Every column and foreign key of one schema, fetched in a couple of round trips for completion.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SchemaCatalog {
+    pub columns: Vec<CatalogColumn>,
+    pub foreign_keys: Vec<CatalogForeignKey>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TableDetails {
     pub columns: Vec<ColumnInfo>,

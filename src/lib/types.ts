@@ -116,6 +116,23 @@ export interface ForeignKeyInfo {
   ref_table: string;
   ref_columns: string[];
 }
+export interface CatalogColumn {
+  table: string;
+  name: string;
+  data_type: string;
+}
+export interface CatalogForeignKey {
+  table: string;
+  columns: string[];
+  ref_schema: string | null;
+  ref_table: string;
+  ref_columns: string[];
+}
+/** Every column and foreign key of one schema (editor completion). */
+export interface SchemaCatalog {
+  columns: CatalogColumn[];
+  foreign_keys: CatalogForeignKey[];
+}
 export interface TableDetails {
   columns: ColumnInfo[];
   indexes: IndexInfo[];
@@ -193,6 +210,7 @@ export interface Settings {
   agent_allow_writes: boolean;
   theme?: "light" | "dark" | "system" | null;
   editor_font_size?: number | null;
+  editor_vim?: boolean;
 }
 
 export type Block =
@@ -257,7 +275,10 @@ export interface SavedQuery {
   id: string;
   connection_id: string | null;
   name: string;
+  /** May contain CodeMirror snippet placeholders: `${1:table}`, `${2}`; Tab moves between them. */
   sql: string;
+  /** Typing this word in the editor offers the query as a snippet completion. */
+  trigger?: string | null;
   created_at: string;
   updated_at?: string;
   /** Previous edits, newest first, capped at MAX_QUERY_VERSIONS. */

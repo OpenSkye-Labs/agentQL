@@ -18,6 +18,7 @@ const ErdTab = lazy(() => import("./components/ErdTab").then((m) => ({ default: 
 const SchemaDiffTab = lazy(() => import("./components/SchemaDiffTab").then((m) => ({ default: m.SchemaDiffTab })));
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { SHORTCUTS_EVENT, ShortcutsDialog } from "./components/ShortcutsDialog";
 import { StatusBar } from "./components/StatusBar";
 import { Toasts } from "./components/Toasts";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -69,6 +70,10 @@ export default function App() {
       } else if (e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
+      } else if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+        // Mod+/ alone is CodeMirror's comment toggle, so the reference lives on Mod+Shift+/.
+        e.preventDefault();
+        window.dispatchEvent(new Event(SHORTCUTS_EVENT));
       } else if (/^[1-9]$/.test(e.key)) {
         const idx = Number(e.key) - 1;
         if (s.tabs[idx]) {
@@ -143,6 +148,7 @@ export default function App() {
           onOpenChange={(o) => setConnDialog((d) => ({ ...d, open: o }))}
         />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <ShortcutsDialog />
       </div>
     </TooltipProvider>
   );

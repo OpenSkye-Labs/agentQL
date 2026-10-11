@@ -1,5 +1,5 @@
 /** Offsets of `;`-delimited statement boundaries in `doc` (ignores quotes, dollar quotes and comments). */
-function statementBounds(doc: string): number[] {
+export function statementBounds(doc: string): number[] {
   const bounds: number[] = [0];
   let i = 0;
   let quote: string | null = null;
@@ -25,6 +25,14 @@ function statementBounds(doc: string): number[] {
   }
   bounds.push(doc.length);
   return bounds;
+}
+
+/** Start offset of the statement containing `pos`. */
+export function statementStart(doc: string, pos: number): number {
+  const bounds = statementBounds(doc);
+  let start = 0;
+  for (const b of bounds.slice(0, -1)) if (b <= pos) start = b; // last entry is the doc-end sentinel
+  return start;
 }
 
 /** Find the `;`-delimited statement containing `pos`. */

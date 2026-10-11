@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { clsx } from "clsx";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Bot, Download, FileText, History, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
-import type { SQLNamespace } from "@codemirror/lang-sql";
+import { Bot, Download, FileText, History, Keyboard, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
+import { snippetCompletion } from "@codemirror/autocomplete";
 import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
 import type { QueryResult, SavedQuery, WriteInfo } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
+import { buildNamespace, editorCompletions, isSnippet, snippetTemplate } from "../lib/completion";
 import { countStatements } from "../lib/sql";
 import { SqlEditor, type SqlEditorHandle } from "./SqlEditor";
 import { ResultGrid } from "./ResultGrid";
-import { Button, Dialog, Menu, Spinner, Tooltip, Kbd, Empty } from "./ui";
+import { SHORTCUTS_EVENT } from "./ShortcutsDialog";
+import { Button, Dialog, Field, Input, Menu, Spinner, Tooltip, Kbd, Empty } from "./ui";
 
 const basename = (p: string) => p.split(/[\\/]/).pop() || p;
 
@@ -40,7 +42,10 @@ export function QueryTab({ tab }: { tab: QTab }) {
   );
   const askAssistant = useStore((s) => s.askAssistant);
   const activeTab = useStore((s) => s.activeTab);
+  const vim = useStore((s) => !!s.settings.editor_vim);
   const editor = useRef<SqlEditorHandle>(null);
+  const [saveForm, setSaveForm] = useState<{ name: string; trigger: string } | null>(null);
+  const [saving, setSaving] = useState(false);
   const [results, setResults] = useState<QueryResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -50,17 +55,42 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const guarding = useRef(false);
   const savedCurrent = tab.savedId ? allSaved.find((q) => q.id === tab.savedId) : undefined;
 
-  const schema: SQLNamespace | undefined = useMemo(() => {
-    if (!live) return undefined;
-    const ns: SQLNamespace = {};
-    for (const [schemaName, tables] of Object.entries(live.tables)) {
-      for (const t of tables) {
-        ns[t.name] = [];
-        ns[`${schemaName}.${t.name}`] = [];
-      }
-    }
-    return ns;
-  }, [live]);
+  const driver = conn?.driver;
+  const quote = driver === "mysql" || driver === "mariadb" ? "`" : '"';
+  const tables = live?.tables;
+  const catalog = live?.catalog;
+  const schema = useMemo(
+    () => (tables ? buildNamespace(tables, catalog ?? {}, quote) : undefined),
+    [tables, catalog, quote],
+  );
+
+  // JOIN / keyword / snippet completion reads the latest data through refs so the editor is configured once.
+  const compDeps = useRef({ catalog, savedQueries, driver, quote });
+  useLayoutEffect(() => {
+    compDeps.current = { catalog, savedQueries, driver, quote };
+  });
+  const completions = useMemo(
+    () =>
+      editorCompletions({
+        catalog: () => compDeps.current.catalog ?? {},
+        postgres: () => compDeps.current.driver === "postgres",
+        quote: () => compDeps.current.quote,
+        snippets: () =>
+          compDeps.current.savedQueries
+            .filter((q) => q.trigger)
+            .map((q) =>
+              isSnippet(q.sql)
+                ? snippetCompletion(snippetTemplate(q.sql), {
+                    label: q.trigger!,
+                    detail: q.name,
+                    type: "text",
+                    boost: 3,
+                  })
+                : { label: q.trigger!, detail: q.name, type: "text", boost: 3, apply: q.sql },
+            ),
+      }),
+    [],
+  );
 
   const run = useCallback(
     async (sqlText: string, explain?: "plain" | "analyze") => {
@@ -227,26 +257,37 @@ export function QueryTab({ tab }: { tab: QTab }) {
     }
   };
   /** Save to the store; re-saving an existing query records the previous text as a version. */
-  const saveNamed = async (existing?: SavedQuery) => {
-    if (!conn) return;
-    const sql = editor.current?.getValue() ?? "";
-    if (!sql.trim()) return;
-    const name = existing?.name ?? prompt("Name this query", tab.title === "Query" ? "" : tab.title);
-    if (!name) return;
-    const id = existing?.id ?? crypto.randomUUID();
+  const persistNamed = async (q: SavedQuery) => {
+    if (saving) return;
+    setSaving(true);
     try {
-      await saveQuery({
-        id,
-        connection_id: existing ? existing.connection_id : conn.id,
-        name,
-        sql,
-        created_at: existing?.created_at ?? new Date().toISOString(),
-      });
-      updateTab(tab.id, { savedId: id, title: name });
-      toast(`Saved "${name}"`, "success");
+      await saveQuery(q);
+      updateTab(tab.id, { savedId: q.id, title: q.name });
+      setSaveForm(null);
+      toast(`Saved "${q.name}"`, "success");
     } catch (e) {
       toast(errMsg(e), "error");
+    } finally {
+      setSaving(false);
     }
+  };
+  /** Re-save the query this tab was loaded from (name, trigger and connection kept). */
+  const saveNamed = (existing: SavedQuery) => {
+    const sql = editor.current?.getValue() ?? "";
+    if (sql.trim()) void persistNamed({ ...existing, sql });
+  };
+  /** Save dialog submit: a new saved query (optionally a snippet trigger). */
+  const submitSave = () => {
+    const sql = editor.current?.getValue() ?? "";
+    if (!saveForm || !conn || !saveForm.name.trim() || !sql.trim()) return;
+    void persistNamed({
+      id: crypto.randomUUID(),
+      connection_id: conn.id,
+      name: saveForm.name.trim(),
+      sql,
+      trigger: saveForm.trigger.trim() || null,
+      created_at: new Date().toISOString(),
+    });
   };
   // Mod+S (global shortcut in App.tsx) saves whatever this tab is bound to: its .sql file, else its
   // saved query, else a new file.
@@ -353,6 +394,16 @@ export function QueryTab({ tab }: { tab: QTab }) {
             {tab.filePath}
           </span>
         )}
+        <Tooltip label={`Keyboard shortcuts (${mod}+Shift+/)`}>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label="Keyboard shortcuts"
+            onClick={() => window.dispatchEvent(new Event(SHORTCUTS_EVENT))}
+          >
+            <Keyboard size={13} />
+          </Button>
+        </Tooltip>
         <span className="flex-1" />
         <Menu
           trigger={
@@ -378,11 +429,14 @@ export function QueryTab({ tab }: { tab: QTab }) {
           }
           items={[
             savedCurrent
-              ? { label: `Save "${savedCurrent.name}"`, onSelect: () => void saveNamed(savedCurrent) }
-              : { label: "Save current query…", onSelect: () => void saveNamed() },
+              ? { label: `Save "${savedCurrent.name}"`, onSelect: () => saveNamed(savedCurrent) }
+              : {
+                  label: "Save current query…",
+                  onSelect: () => setSaveForm({ name: tab.title === "Query" ? "" : tab.title, trigger: "" }),
+                },
             ...(savedCurrent
               ? [
-                  { label: "Save as new…", onSelect: () => void saveNamed() },
+                  { label: "Save as new…", onSelect: () => setSaveForm({ name: "", trigger: "" }) },
                   {
                     label: `Versions (${savedCurrent.versions?.length ?? 0})…`,
                     onSelect: () => setVersionsOpen(true),
@@ -393,9 +447,15 @@ export function QueryTab({ tab }: { tab: QTab }) {
               ? [
                   { separator: true, label: "" },
                   ...savedQueries.map((q) => ({
-                    label: q.name,
-                    onSelect: () =>
-                      updateTab(tab.id, { sql: q.sql, title: q.name, savedId: q.id, filePath: undefined }),
+                    label: q.trigger ? `${q.name} · ${q.trigger}` : q.name,
+                    onSelect: () => {
+                      const bind = { title: q.name, savedId: q.id, filePath: undefined };
+                      // `${1:x}` placeholders become Tab stops; anything else loads verbatim.
+                      if (isSnippet(q.sql)) {
+                        editor.current?.loadSnippet(snippetTemplate(q.sql));
+                        updateTab(tab.id, bind);
+                      } else updateTab(tab.id, { sql: q.sql, ...bind });
+                    },
                   })),
                 ]
               : []),
@@ -459,6 +519,8 @@ export function QueryTab({ tab }: { tab: QTab }) {
             schema={schema}
             onRun={() => runGuarded(editor.current?.getRunnable() ?? "")}
             onRunAll={() => runGuarded(editor.current?.getValue() ?? "", { all: true })}
+            vim={vim}
+            completions={completions}
             placeholder={`Write ${conn.driver === "postgres" ? "PostgreSQL" : conn.driver} here. ${mod}+Enter runs the statement under the cursor.`}
           />
         </Panel>
@@ -554,6 +616,48 @@ export function QueryTab({ tab }: { tab: QTab }) {
           </div>
         </Panel>
       </PanelGroup>
+      <Dialog
+        open={saveForm !== null}
+        onOpenChange={(o) => !o && setSaveForm(null)}
+        title="Save query"
+        description={"Numbered placeholders like ${1:table} or ${2} become Tab stops when the query is loaded."}
+        width="max-w-md"
+        footer={
+          <>
+            <Button onClick={() => setSaveForm(null)}>Cancel</Button>
+            <Button variant="primary" type="submit" form="save-query-form" disabled={saving || !saveForm?.name.trim()}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="save-query-form"
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitSave();
+          }}
+        >
+          <Field label="Name">
+            <Input
+              autoFocus
+              value={saveForm?.name ?? ""}
+              onChange={(e) => setSaveForm((f) => f && { ...f, name: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="Completion trigger (optional)"
+            hint="Letters, digits, _ or $ only. Typing this word in the editor offers the query as a snippet."
+          >
+            <Input
+              placeholder="e.g. topn"
+              value={saveForm?.trigger ?? ""}
+              onChange={(e) => setSaveForm((f) => f && { ...f, trigger: e.target.value.replace(/[^\w$]/g, "") })}
+            />
+          </Field>
+        </form>
+      </Dialog>
     </div>
   );
 }

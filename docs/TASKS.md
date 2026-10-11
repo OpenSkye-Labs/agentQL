@@ -96,9 +96,9 @@ M6 Connectivity (M)
 
 M7 Editor ergonomics (S–M)
 
-- [ ] Alias-aware completion, JOIN suggestions from FKs, completion checklist in TESTING.md
-- [ ] Vim keymap toggle + shortcut reference dialog
-- [ ] Snippets with placeholders
+- [x] Alias-aware completion, JOIN suggestions from FKs, completion checklist in TESTING.md
+- [x] Vim keymap toggle + shortcut reference dialog
+- [x] Snippets with placeholders
 
 M8 Query versioning and portable profiles (S)
 
