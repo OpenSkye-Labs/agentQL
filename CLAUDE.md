@@ -49,7 +49,8 @@ docs/             PLAN.md, ARCHITECTURE.md, TASKS.md, FEATURES.md, REVIEWS.md
 - Agent tool calls that write go through an in-app approval (`agent_allow_writes` setting + per-call approval).
 - Deliberate simplifications are marked with a `ponytail:` comment naming the ceiling and the upgrade path.
 - Every feature or decision is recorded in `docs/` (TASKS.md board, FEATURES.md log). Keep them current.
-- Code is reviewed with Codex (`codex exec review --uncommitted`); findings and fixes go to `docs/REVIEWS.md`.
+- Code is reviewed with Codex (`codex exec review --uncommitted`); findings and fixes go to a per-PR file under
+  `docs/reviews/` (ADR-0003; `docs/REVIEWS.md` holds the pre-PR history and an index the maintainer updates after merge).
 
 ## Engineering rules (distilled from review findings, see docs/adr/)
 
@@ -71,7 +72,8 @@ docs/             PLAN.md, ARCHITECTURE.md, TASKS.md, FEATURES.md, REVIEWS.md
 - **Secrets are stripped by type, not by field list.** Anything serialised outside the keychain goes through a
   dedicated public type so a new secret field cannot leak by omission.
 - **Shared logs are append-only and conflict-prone.** Review logs live one file per PR under `docs/reviews/`
-  (ADR-0003); FEATURES.md and TASKS.md entries stay short and are merged, never rewritten.
+  (ADR-0003); FEATURES.md and TASKS.md entries stay short and are merged, never rewritten. When a log file
+  conflicts on merge, keep both sides; never drop the other branch's entries.
 
 ## Workflow
 

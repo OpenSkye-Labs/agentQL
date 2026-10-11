@@ -25,6 +25,7 @@ files, and installers built from CI only.
 ## Consequences
 
 - Nobody edits versions by hand; `pnpm version:check` guards consistency.
-- Release PRs come from a bot, so CI does not run on them unless a PAT is configured; the maintainer merges them
-  via bypass after the preceding `dev` → `main` PR was green.
+- Release PRs come from a bot, so CI does not run on them unless a `RELEASE_PLEASE_TOKEN` PAT is configured.
+  In that mode the maintainer checks out the release branch and runs `pnpm version:check` before merging via
+  bypass, since the `versions` job never saw the PR's version edits. The preceding `dev` → `main` PR must be green.
 - Squash on `dev` means review-fix commits disappear from history, which is intended.

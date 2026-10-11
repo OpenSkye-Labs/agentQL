@@ -21,5 +21,7 @@ transparent edges, so the bare mark and the wordmark lockups were unusable as ra
 
 ## Consequences
 
-- One file change propagates to all 19 icon sizes and the README header.
+- One change to `icon.svg` propagates to all 19 icon sizes via `tauri icon`. The README lockups are separate
+  files that embed a copy of the same tile, so a change to the mark is applied to `logo.svg` and `logo-dark.svg`
+  by hand in the same commit.
 - Any future rebrand starts with a contact sheet, not a single render.

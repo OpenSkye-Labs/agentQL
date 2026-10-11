@@ -12,13 +12,15 @@ because each branch appended at the same end of the same file.
 ## Decision
 
 - Review rounds are recorded in `docs/reviews/<pr-number>-<slug>.md`, one file per PR. `docs/REVIEWS.md` keeps
-  the pre-PR history and an index line per file.
+  the pre-PR history and an index line per file; the index is updated by the maintainer after merge, never inside
+  the PR, so parallel PRs do not touch it.
 - `docs/FEATURES.md` stays a single log, but entries are one line each so merges are trivial; `docs/TASKS.md`
   checkboxes are ticked in place, never reordered.
-- Worker briefs tell agents to resolve log conflicts by keeping both sides, so if a conflict still happens it is
-  mechanical.
+- The rule for resolving a log conflict (keep both sides) lives in `CLAUDE.md` under Engineering rules, which
+  every agent and session loads; there is no separate brief template.
 
 ## Consequences
 
-- Parallel PRs no longer conflict on review logs at all.
+- Parallel PRs no longer conflict on review logs; FEATURES.md can still conflict, but on one-line appends the
+  resolution is mechanical.
 - Reading all reviews means opening a directory instead of one file; the index in `REVIEWS.md` mitigates that.
