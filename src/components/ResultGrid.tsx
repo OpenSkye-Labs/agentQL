@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { clsx } from "clsx";
-import { ArrowDown, ArrowUp, X } from "lucide-react";
-import type { Cell, Column, QueryResult } from "../lib/types";
+import { ArrowDown, ArrowUp, ArrowUpRight, X } from "lucide-react";
+import type { Cell, Column, ForeignKeyInfo, QueryResult } from "../lib/types";
 import { cellFull, cellText, parseCell } from "../lib/format";
 import { ContextMenu, Button } from "./ui";
 
@@ -24,6 +24,10 @@ interface Props {
   onSort?: (column: string) => void;
   className?: string;
   primaryKeys?: string[];
+  /** Foreign keys of the browsed table: cells in FK columns get a jump affordance. */
+  foreignKeys?: ForeignKeyInfo[];
+  /** Called with the FK and the referenced key (`ref_column -> value`) when the user follows a jump. */
+  onFollowFk?: (fk: ForeignKeyInfo, key: Record<string, Cell>) => void;
 }
 
 const ROW_H = 26;
@@ -40,6 +44,8 @@ export function ResultGrid({
   onSort,
   className,
   primaryKeys = [],
+  foreignKeys = [],
+  onFollowFk,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
@@ -52,6 +58,12 @@ export function ResultGrid({
   const gridId = useMemo(() => `grid-${Math.random().toString(36).slice(2, 8)}`, []);
 
   const cols = result.columns;
+  // ponytail: a column in several FKs follows the first one; add a chooser if that ever matters.
+  const fkByCol = useMemo(() => {
+    const m = new Map<string, ForeignKeyInfo>();
+    for (const fk of foreignKeys) for (const c of fk.columns) if (!m.has(c)) m.set(c, fk);
+    return m;
+  }, [foreignKeys]);
   // Client-side sort only when the parent does not handle sorting.
   const order = useMemo(() => {
     const idx = result.rows.map((_, i) => i);
@@ -121,6 +133,22 @@ export function ResultGrid({
       parentRef.current?.focus();
     },
     [editing, order, cols, result.rows, onEdit],
+  );
+
+  const followFk = useCallback(
+    (rowIdx: number, fk: ForeignKeyInfo) => {
+      const row = result.rows[rowIdx];
+      const key: Record<string, Cell> = {};
+      for (const [i, c] of fk.columns.entries()) {
+        const ci = cols.findIndex((x) => x.name === c);
+        const ref = fk.ref_columns[i];
+        if (!ref || ci < 0) return; // malformed FK metadata: nothing sensible to filter on
+        const k = `${rowIdx}:${c}`;
+        key[ref] = edits?.has(k) ? edits.get(k)! : (row[ci] ?? null);
+      }
+      onFollowFk?.(fk, key);
+    },
+    [result.rows, cols, edits, onFollowFk],
   );
 
   const copySelection = useCallback(
@@ -262,6 +290,15 @@ export function ResultGrid({
         onSelect: () => void navigator.clipboard.writeText(cols.map((cc, i) => cellText(cellOf(cc, i))).join("\t")),
       },
       { label: "View value", onSelect: () => setInspect(menuCell) },
+      ...(onFollowFk && fkByCol.has(c.name) && v !== null
+        ? [
+            {
+              label: `Open referenced row in ${fkByCol.get(c.name)!.ref_table}`,
+              icon: <ArrowUpRight size={13} />,
+              onSelect: () => followFk(rowIdx, fkByCol.get(c.name)!),
+            },
+          ]
+        : []),
       ...(editable
         ? [
             { separator: true, label: "" },
@@ -376,6 +413,7 @@ export function ResultGrid({
                       const isEditing = editing && editing.r === vi.index && editing.c === ci;
                       const selected = inSelection(vi.index, ci);
                       const focused = sel?.r === vi.index && sel?.c === ci;
+                      const fk = onFollowFk && v !== null && !isEditing ? fkByCol.get(c.name) : undefined;
                       return (
                         <div
                           key={ci}
@@ -438,6 +476,22 @@ export function ResultGrid({
                             >
                               {cellText(v)}
                             </span>
+                          )}
+                          {fk && (
+                            <button
+                              type="button"
+                              title={`Open referenced row in ${fk.ref_table}`}
+                              aria-label={`Open referenced row in ${fk.ref_table}`}
+                              className="absolute right-0.5 top-1/2 -translate-y-1/2 rounded bg-elev/90 p-0.5 text-accent opacity-0 hover:bg-accent-soft focus-visible:opacity-100 [[role=gridcell]:hover_&]:opacity-100"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onDoubleClick={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                followFk(rowIdx, fk);
+                              }}
+                            >
+                              <ArrowUpRight size={12} />
+                            </button>
                           )}
                         </div>
                       );

@@ -4,7 +4,7 @@
 use super::value::{mysql_value, pg_value, sqlite_value};
 use super::{
     CatalogColumn, CatalogForeignKey, Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult,
-    RowChange, SchemaCatalog, TableDetails, TableInfo, TableQuery,
+    RowChange, SchemaCatalog, SchemaObject, TableDetails, TableInfo, TableQuery,
 };
 use crate::config::{ConnectionConfig, ConnectionSecrets, Driver};
 use crate::error::{AppError, Result};
@@ -445,15 +445,25 @@ impl SqlConn {
     // ---------------------------------------------------------------- browsing
 
     /// A browse filter must be exactly one expression: no extra statements or trailing comments.
-    pub fn validate_filter(filter: Option<&str>) -> Result<()> {
+    pub fn validate_filter(&self, filter: Option<&str>) -> Result<()> {
+        Self::validate_filter_for(self.driver, filter)
+    }
+
+    pub fn validate_filter_for(driver: Driver, filter: Option<&str>) -> Result<()> {
         let Some(f) = filter.map(str::trim).filter(|f| !f.is_empty()) else {
             return Ok(());
         };
-        let parts = split_statements(f);
+        // Comment markers and statement breaks only count outside '…' literals (an FK key value may
+        // legitimately contain "--" or ";"). Only MySQL/MariaDB treat a backslash as an escape inside a
+        // literal; on Postgres/SQLite `'a\'` is closed. Blanking literals first keeps `split_statements`
+        // (which escapes backslashes for every dialect) from mis-splitting such keys.
+        let backslash = matches!(driver, Driver::Mysql | Driver::Mariadb);
+        let code = blank_string_literals(f, backslash);
+        let parts = split_statements(&code);
         if parts.len() != 1
-            || parts[0] != f.trim_end_matches(';').trim()
-            || f.contains("--")
-            || f.contains("/*")
+            || parts[0] != code.trim_end_matches(';').trim()
+            || code.contains("--")
+            || code.contains("/*")
         {
             return Err(AppError::Msg(
                 "filter must be a single WHERE expression".into(),
@@ -940,6 +950,26 @@ impl SqlConn {
                 }
                 let mut fks: Vec<_> = fk_map.into_values().collect();
                 fks.sort_by(|a, b| a.name.cmp(&b.name));
+                // `REFERENCES parent` without a column list reports `to` as NULL: resolve it to parent's PK.
+                for fk in fks
+                    .iter_mut()
+                    .filter(|fk| fk.ref_columns.iter().any(String::is_empty))
+                {
+                    let mut pk: Vec<(i64, String)> = self
+                        .rows(&format!(
+                            "PRAGMA {pfx}table_info({})",
+                            self.quote_ident(&fk.ref_table)
+                        ))
+                        .await?
+                        .into_iter()
+                        .filter_map(|mut r| {
+                            let n = take_i64(&mut r, "pk");
+                            (n > 0).then(|| (n, take_str(&mut r, "name")))
+                        })
+                        .collect();
+                    pk.sort();
+                    fk.ref_columns = pk.into_iter().map(|(_, n)| n).collect();
+                }
                 Ok(TableDetails {
                     columns: cols
                         .into_iter()
@@ -961,6 +991,18 @@ impl SqlConn {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Every table/view in `schema` with columns, indexes, FKs and DDL.
+    // ponytail: N+1 introspection (a few queries per table); switch to bulk information_schema
+    // queries if schemas with hundreds of tables feel slow.
+    pub async fn schema_objects(&self, schema: &str) -> Result<Vec<SchemaObject>> {
+        let mut out = vec![];
+        for table in self.tables(schema).await? {
+            let details = self.table_details(schema, &table.name).await?;
+            out.push(SchemaObject { table, details });
+        }
+        Ok(out)
     }
 
     /// Columns and foreign keys of every table in `schema`, for editor completion.
@@ -1186,6 +1228,36 @@ macro_rules! exec_stream {
     }};
 }
 use exec_stream;
+
+/// Replace the contents of single-quoted literals by spaces so lexical checks skip them.
+/// `''` stays inside the literal; with `backslash` (MySQL dialects) so does a backslash-escaped character.
+/// `backslash` is the dialect default (MySQL); a Postgres `E'…'` escape string enables it per literal.
+fn blank_string_literals(sql: &str, backslash: bool) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut in_str = false;
+    let mut esc = backslash;
+    let mut prev = [' ', ' ']; // the two characters before the current one
+    let mut chars = sql.chars();
+    while let Some(c) = chars.next() {
+        if c == '\'' {
+            if !in_str {
+                let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '"' || c == '`';
+                esc = backslash || (matches!(prev[1], 'E' | 'e') && !is_ident(prev[0]));
+            }
+            in_str = !in_str;
+            out.push(c);
+        } else if in_str {
+            out.push(' ');
+            if esc && c == '\\' && chars.next().is_some() {
+                out.push(' ');
+            }
+        } else {
+            out.push(c);
+        }
+        prev = [prev[1], c];
+    }
+    out
+}
 
 fn json_str(v: Value) -> Option<String> {
     match v {
@@ -1732,6 +1804,28 @@ fn first_word(sql: &str) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn filter_allows_comment_markers_inside_literals() {
+        let pg = |f| SqlConn::validate_filter_for(Driver::Postgres, Some(f));
+        let my = |f| SqlConn::validate_filter_for(Driver::Mysql, Some(f));
+        assert!(pg("\"code\" = 'a--b' AND \"x\" = 'it''s /* ok */'").is_ok());
+        // Backslash escapes only exist in MySQL dialects; on Postgres `'a\'` is a closed literal + comment.
+        assert!(my("\"x\" = 'a\\' -- '").is_ok());
+        assert!(pg("\"x\" = 'a\\' -- '").is_err());
+        // Semicolons inside literals never split, whatever the splitter thinks of the backslash.
+        assert!(pg("\"x\" = 'a\\'';b'").is_ok());
+        assert!(my("\"x\" = 'a\\';b'").is_ok());
+        assert!(pg("\"x\" = 'a'; delete from t").is_err());
+        // Postgres escape strings do use backslashes: E'\'' is one quote, not a closed literal.
+        assert!(pg("\"x\" = E'a\\'b'").is_ok());
+        assert!(pg("\"x\" = E'\\'' ; delete from t; --'").is_err());
+        assert!(pg("\"x\" = e'\\'' ; delete from t; --'").is_err());
+        assert!(pg("\"some\" = 'E'; delete from t").is_err()); // a literal E is not a prefix
+        assert!(pg("\"id\" = 1 -- drop").is_err());
+        assert!(pg("\"id\" = 1 /* c */").is_err());
+        assert!(pg("\"id\" = 1; delete from t").is_err());
+    }
+
+    #[test]
     fn classifies_writes_for_confirmation() {
         let w = |k: &str, t: Option<&str>| WriteInfo {
             kind: k.into(),
@@ -1862,9 +1956,11 @@ mod tests {
             Driver::Postgres,
             "WITH x AS (select 1) FROBNICATE"
         ));
-        assert!(SqlConn::validate_filter(Some("id = 1")).is_ok());
-        assert!(SqlConn::validate_filter(Some("0; DELETE FROM t; --")).is_err());
-        assert!(SqlConn::validate_filter(Some("name = 'a;b'")).is_ok());
+        assert!(SqlConn::validate_filter_for(Driver::Postgres, Some("id = 1")).is_ok());
+        assert!(
+            SqlConn::validate_filter_for(Driver::Postgres, Some("0; DELETE FROM t; --")).is_err()
+        );
+        assert!(SqlConn::validate_filter_for(Driver::Postgres, Some("name = 'a;b'")).is_ok());
     }
 
     #[test]

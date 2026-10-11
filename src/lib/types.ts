@@ -140,6 +140,12 @@ export interface TableDetails {
   ddl: string | null;
 }
 
+/** One table or view with everything the backend introspects about it. */
+export interface SchemaObject {
+  table: TableInfo;
+  details: TableDetails;
+}
+
 export interface TableQuery {
   schema?: string | null;
   table: string;

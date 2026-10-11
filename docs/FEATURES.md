@@ -93,3 +93,18 @@ Append-only record of shipped behaviour. Newest at the bottom.
   tagged `source: "agent"` with its session id (backend writes `history.json` under a lock; the UI appends through the same
   command). run_sql pushes `LIMIT <limit>` into bare SELECTs that have no LIMIT/OFFSET/FETCH/lock clause so the database
   stops scanning early.
+- Foreign-key click-through (M4): in a table tab, cells of FK columns show a jump arrow on hover (and an "Open referenced
+  row in …" context-menu item) that opens the referenced table filtered to that key (`"id" = …`). The filter now lives on
+  the tab, so jumping into an already open table re-targets it; tabs with pending edits ask before discarding them.
+  SQLite FKs declared without a target column list resolve to the parent's primary key.
+- ER diagram (M4): "ER diagram" on a schema's context menu opens a tab that introspects every table (`schema_objects`),
+  lays them out with dagre (left-to-right ranks) and draws them as plain SVG: PK columns highlighted, FK columns marked,
+  edges from the FK column to the referenced table. Wheel zooms around the cursor, drag pans, hovering a table lights up
+  its relations, clicking opens the table tab. Export writes SVG (theme colours inlined) or PNG (2x) via the save dialog.
+- Schema diff (M4): "Schema diff…" on a connection (or "Compare schema…" on a schema) opens a tab with two
+  (connection, schema) pickers over the connected SQL databases. Compare introspects both sides, matches objects by name,
+  lists them as added / removed / changed / unchanged and shows a line diff of the DDL (schema qualification and MySQL
+  AUTO_INCREMENT counters normalised away). "Copy as migration" writes SQL that moves A towards B: CREATE TABLE
+  synthesised from the metadata, drop statements for tables, views and materialized views, ADD / DROP COLUMN, and
+  review comments for type changes, indexes, foreign keys and views. Two databases on one Postgres server need two
+  connections.

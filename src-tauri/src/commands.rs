@@ -5,7 +5,9 @@ use crate::ai::{self, AgentEvent, ChatSession, Ctx};
 use crate::config::{ConnectionConfig, ConnectionSecrets, Settings};
 use crate::db::mongo::MongoFind;
 use crate::db::redis::ScanResult;
-use crate::db::{Live, QueryResult, RowChange, SchemaCatalog, TableDetails, TableInfo, TableQuery};
+use crate::db::{
+    Live, QueryResult, RowChange, SchemaCatalog, SchemaObject, TableDetails, TableInfo, TableQuery,
+};
 use crate::error::{AppError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -292,6 +294,38 @@ pub async fn table_details(
     sql(&s).await?.table_details(&schema, &table).await
 }
 
+#[tauri::command]
+pub async fn schema_objects(
+    st: State<'_, AppState>,
+    id: String,
+    schema: String,
+) -> Result<Vec<SchemaObject>> {
+    let s = st.manager.get(&id).await?;
+    sql(&s).await?.schema_objects(&schema).await
+}
+
+/// Write base64-encoded bytes to a path the user picked in a save dialog (SVG/PNG exports).
+/// The dialog runs in the webview, so the path is re-checked here: absolute and an export extension only.
+#[tauri::command]
+pub async fn save_file(path: String, data: String) -> Result<()> {
+    use base64::Engine as _;
+    let p = std::path::Path::new(&path);
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    if !p.is_absolute() || !matches!(ext.as_deref(), Some("svg" | "png")) {
+        return Err(AppError::Msg(
+            "export path must be an absolute .svg or .png file".into(),
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| AppError::Msg(e.to_string()))?;
+    std::fs::write(&path, bytes)?;
+    Ok(())
+}
+
 #[derive(Serialize)]
 pub struct TablePage {
     pub result: QueryResult,
@@ -307,7 +341,7 @@ pub async fn fetch_table(
 ) -> Result<TablePage> {
     let s = st.manager.get(&id).await?;
     let c = sql(&s).await?;
-    crate::db::sql::SqlConn::validate_filter(query.filter.as_deref())?;
+    c.validate_filter(query.filter.as_deref())?;
     let sql_text = c.select_sql(&query);
     let result = c.run_one_read_only(&sql_text, query.limit.max(1)).await?;
     // The exact count is fetched separately (`count_table`) so big tables render immediately.
@@ -322,7 +356,7 @@ pub async fn fetch_table(
 pub async fn count_table(st: State<'_, AppState>, id: String, query: TableQuery) -> Result<i64> {
     let s = st.manager.get(&id).await?;
     let c = sql(&s).await?;
-    crate::db::sql::SqlConn::validate_filter(query.filter.as_deref())?;
+    c.validate_filter(query.filter.as_deref())?;
     c.count(&query).await
 }
 

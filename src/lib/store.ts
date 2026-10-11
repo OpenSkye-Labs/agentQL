@@ -26,11 +26,25 @@ export type Tab =
       /** On-disk .sql file this tab was opened from or saved to. */
       filePath?: string;
     }
-  | { id: string; kind: "table"; connectionId: string; title: string; schema: string; table: string; tableKind: string }
+  | {
+      id: string;
+      kind: "table";
+      connectionId: string;
+      title: string;
+      schema: string;
+      table: string;
+      tableKind: string;
+      /** WHERE clause body applied to the grid (set by FK jumps, kept in sync by the tab). */
+      filter?: string;
+      /** Unapplied grid edits exist (published by TableTab so a jump can ask before discarding them). */
+      dirty?: boolean;
+    }
   | { id: string; kind: "chat"; connectionId: string; title: string; sessionId: string }
   | { id: string; kind: "dashboard"; connectionId: string; title: string; dashboardId: string }
   | { id: string; kind: "redis"; connectionId: string; title: string }
   | { id: string; kind: "mongo"; connectionId: string; title: string; db: string; collection: string }
+  | { id: string; kind: "erd"; connectionId: string; title: string; schema: string }
+  | { id: string; kind: "diff"; connectionId: string; title: string; schema?: string }
   | { id: string; kind: "welcome"; connectionId: null; title: string };
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -266,6 +280,8 @@ export const useStore = create<State>((set, get) => ({
           return t.kind === "dashboard" && t.dashboardId === tab.dashboardId;
         case "chat":
           return t.kind === "chat" && t.sessionId === tab.sessionId;
+        case "erd":
+          return t.kind === "erd" && t.schema === tab.schema;
         case "redis":
           return true;
         default:
@@ -273,6 +289,8 @@ export const useStore = create<State>((set, get) => ({
       }
     });
     if (existing) {
+      // Re-opening a table with a filter (FK jump) re-targets the already open tab.
+      if (tab.kind === "table" && tab.filter !== undefined) get().updateTab(existing.id, { filter: tab.filter });
       set({ activeTab: existing.id });
       return existing.id;
     }
