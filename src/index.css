@@ -417,13 +417,9 @@ body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
-button,
-input,
-select,
-textarea {
-  font: inherit;
-  color: inherit;
-}
+/* Form controls already get `font: inherit; color: inherit` from Tailwind's preflight (in @layer base).
+   Repeating it here, outside any layer, out-ranked every `text-*` utility, so primary buttons rendered
+   in the page text colour instead of --accent-fg. */
 *:focus {
   outline: none;
 }
