@@ -1,4 +1,4 @@
-/** Offsets where `;`-delimited statements start/end (ignores quotes/comments reasonably). */
+/** Offsets of `;`-delimited statement boundaries in `doc` (ignores quotes, dollar quotes and comments). */
 export function statementBounds(doc: string): number[] {
   const bounds: number[] = [0];
   let i = 0;
@@ -9,7 +9,13 @@ export function statementBounds(doc: string): number[] {
       if (c === quote) quote = null;
       else if (c === "\\") i++;
     } else if (c === "'" || c === '"' || c === "`") quote = c;
-    else if (c === "-" && doc[i + 1] === "-") {
+    else if (c === "$") {
+      // Postgres dollar quoting: $$ … $$ or $tag$ … $tag$ (same rule as the backend splitter)
+      const m = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(doc.slice(i));
+      // No closing tag (e.g. MySQL `$$` identifier): treat `$` as an ordinary character, like the backend.
+      const end = m ? doc.indexOf(m[0], i + m[0].length) : -1;
+      if (m && end !== -1) i = end + m[0].length - 1;
+    } else if (c === "-" && doc[i + 1] === "-") {
       while (i < doc.length && doc[i] !== "\n") i++;
     } else if (c === "/" && doc[i + 1] === "*") {
       const end = doc.indexOf("*/", i + 2);
@@ -47,4 +53,16 @@ export function statementAt(doc: string, pos: number): string {
     }
   }
   return doc.trim();
+}
+
+/** Number of non-empty statements in `doc`. */
+// ponytail: comments-only chunks count as statements; fine for a "run all N?" prompt, use a lexer if it misleads.
+export function countStatements(doc: string): number {
+  const bounds = statementBounds(doc);
+  return bounds.slice(0, -1).filter((start, b) =>
+    doc
+      .slice(start, bounds[b + 1])
+      .replace(/;/g, "")
+      .trim(),
+  ).length;
 }

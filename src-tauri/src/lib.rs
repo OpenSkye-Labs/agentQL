@@ -101,6 +101,7 @@ pub fn run() {
             commands::app_info,
             commands::read_text_file,
             commands::write_text_file,
+            commands::classify_sql,
             commands::schema_catalog,
         ])
         .run(tauri::generate_context!())

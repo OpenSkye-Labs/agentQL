@@ -6,9 +6,10 @@ import { Bot, Download, FileText, History, Keyboard, Play, Save, Sparkles, StopC
 import { snippetCompletion } from "@codemirror/autocomplete";
 import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
-import type { QueryResult, SavedQuery } from "../lib/types";
+import type { QueryResult, SavedQuery, WriteInfo } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
 import { buildNamespace, editorCompletions, isSnippet, snippetTemplate } from "../lib/completion";
+import { countStatements } from "../lib/sql";
 import { SqlEditor, type SqlEditorHandle } from "./SqlEditor";
 import { ResultGrid } from "./ResultGrid";
 import { SHORTCUTS_EVENT } from "./ShortcutsDialog";
@@ -17,6 +18,9 @@ import { Button, Dialog, Field, Input, Menu, Spinner, Tooltip, Kbd, Empty } from
 const basename = (p: string) => p.split(/[\\/]/).pop() || p;
 
 type QTab = Extract<Tab, { kind: "query" }>;
+
+/** Identifiers can carry newlines/control chars; keep the native prompt on one line per write. */
+const plain = (s: string) => Array.from(s, (c) => (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 ? " " : c)).join("");
 
 export function QueryTab({ tab }: { tab: QTab }) {
   const conn = useConnection(tab.connectionId);
@@ -48,6 +52,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const [active, setActive] = useState(0);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const inFlight = useRef(0);
+  const guarding = useRef(false);
   const savedCurrent = tab.savedId ? allSaved.find((q) => q.id === tab.savedId) : undefined;
 
   const driver = conn?.driver;
@@ -134,6 +139,55 @@ export function QueryTab({ tab }: { tab: QTab }) {
       }
     },
     [conn, tab.id, tab.title, updateTab, addHistory],
+  );
+
+  const confirmAndRun = useCallback(
+    async (sqlText: string, opts: { all?: boolean; explain?: "plain" | "analyze" }) => {
+      if (!conn) return;
+      const lines: string[] = [];
+      // Count what is about to execute (selection or whole script), not which button was pressed.
+      const n = countStatements(sqlText);
+      if (n > 1) lines.push(`Run ${opts.all ? "all " : ""}${n} statements?`);
+      if (conn.environment === "production" && opts.explain !== "plain") {
+        const docBefore = editor.current?.getValue();
+        let writes: WriteInfo[];
+        try {
+          writes = await api.classifySql(conn.driver, sqlText);
+        } catch (e) {
+          toast(`Could not classify statements, not running on production: ${errMsg(e)}`, "error");
+          return;
+        }
+        // The editor stayed editable during the IPC round trip: never prompt for, or run, SQL the user no longer sees.
+        if (editor.current?.getValue() !== docBefore || useStore.getState().activeTab !== tab.id) {
+          toast("Editor changed while checking the statements; run again.", "error");
+          return;
+        }
+        if (writes.length)
+          lines.push(
+            `"${conn.name}" is tagged PRODUCTION. This will run:`,
+            ...writes.map((w) => `  • ${plain(w.kind)}${w.table ? ` on ${plain(w.table)}` : ""}`),
+          );
+      }
+      // ponytail: native confirm(), same as the delete prompts elsewhere; swap for <Dialog> if it needs styling.
+      if (lines.length && !confirm(lines.join("\n"))) return;
+      run(sqlText, opts.explain);
+    },
+    [conn, run, toast, tab.id],
+  );
+
+  // M1 safety: confirm "run all" when the script has several statements, and every write on a production connection.
+  const runGuarded = useCallback(
+    async (sqlText: string, opts: { all?: boolean; explain?: "plain" | "analyze" } = {}) => {
+      if (!sqlText.trim() || !conn || inFlight.current || guarding.current) return;
+      // Hold the guard across classification + confirmation so a second shortcut press cannot queue a duplicate run.
+      guarding.current = true;
+      try {
+        await confirmAndRun(sqlText, opts);
+      } finally {
+        guarding.current = false;
+      }
+    },
+    [conn, confirmAndRun],
   );
 
   // Insert SQL coming from the chat panel into the active query tab.
@@ -257,14 +311,18 @@ export function QueryTab({ tab }: { tab: QTab }) {
           <Button
             size="sm"
             variant="primary"
-            onClick={() => run(editor.current?.getRunnable() ?? "")}
+            onClick={() => runGuarded(editor.current?.getRunnable() ?? "")}
             disabled={running}
           >
             {running ? <Spinner className="border-t-accent-fg" /> : <Play size={13} />} Run
           </Button>
         </Tooltip>
         <Tooltip label={`Run everything (${mod}+Shift+Enter)`}>
-          <Button size="sm" onClick={() => run(editor.current?.getValue() ?? "")} disabled={running}>
+          <Button
+            size="sm"
+            onClick={() => runGuarded(editor.current?.getValue() ?? "", { all: true })}
+            disabled={running}
+          >
             Run all
           </Button>
         </Tooltip>
@@ -275,10 +333,13 @@ export function QueryTab({ tab }: { tab: QTab }) {
             </Button>
           }
           items={[
-            { label: "Explain plan", onSelect: () => run(editor.current?.getRunnable() ?? "", "plain") },
+            {
+              label: "Explain plan",
+              onSelect: () => runGuarded(editor.current?.getRunnable() ?? "", { explain: "plain" }),
+            },
             {
               label: "Explain analyze (runs the query)",
-              onSelect: () => run(editor.current?.getRunnable() ?? "", "analyze"),
+              onSelect: () => runGuarded(editor.current?.getRunnable() ?? "", { explain: "analyze" }),
             },
           ]}
           align="start"
@@ -453,8 +514,8 @@ export function QueryTab({ tab }: { tab: QTab }) {
             onChange={(sql) => updateTab(tab.id, { sql })}
             driver={conn.driver}
             schema={schema}
-            onRun={() => run(editor.current?.getRunnable() ?? "")}
-            onRunAll={() => run(editor.current?.getValue() ?? "")}
+            onRun={() => runGuarded(editor.current?.getRunnable() ?? "")}
+            onRunAll={() => runGuarded(editor.current?.getValue() ?? "", { all: true })}
             vim={vim}
             completions={completions}
             placeholder={`Write ${conn.driver === "postgres" ? "PostgreSQL" : conn.driver} here. ${mod}+Enter runs the statement under the cursor.`}
