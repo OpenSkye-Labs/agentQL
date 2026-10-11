@@ -303,9 +303,20 @@ pub async fn schema_objects(
 }
 
 /// Write base64-encoded bytes to a path the user picked in a save dialog (SVG/PNG exports).
+/// The dialog runs in the webview, so the path is re-checked here: absolute and an export extension only.
 #[tauri::command]
 pub async fn save_file(path: String, data: String) -> Result<()> {
     use base64::Engine as _;
+    let p = std::path::Path::new(&path);
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    if !p.is_absolute() || !matches!(ext.as_deref(), Some("svg" | "png")) {
+        return Err(AppError::Msg(
+            "export path must be an absolute .svg or .png file".into(),
+        ));
+    }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data)
         .map_err(|e| AppError::Msg(e.to_string()))?;

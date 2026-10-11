@@ -1066,16 +1066,21 @@ macro_rules! exec_stream {
 }
 use exec_stream;
 
-/// Replace the contents of single-quoted literals (with `''` escapes) by spaces so lexical checks skip them.
+/// Replace the contents of single-quoted literals by spaces so lexical checks skip them.
+/// Mirrors `split_statements`: `''` and a backslash-escaped character stay inside the literal.
 fn blank_string_literals(sql: &str) -> String {
     let mut out = String::with_capacity(sql.len());
     let mut in_str = false;
-    for c in sql.chars() {
+    let mut chars = sql.chars();
+    while let Some(c) = chars.next() {
         if c == '\'' {
             in_str = !in_str;
             out.push(c);
         } else if in_str {
             out.push(' ');
+            if c == '\\' && chars.next().is_some() {
+                out.push(' ');
+            }
         } else {
             out.push(c);
         }
@@ -1438,6 +1443,7 @@ mod tests {
             SqlConn::validate_filter(Some("\"code\" = 'a--b' AND \"x\" = 'it''s /* ok */'"))
                 .is_ok()
         );
+        assert!(SqlConn::validate_filter(Some("\"x\" = 'a\\' -- '")).is_ok()); // MySQL backslash escape
         assert!(SqlConn::validate_filter(Some("\"id\" = 1 -- drop")).is_err());
         assert!(SqlConn::validate_filter(Some("\"id\" = 1 /* c */")).is_err());
         assert!(SqlConn::validate_filter(Some("\"id\" = 1; delete from t")).is_err());

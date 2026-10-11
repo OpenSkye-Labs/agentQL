@@ -244,3 +244,10 @@ Requirements: all M4 criteria met. Judge: 8/10 (advisory). Findings addressed be
 | --- | ----- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | 1   | major | SQLite rejects `ALTER TABLE … ADD CONSTRAINT`, so migrations with new FKs failed | SQLite inlines `CONSTRAINT … FOREIGN KEY` in CREATE TABLE (no parent-order check); others unchanged |
 | 2   | minor | `validate_filter` rejected FK key values containing `--` or `/*`                 | Literal contents are blanked before the comment-marker check; unit test added                       |
+
+## 2026-10-11 — M4 PR #10 (CodeRabbit, third pass after merging PR #7: 2 comments)
+
+| #   | Sev   | Finding                                                                        | Resolution                                                                               |
+| --- | ----- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| 1   | minor | `save_file` wrote to any path the webview sent (arbitrary-file-write sink)     | Rust re-checks the path: absolute and `.svg` / `.png` only                               |
+| 2   | minor | `blank_string_literals` ended a literal at `\'`, disagreeing with the splitter | Backslash skips the next character inside a literal, like `split_statements`; test added |
