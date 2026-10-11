@@ -93,6 +93,10 @@ Append-only record of shipped behaviour. Newest at the bottom.
   tagged `source: "agent"` with its session id (backend writes `history.json` under a lock; the UI appends through the same
   command). run_sql pushes `LIMIT <limit>` into bare SELECTs that have no LIMIT/OFFSET/FETCH/lock clause so the database
   stops scanning early.
+- Agent scope fails closed (follow-up to M2): `TABLE x` bodies, `LATERAL fn(...)` factors and every table factor the
+  parser-side collector does not model (PIVOT, JSON_TABLE, ...) are refused while a scope is set, as is `set_config()`.
+  On Postgres the resolved schema for unqualified names is pinned at execution with `SET LOCAL search_path` inside the
+  statement's transaction (run_sql, explain_sql, charts); on MySQL/SQLite scoped SQL must schema-qualify table names.
 - Foreign-key click-through (M4): in a table tab, cells of FK columns show a jump arrow on hover (and an "Open referenced
   row in …" context-menu item) that opens the referenced table filtered to that key (`"id" = …`). The filter now lives on
   the tab, so jumping into an already open table re-targets it; tabs with pending edits ask before discarding them.

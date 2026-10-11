@@ -179,40 +179,78 @@ impl SqlConn {
     }
 
     pub async fn run_one(&self, sql: &str, limit: u32) -> Result<QueryResult> {
-        self.run_one_opts(sql, limit, false).await
+        self.run_one_opts(sql, limit, false, None).await
     }
 
     /// Execute a single statement inside a database-enforced read-only context
     /// (READ ONLY transaction / `PRAGMA query_only`), so even `SELECT nextval()`
     /// or stray semicolons cannot write.
     pub async fn run_one_read_only(&self, sql: &str, limit: u32) -> Result<QueryResult> {
-        self.run_one_opts(sql, limit, true).await
+        self.run_one_opts(sql, limit, true, None).await
     }
 
     pub async fn run_read_only(&self, sql: &str, limit: u32) -> Result<Vec<QueryResult>> {
+        self.run_with_search_path(sql, limit, true, None).await
+    }
+
+    /// `run` / `run_read_only` with the Postgres `search_path` pinned for the duration of each
+    /// statement (`SET LOCAL` inside the transaction), so unqualified names resolve to the schema
+    /// the agent scope check used, whatever the pooled session's `search_path` was changed to.
+    /// Ignored on other drivers: their scoped callers require schema-qualified names instead.
+    pub async fn run_with_search_path(
+        &self,
+        sql: &str,
+        limit: u32,
+        read_only: bool,
+        search_path: Option<&str>,
+    ) -> Result<Vec<QueryResult>> {
         let mut out = vec![];
         for stmt in split_statements(sql) {
-            out.push(self.run_one_read_only(&stmt, limit).await?);
+            out.push(
+                self.run_one_opts(&stmt, limit, read_only, search_path)
+                    .await?,
+            );
         }
         Ok(out)
     }
 
-    async fn run_one_opts(&self, sql: &str, limit: u32, read_only: bool) -> Result<QueryResult> {
+    async fn run_one_opts(
+        &self,
+        sql: &str,
+        limit: u32,
+        read_only: bool,
+        search_path: Option<&str>,
+    ) -> Result<QueryResult> {
         let start = Instant::now();
-        let mut res = match (&self.pool, read_only) {
-            (Pool::Pg(p), false) => exec_stream!(p, sql, limit, pg_value)?,
-            (Pool::My(p), false) => exec_stream!(p, sql, limit, mysql_value)?,
-            (Pool::Lite(p), false) => exec_stream!(p, sql, limit, sqlite_value)?,
-            (Pool::Pg(p), true) => {
+        let mut res = match (&self.pool, read_only, search_path) {
+            (Pool::Pg(p), false, None) => exec_stream!(p, sql, limit, pg_value)?,
+            (Pool::My(p), false, _) => exec_stream!(p, sql, limit, mysql_value)?,
+            (Pool::Lite(p), false, _) => exec_stream!(p, sql, limit, sqlite_value)?,
+            (Pool::Pg(p), _, _) => {
                 let mut tx = p.begin().await?;
-                sqlx::query("SET TRANSACTION READ ONLY")
+                if read_only {
+                    sqlx::query("SET TRANSACTION READ ONLY")
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                if let Some(schema) = search_path {
+                    sqlx::query(&format!(
+                        "SET LOCAL search_path TO {}",
+                        self.quote_ident(schema)
+                    ))
                     .execute(&mut *tx)
                     .await?;
+                }
                 let r = exec_stream!(&mut *tx, sql, limit, pg_value);
-                let _ = tx.rollback().await;
+                match (&r, read_only) {
+                    (Ok(_), false) => tx.commit().await?,
+                    _ => {
+                        let _ = tx.rollback().await;
+                    }
+                }
                 r?
             }
-            (Pool::My(p), true) => {
+            (Pool::My(p), true, _) => {
                 // START TRANSACTION is not preparable on MySQL; SET TRANSACTION (next txn only) + begin() is.
                 let mut conn = p.acquire().await?;
                 sqlx::query("SET TRANSACTION READ ONLY")
@@ -223,7 +261,7 @@ impl SqlConn {
                 let _ = tx.rollback().await;
                 r?
             }
-            (Pool::Lite(p), true) => {
+            (Pool::Lite(p), true, _) => {
                 let mut conn = p.acquire().await?;
                 sqlx::query("PRAGMA query_only = 1")
                     .execute(&mut *conn)
@@ -237,16 +275,42 @@ impl SqlConn {
         };
         if res.columns.is_empty() && res.rows.is_empty() && is_query_like(sql) {
             // Zero-row SELECT: still show the headers.
-            res.columns = self.describe_columns(sql).await.unwrap_or_default();
+            res.columns = self
+                .describe_columns(sql, search_path)
+                .await
+                .unwrap_or_default();
         }
         res.duration_ms = start.elapsed().as_millis();
         res.statement = sql.to_string();
         Ok(res)
     }
 
-    async fn describe_columns(&self, sql: &str) -> Result<Vec<Column>> {
-        Ok(match &self.pool {
-            Pool::Pg(p) => p
+    /// Column metadata for a statement; `search_path` pins the Postgres schema the same way
+    /// `run_one_opts` did, so the headers describe the query that actually ran.
+    async fn describe_columns(&self, sql: &str, search_path: Option<&str>) -> Result<Vec<Column>> {
+        let to_columns = |cols: &[sqlx::postgres::PgColumn]| -> Vec<Column> {
+            cols.iter()
+                .map(|c| Column {
+                    name: c.name().to_string(),
+                    type_name: c.type_info().name().to_string(),
+                })
+                .collect()
+        };
+        Ok(match (&self.pool, search_path) {
+            (Pool::Pg(p), Some(schema)) => {
+                let mut tx = p.begin().await?;
+                sqlx::query(&format!(
+                    "SET LOCAL search_path TO {}",
+                    self.quote_ident(schema)
+                ))
+                .execute(&mut *tx)
+                .await?;
+                let d = (&mut *tx).describe(sql).await;
+                let _ = tx.rollback().await;
+                to_columns(d?.columns())
+            }
+            (Pool::Pg(p), None) => to_columns(p.describe(sql).await?.columns()),
+            (Pool::My(p), _) => p
                 .describe(sql)
                 .await?
                 .columns()
@@ -256,17 +320,7 @@ impl SqlConn {
                     type_name: c.type_info().name().to_string(),
                 })
                 .collect(),
-            Pool::My(p) => p
-                .describe(sql)
-                .await?
-                .columns()
-                .iter()
-                .map(|c| Column {
-                    name: c.name().to_string(),
-                    type_name: c.type_info().name().to_string(),
-                })
-                .collect(),
-            Pool::Lite(p) => p
+            (Pool::Lite(p), _) => p
                 .describe(sql)
                 .await?
                 .columns()
@@ -1640,6 +1694,9 @@ pub struct SqlRefs {
     pub functions: Vec<String>,
     /// Statements whose targets the visitor does not report (SHOW, DESCRIBE, PRAGMA, ...).
     pub opaque: Vec<String>,
+    /// Query bodies and table factors the collector does not understand (`TABLE x`, PIVOT, JSON_TABLE, ...).
+    /// Scoped runs refuse them: a construct that is not modelled cannot be checked.
+    pub unsupported: Vec<String>,
 }
 
 /// Every table the SQL reads or writes, with identifiers normalised the way the database resolves
@@ -1647,7 +1704,9 @@ pub struct SqlRefs {
 /// skipped only where they are lexically visible, table-valued functions always (they are reported
 /// under `functions`). `None` when the text does not parse, so callers can fail closed.
 pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
-    use sqlparser::ast::{Expr, Ident, ObjectName, Query, Statement, TableFactor, Visit, Visitor};
+    use sqlparser::ast::{
+        Expr, Ident, ObjectName, Query, SetExpr, Statement, TableFactor, Visit, Visitor,
+    };
     use std::ops::ControlFlow;
     /// One `WITH` clause: its names become visible one by one (all at once when RECURSIVE).
     struct Frame {
@@ -1666,6 +1725,7 @@ pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
         functions: Vec<String>,
         relations: Vec<ObjectName>,
         opaque: Vec<String>,
+        unsupported: Vec<String>,
     }
     /// Function names as the database resolves them: quotes dropped, lowercased.
     fn function_key(n: &ObjectName) -> String {
@@ -1675,6 +1735,21 @@ pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
             .join(".")
     }
     impl Collector {
+        /// Every body kind is named so a sqlparser upgrade that adds one fails to compile here
+        /// instead of slipping past the scope check. Set-operation arms are bodies too, not queries.
+        fn check_body(&mut self, body: &SetExpr) {
+            match body {
+                SetExpr::Select(_) | SetExpr::Query(_) | SetExpr::Values(_) => {}
+                SetExpr::Insert(_) | SetExpr::Update(_) => {}
+                SetExpr::SetOperation { left, right, .. } => {
+                    self.check_body(left);
+                    self.check_body(right);
+                }
+                // `TABLE x`: the parser keeps only the raw words, so quoting (and thus case folding)
+                // is lost and the name cannot be matched against the catalog reliably.
+                SetExpr::Table(_) => self.unsupported.push("TABLE statements".into()),
+            }
+        }
         fn norm(&self, i: &Ident) -> String {
             if i.quote_style.is_none() && self.driver_folds {
                 i.value.to_lowercase()
@@ -1686,6 +1761,7 @@ pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
     impl Visitor for Collector {
         type Break = ();
         fn pre_visit_query(&mut self, q: &Query) -> ControlFlow<()> {
+            self.check_body(&q.body);
             // Entering CTE body i of a non-recursive WITH: only earlier CTEs are visible.
             if let Some(f) = self.frames.last_mut()
                 && !f.recursive
@@ -1726,14 +1802,30 @@ pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
             ControlFlow::Continue(())
         }
         fn pre_visit_table_factor(&mut self, tf: &TableFactor) -> ControlFlow<()> {
-            if let TableFactor::Table {
-                name,
-                args: Some(_),
-                ..
-            } = tf
-            {
-                self.function_names.push(name);
-                self.functions.push(function_key(name));
+            match tf {
+                // `FROM fn(...)`: the name is visited as a relation, so remember the node to skip it.
+                TableFactor::Table {
+                    name,
+                    args: Some(_),
+                    ..
+                } => {
+                    self.function_names.push(name);
+                    self.functions.push(function_key(name));
+                }
+                // `LATERAL fn(...)`: a distinct factor whose name is not visited as a relation.
+                TableFactor::Function { name, .. } => self.functions.push(function_key(name)),
+                TableFactor::Table { .. }
+                | TableFactor::Derived { .. }
+                | TableFactor::NestedJoin { .. }
+                | TableFactor::UNNEST { .. } => {}
+                TableFactor::TableFunction { .. } => self.unsupported.push("TABLE(...)".into()),
+                TableFactor::JsonTable { .. } => self.unsupported.push("JSON_TABLE".into()),
+                TableFactor::OpenJsonTable { .. } => self.unsupported.push("OPENJSON".into()),
+                TableFactor::Pivot { .. } => self.unsupported.push("PIVOT".into()),
+                TableFactor::Unpivot { .. } => self.unsupported.push("UNPIVOT".into()),
+                TableFactor::MatchRecognize { .. } => {
+                    self.unsupported.push("MATCH_RECOGNIZE".into())
+                }
             }
             ControlFlow::Continue(())
         }
@@ -1789,6 +1881,7 @@ pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
             .collect(),
         functions: c.functions,
         opaque: c.opaque,
+        unsupported: c.unsupported,
     })
 }
 
@@ -2072,6 +2165,56 @@ mod tests {
             referenced_tables(pg, "explain select * from t")
                 .unwrap()
                 .opaque
+                .is_empty()
+        );
+    }
+
+    /// Every way a scoped agent could reach a table the parsed table list does not show.
+    #[test]
+    fn scope_fails_closed() {
+        let pg = Driver::Postgres;
+        let r = |sql: &str| {
+            referenced_tables(pg, sql).unwrap_or_else(|| panic!("did not parse: {sql}"))
+        };
+        // `TABLE x` is a query body without a FROM (reachable in CTEs, subqueries and set operations);
+        // the parser drops identifier quoting, so it is refused rather than matched.
+        assert!(referenced_tables(pg, "TABLE other.secrets").is_none());
+        for sql in [
+            "with x as (table other.secrets) select * from x",
+            "select * from (table other.secrets) t",
+            "select 1 union all table other.secrets",
+        ] {
+            let refs = r(sql);
+            assert_eq!(refs.unsupported, vec!["TABLE statements"], "{sql}");
+            assert!(refs.tables.is_empty(), "{sql}");
+        }
+        // LATERAL function calls are a distinct table factor and must hit the function blocklist.
+        assert_eq!(
+            r("select * from lateral pg_read_file('/etc/passwd') f").functions,
+            vec!["pg_read_file"]
+        );
+        let lat = r("select * from t, lateral jsonb_each(t.doc) x");
+        assert_eq!(lat.tables, vec![(None, "t".into())]);
+        assert_eq!(lat.functions, vec!["jsonb_each"]);
+        assert!(lat.unsupported.is_empty());
+        // search_path changes are either opaque statements or a flagged function call.
+        assert_eq!(
+            r("SET search_path TO other").opaque,
+            vec!["SET search_path"]
+        );
+        assert_eq!(
+            r("select set_config('search_path', 'other', false)").functions,
+            vec!["set_config"]
+        );
+        // Table factors the collector does not understand are reported, not passed.
+        assert_eq!(
+            r("select * from t pivot (sum(x) for y in ('a'))").unsupported,
+            vec!["PIVOT"]
+        );
+        // The everyday shapes stay clean.
+        assert!(
+            r("select * from (select 1) d, unnest(array[1]) u, (t join s on t.id = s.id)")
+                .unsupported
                 .is_empty()
         );
     }

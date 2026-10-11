@@ -915,7 +915,7 @@ pub async fn run_chart(
     req: ChartRequest,
 ) -> Result<QueryResult> {
     let c = ctx(&app, &st);
-    ai::tools::run_chart_source(&c, &req.connection_id, &req.source).await
+    ai::tools::run_chart_source(&c, &req.connection_id, &req.source, None).await
 }
 
 #[tauri::command]
