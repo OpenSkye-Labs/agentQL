@@ -275,16 +275,42 @@ impl SqlConn {
         };
         if res.columns.is_empty() && res.rows.is_empty() && is_query_like(sql) {
             // Zero-row SELECT: still show the headers.
-            res.columns = self.describe_columns(sql).await.unwrap_or_default();
+            res.columns = self
+                .describe_columns(sql, search_path)
+                .await
+                .unwrap_or_default();
         }
         res.duration_ms = start.elapsed().as_millis();
         res.statement = sql.to_string();
         Ok(res)
     }
 
-    async fn describe_columns(&self, sql: &str) -> Result<Vec<Column>> {
-        Ok(match &self.pool {
-            Pool::Pg(p) => p
+    /// Column metadata for a statement; `search_path` pins the Postgres schema the same way
+    /// `run_one_opts` did, so the headers describe the query that actually ran.
+    async fn describe_columns(&self, sql: &str, search_path: Option<&str>) -> Result<Vec<Column>> {
+        let to_columns = |cols: &[sqlx::postgres::PgColumn]| -> Vec<Column> {
+            cols.iter()
+                .map(|c| Column {
+                    name: c.name().to_string(),
+                    type_name: c.type_info().name().to_string(),
+                })
+                .collect()
+        };
+        Ok(match (&self.pool, search_path) {
+            (Pool::Pg(p), Some(schema)) => {
+                let mut tx = p.begin().await?;
+                sqlx::query(&format!(
+                    "SET LOCAL search_path TO {}",
+                    self.quote_ident(schema)
+                ))
+                .execute(&mut *tx)
+                .await?;
+                let d = (&mut *tx).describe(sql).await;
+                let _ = tx.rollback().await;
+                to_columns(d?.columns())
+            }
+            (Pool::Pg(p), None) => to_columns(p.describe(sql).await?.columns()),
+            (Pool::My(p), _) => p
                 .describe(sql)
                 .await?
                 .columns()
@@ -294,17 +320,7 @@ impl SqlConn {
                     type_name: c.type_info().name().to_string(),
                 })
                 .collect(),
-            Pool::My(p) => p
-                .describe(sql)
-                .await?
-                .columns()
-                .iter()
-                .map(|c| Column {
-                    name: c.name().to_string(),
-                    type_name: c.type_info().name().to_string(),
-                })
-                .collect(),
-            Pool::Lite(p) => p
+            (Pool::Lite(p), _) => p
                 .describe(sql)
                 .await?
                 .columns()
