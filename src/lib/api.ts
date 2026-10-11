@@ -5,11 +5,13 @@ import type {
   ConnectionConfig,
   ConnectionSecrets,
   Driver,
+  HistoryEntry,
   MongoFind,
   MongoPage,
   QueryResult,
   RowChange,
   ScanResult,
+  ScopeEntry,
   SchemaObject,
   Settings,
   TableDetails,
@@ -112,6 +114,8 @@ export const api = {
   kvSet: (name: string, value: unknown) => invoke<void>("kv_set", { name, value }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
   writeTextFile: (path: string, contents: string) => invoke<void>("write_text_file", { path, contents }),
+  historyAdd: (entry: HistoryEntry) => invoke<void>("history_add", { entry }),
+  setAgentScope: (id: string, scope: ScopeEntry[] | null) => invoke<void>("set_agent_scope", { id, scope }),
 
   // ai
   aiListSessions: (connectionId?: string) => invoke<ChatSession[]>("ai_list_sessions", { connectionId }),

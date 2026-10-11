@@ -65,10 +65,10 @@ M1 Safety defaults (S)
 
 M2 AI trust and audit (M)
 
-- [ ] First-use consent per connection before schema/data goes to a remote provider
-- [ ] Per-connection scope picker (schemas/tables the agent may see)
-- [ ] Agent-executed statements recorded in query history tagged `agent` with session id
-- [ ] `run_sql` appends `LIMIT row_limit` to bare SELECTs
+- [x] First-use consent per connection before schema/data goes to a remote provider
+- [x] Per-connection scope picker (schemas/tables the agent may see)
+- [x] Agent-executed statements recorded in query history tagged `agent` with session id
+- [x] `run_sql` appends `LIMIT row_limit` to bare SELECTs
 
 M3 Data dictionary (M)
 

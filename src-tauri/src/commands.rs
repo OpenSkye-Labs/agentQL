@@ -757,6 +757,30 @@ pub fn kv_set(st: State<'_, AppState>, name: String, value: Value) -> Result<()>
     st.store.write(&format!("{name}.json"), &value)
 }
 
+/// Update only the agent scope of a connection, so a stale config in the UI cannot clobber
+/// other fields (e.g. a consent granted meanwhile).
+#[tauri::command]
+pub fn set_agent_scope(
+    st: State<'_, AppState>,
+    id: String,
+    scope: Option<Vec<crate::config::ScopeEntry>>,
+) -> Result<()> {
+    let mut list = st.store.connections();
+    let conn = list
+        .iter_mut()
+        .find(|c| c.id == id)
+        .ok_or_else(|| AppError::Msg("connection not found".into()))?;
+    conn.agent_scope = scope;
+    conn.updated_at = Some(chrono::Utc::now().to_rfc3339());
+    st.store.save_connections(&list)
+}
+
+/// Prepend one query-history entry (the UI's own runs); agent runs go through the same store call.
+#[tauri::command]
+pub fn history_add(st: State<'_, AppState>, entry: Value) -> Result<()> {
+    st.store.push_history(entry)
+}
+
 // ----------------------------------------------------------------- ai
 
 #[tauri::command]

@@ -626,6 +626,24 @@ impl SqlConn {
         }
     }
 
+    /// Where an unqualified table name resolves first (Postgres `current_schema()`, the MySQL
+    /// database, SQLite `main`).
+    pub async fn current_schema(&self) -> Result<String> {
+        let sql = match self.driver {
+            Driver::Postgres => "SELECT current_schema() AS name",
+            Driver::Mysql | Driver::Mariadb => "SELECT DATABASE() AS name",
+            _ => return Ok("main".into()),
+        };
+        Ok(self
+            .rows(sql)
+            .await?
+            .into_iter()
+            .next()
+            .and_then(|mut r| r.remove("name"))
+            .and_then(json_str)
+            .unwrap_or_default())
+    }
+
     pub async fn tables(&self, schema: &str) -> Result<Vec<TableInfo>> {
         let rows = match self.driver {
             Driver::Postgres => {
@@ -1432,6 +1450,193 @@ fn describe_writes(s: &sqlparser::ast::Statement) -> Vec<WriteInfo> {
     }
 }
 
+/// Append `LIMIT n` to a single statement that parses as a plain query without its own
+/// LIMIT / OFFSET / FETCH / locking clause. Everything else comes back untouched, so the
+/// agent's `run_sql` never turns valid SQL into invalid SQL.
+pub fn with_limit(driver: Driver, stmt: &str, limit: u32) -> String {
+    use sqlparser::ast::{SetExpr, Statement};
+    let Ok(parsed) = sqlparser::parser::Parser::parse_sql(&*dialect(driver), stmt) else {
+        return stmt.to_string();
+    };
+    match parsed.as_slice() {
+        [Statement::Query(q)]
+            if q.limit.is_none()
+                && q.limit_by.is_empty()
+                && q.offset.is_none()
+                && q.fetch.is_none()
+                && q.locks.is_empty()
+                && q.for_clause.is_none()
+                && !matches!(q.body.as_ref(), SetExpr::Select(s) if s.into.is_some()) =>
+        {
+            // On its own line: the statement may end in a `--` comment.
+            format!(
+                "{}\nLIMIT {limit}",
+                stmt.trim_end().trim_end_matches(';').trim_end()
+            )
+        }
+        _ => stmt.to_string(),
+    }
+}
+
+/// What a piece of SQL touches: tables as `(schema, table)` and every function it calls (lowercased).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SqlRefs {
+    pub tables: Vec<(Option<String>, String)>,
+    pub functions: Vec<String>,
+    /// Statements whose targets the visitor does not report (SHOW, DESCRIBE, PRAGMA, ...).
+    pub opaque: Vec<String>,
+}
+
+/// Every table the SQL reads or writes, with identifiers normalised the way the database resolves
+/// them (Postgres folds unquoted names to lowercase; MySQL and SQLite keep them). CTE names are
+/// skipped only where they are lexically visible, table-valued functions always (they are reported
+/// under `functions`). `None` when the text does not parse, so callers can fail closed.
+pub fn referenced_tables(driver: Driver, sql: &str) -> Option<SqlRefs> {
+    use sqlparser::ast::{Expr, Ident, ObjectName, Query, Statement, TableFactor, Visit, Visitor};
+    use std::ops::ControlFlow;
+    /// One `WITH` clause: its names become visible one by one (all at once when RECURSIVE).
+    struct Frame {
+        owner: *const Query,
+        recursive: bool,
+        names: Vec<String>,
+        bodies: Vec<*const Query>,
+        visible: usize,
+    }
+    #[derive(Default)]
+    struct Collector {
+        driver_folds: bool,
+        frames: Vec<Frame>,
+        /// The `name` nodes of table-valued functions, so only those exact nodes are skipped.
+        function_names: Vec<*const ObjectName>,
+        functions: Vec<String>,
+        relations: Vec<ObjectName>,
+        opaque: Vec<String>,
+    }
+    /// Function names as the database resolves them: quotes dropped, lowercased.
+    fn function_key(n: &ObjectName) -> String {
+        n.0.iter()
+            .map(|i| i.value.to_lowercase())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+    impl Collector {
+        fn norm(&self, i: &Ident) -> String {
+            if i.quote_style.is_none() && self.driver_folds {
+                i.value.to_lowercase()
+            } else {
+                i.value.clone()
+            }
+        }
+    }
+    impl Visitor for Collector {
+        type Break = ();
+        fn pre_visit_query(&mut self, q: &Query) -> ControlFlow<()> {
+            // Entering CTE body i of a non-recursive WITH: only earlier CTEs are visible.
+            if let Some(f) = self.frames.last_mut()
+                && !f.recursive
+                && let Some(i) = f.bodies.iter().position(|b| std::ptr::eq(*b, q))
+            {
+                f.visible = i;
+            }
+            if let Some(w) = &q.with {
+                let names: Vec<String> = w
+                    .cte_tables
+                    .iter()
+                    .map(|c| self.norm(&c.alias.name))
+                    .collect();
+                self.frames.push(Frame {
+                    owner: q,
+                    recursive: w.recursive,
+                    visible: if w.recursive { names.len() } else { 0 },
+                    bodies: w
+                        .cte_tables
+                        .iter()
+                        .map(|c| &*c.query as *const Query)
+                        .collect(),
+                    names,
+                });
+            }
+            ControlFlow::Continue(())
+        }
+        fn post_visit_query(&mut self, q: &Query) -> ControlFlow<()> {
+            if self.frames.last().is_some_and(|f| std::ptr::eq(f.owner, q)) {
+                self.frames.pop();
+            }
+            if let Some(f) = self.frames.last_mut()
+                && !f.recursive
+                && let Some(i) = f.bodies.iter().position(|b| std::ptr::eq(*b, q))
+            {
+                f.visible = i + 1;
+            }
+            ControlFlow::Continue(())
+        }
+        fn pre_visit_table_factor(&mut self, tf: &TableFactor) -> ControlFlow<()> {
+            if let TableFactor::Table {
+                name,
+                args: Some(_),
+                ..
+            } = tf
+            {
+                self.function_names.push(name);
+                self.functions.push(function_key(name));
+            }
+            ControlFlow::Continue(())
+        }
+        fn pre_visit_statement(&mut self, st: &Statement) -> ControlFlow<()> {
+            if !matches!(
+                st,
+                Statement::Query(_)
+                    | Statement::Insert(_)
+                    | Statement::Update { .. }
+                    | Statement::Delete(_)
+                    | Statement::Explain { .. }
+            ) {
+                let text = st.to_string();
+                let head: Vec<&str> = text.split_whitespace().take(2).collect();
+                self.opaque.push(head.join(" "));
+            }
+            ControlFlow::Continue(())
+        }
+        fn pre_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
+            if let Expr::Function(f) = e {
+                self.functions.push(function_key(&f.name));
+            }
+            ControlFlow::Continue(())
+        }
+        fn pre_visit_relation(&mut self, r: &ObjectName) -> ControlFlow<()> {
+            let is_cte = r.0.len() == 1
+                && self.frames.iter().any(|f| {
+                    let n = self.norm(&r.0[0]);
+                    f.names[..f.visible].contains(&n)
+                });
+            let is_function = self.function_names.iter().any(|n| std::ptr::eq(*n, r));
+            if !is_cte && !is_function {
+                self.relations.push(r.clone());
+            }
+            ControlFlow::Continue(())
+        }
+    }
+    let stmts = sqlparser::parser::Parser::parse_sql(&*dialect(driver), sql).ok()?;
+    let mut c = Collector {
+        driver_folds: driver == Driver::Postgres,
+        ..Default::default()
+    };
+    let _ = stmts.visit(&mut c);
+    Some(SqlRefs {
+        tables: c
+            .relations
+            .iter()
+            .map(|r| {
+                let mut parts: Vec<String> = r.0.iter().map(|i| c.norm(i)).collect();
+                let table = parts.pop().unwrap_or_default();
+                (parts.pop(), table)
+            })
+            .collect(),
+        functions: c.functions,
+        opaque: c.opaque,
+    })
+}
+
 fn first_word(sql: &str) -> String {
     sql.trim_start()
         .split(|c: char| c.is_whitespace() || c == '(')
@@ -1592,5 +1797,118 @@ mod tests {
             SqlConn::validate_filter_for(Driver::Postgres, Some("0; DELETE FROM t; --")).is_err()
         );
         assert!(SqlConn::validate_filter_for(Driver::Postgres, Some("name = 'a;b'")).is_ok());
+    }
+
+    #[test]
+    fn limit_and_scope_helpers() {
+        let pg = Driver::Postgres;
+        assert_eq!(
+            with_limit(pg, "select * from t -- note", 50),
+            "select * from t -- note\nLIMIT 50"
+        );
+        assert_eq!(
+            with_limit(pg, "with x as (select 1) select * from x;", 5),
+            "with x as (select 1) select * from x\nLIMIT 5"
+        );
+        for untouched in [
+            "select * from t limit 10",
+            "select * from t offset 5",
+            "select * from t for update",
+            "delete from t",
+            "select * from t where",
+            "select * into t2 from t",
+        ] {
+            assert_eq!(with_limit(pg, untouched, 7), untouched, "{untouched}");
+        }
+        assert_eq!(
+            with_limit(Driver::Mysql, "select * from `t`", 3),
+            "select * from `t`\nLIMIT 3"
+        );
+
+        let t = |sql: &str| referenced_tables(pg, sql).unwrap().tables;
+        assert_eq!(
+            t("select a.id from public.users a join orders o on o.uid = a.id"),
+            vec![
+                (Some("public".into()), "users".into()),
+                (None, "orders".into())
+            ]
+        );
+        assert_eq!(
+            t("with recent as (select * from events) select * from recent, generate_series(1, 3)"),
+            vec![(None, "events".into())]
+        );
+        assert_eq!(
+            t("insert into audit.log (a) select a from src"),
+            vec![(Some("audit".into()), "log".into()), (None, "src".into())]
+        );
+        assert_eq!(t("select 1"), Vec::<(Option<String>, String)>::new());
+        assert!(referenced_tables(pg, "select * from").is_none());
+        // CTE names only shadow where they are visible.
+        assert_eq!(
+            t("with secret as (select 1) select * from secret; select * from secret"),
+            vec![(None, "secret".into())]
+        );
+        assert_eq!(
+            t("with a as (select * from a), b as (select * from a) select * from b"),
+            vec![(None, "a".into())]
+        );
+        assert_eq!(
+            t("with recursive a as (select 1 union select * from a) select * from a"),
+            Vec::<(Option<String>, String)>::new()
+        );
+        assert_eq!(
+            t("select * from (with x as (select 1) select * from x) y, x"),
+            vec![(None, "x".into())]
+        );
+        // Identifier folding follows the dialect.
+        assert_eq!(
+            t(r#"select * from Public."Users", users"#),
+            vec![
+                (Some("public".into()), "Users".into()),
+                (None, "users".into())
+            ]
+        );
+        assert_eq!(
+            referenced_tables(Driver::Mysql, "select * from App.Users")
+                .unwrap()
+                .tables,
+            vec![(Some("App".into()), "Users".into())]
+        );
+        // Table functions are skipped only at their own node; calls are reported.
+        assert_eq!(
+            t("select * from generate_series(1, 1); select * from generate_series"),
+            vec![(None, "generate_series".into())]
+        );
+        assert_eq!(
+            referenced_tables(
+                pg,
+                "select query_to_xml('select 1', true, false, ''), Upper(x) from t"
+            )
+            .unwrap()
+            .functions,
+            vec!["query_to_xml", "upper"]
+        );
+        assert_eq!(
+            referenced_tables(pg, r#"select "query_to_xml"('select 1', true, false, '')"#)
+                .unwrap()
+                .functions,
+            vec!["query_to_xml"]
+        );
+        assert_eq!(
+            referenced_tables(Driver::Sqlite, "select * from pragma_table_info('t')")
+                .unwrap()
+                .functions,
+            vec!["pragma_table_info"]
+        );
+        // Statements the visitor cannot see into are reported so scoped runs can refuse them.
+        let r = referenced_tables(Driver::Mysql, "show create table x.t; show tables").unwrap();
+        assert!(r.tables.is_empty());
+        assert_eq!(r.opaque, vec!["SHOW CREATE", "SHOW TABLES"]);
+        assert!(
+            referenced_tables(pg, "explain select * from t")
+                .unwrap()
+                .opaque
+                .is_empty()
+        );
     }
 }
