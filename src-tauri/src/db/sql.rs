@@ -445,13 +445,19 @@ impl SqlConn {
     // ---------------------------------------------------------------- browsing
 
     /// A browse filter must be exactly one expression: no extra statements or trailing comments.
-    pub fn validate_filter(filter: Option<&str>) -> Result<()> {
+    pub fn validate_filter(&self, filter: Option<&str>) -> Result<()> {
+        Self::validate_filter_for(self.driver, filter)
+    }
+
+    pub fn validate_filter_for(driver: Driver, filter: Option<&str>) -> Result<()> {
         let Some(f) = filter.map(str::trim).filter(|f| !f.is_empty()) else {
             return Ok(());
         };
         let parts = split_statements(f);
         // Comment markers only count outside '…' literals (an FK key value may legitimately contain "--").
-        let code = blank_string_literals(f);
+        // Only MySQL/MariaDB treat a backslash as an escape inside a literal; on Postgres/SQLite `'a\'` is closed.
+        let backslash = matches!(driver, Driver::Mysql | Driver::Mariadb);
+        let code = blank_string_literals(f, backslash);
         if parts.len() != 1
             || parts[0] != f.trim_end_matches(';').trim()
             || code.contains("--")
@@ -1067,8 +1073,8 @@ macro_rules! exec_stream {
 use exec_stream;
 
 /// Replace the contents of single-quoted literals by spaces so lexical checks skip them.
-/// Mirrors `split_statements`: `''` and a backslash-escaped character stay inside the literal.
-fn blank_string_literals(sql: &str) -> String {
+/// `''` stays inside the literal; with `backslash` (MySQL dialects) so does a backslash-escaped character.
+fn blank_string_literals(sql: &str, backslash: bool) -> String {
     let mut out = String::with_capacity(sql.len());
     let mut in_str = false;
     let mut chars = sql.chars();
@@ -1078,7 +1084,7 @@ fn blank_string_literals(sql: &str) -> String {
             out.push(c);
         } else if in_str {
             out.push(' ');
-            if c == '\\' && chars.next().is_some() {
+            if backslash && c == '\\' && chars.next().is_some() {
                 out.push(' ');
             }
         } else {
@@ -1439,14 +1445,15 @@ mod tests {
     use super::*;
     #[test]
     fn filter_allows_comment_markers_inside_literals() {
-        assert!(
-            SqlConn::validate_filter(Some("\"code\" = 'a--b' AND \"x\" = 'it''s /* ok */'"))
-                .is_ok()
-        );
-        assert!(SqlConn::validate_filter(Some("\"x\" = 'a\\' -- '")).is_ok()); // MySQL backslash escape
-        assert!(SqlConn::validate_filter(Some("\"id\" = 1 -- drop")).is_err());
-        assert!(SqlConn::validate_filter(Some("\"id\" = 1 /* c */")).is_err());
-        assert!(SqlConn::validate_filter(Some("\"id\" = 1; delete from t")).is_err());
+        let pg = |f| SqlConn::validate_filter_for(Driver::Postgres, Some(f));
+        let my = |f| SqlConn::validate_filter_for(Driver::Mysql, Some(f));
+        assert!(pg("\"code\" = 'a--b' AND \"x\" = 'it''s /* ok */'").is_ok());
+        // Backslash escapes only exist in MySQL dialects; on Postgres `'a\'` is a closed literal + comment.
+        assert!(my("\"x\" = 'a\\' -- '").is_ok());
+        assert!(pg("\"x\" = 'a\\' -- '").is_err());
+        assert!(pg("\"id\" = 1 -- drop").is_err());
+        assert!(pg("\"id\" = 1 /* c */").is_err());
+        assert!(pg("\"id\" = 1; delete from t").is_err());
     }
 
     #[test]
@@ -1580,8 +1587,10 @@ mod tests {
             Driver::Postgres,
             "WITH x AS (select 1) FROBNICATE"
         ));
-        assert!(SqlConn::validate_filter(Some("id = 1")).is_ok());
-        assert!(SqlConn::validate_filter(Some("0; DELETE FROM t; --")).is_err());
-        assert!(SqlConn::validate_filter(Some("name = 'a;b'")).is_ok());
+        assert!(SqlConn::validate_filter_for(Driver::Postgres, Some("id = 1")).is_ok());
+        assert!(
+            SqlConn::validate_filter_for(Driver::Postgres, Some("0; DELETE FROM t; --")).is_err()
+        );
+        assert!(SqlConn::validate_filter_for(Driver::Postgres, Some("name = 'a;b'")).is_ok());
     }
 }
