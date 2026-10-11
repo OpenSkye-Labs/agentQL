@@ -35,9 +35,9 @@
   --selection: rgba(59, 108, 246, 0.18);
   --shadow: 0 4px 16px rgba(20, 24, 40, 0.14);
   --syn-keyword: #a626a4;
-  --syn-string: #50a14f;
+  --syn-string: #418240;
   --syn-number: #986801;
-  --syn-type: #4078f2;
+  --syn-type: #2d6af1;
   /* chart palette (validated categorical order) */
   --series-1: #2a78d6;
   --series-2: #eb6834;
@@ -219,10 +219,10 @@
   --null: #839496;
   --selection: rgba(38, 139, 210, 0.2);
   --shadow: 0 4px 16px rgba(88, 110, 117, 0.2);
-  --syn-keyword: #859900;
-  --syn-string: #2aa198;
-  --syn-number: #d33682;
-  --syn-type: #268bd2;
+  --syn-keyword: #667500;
+  --syn-string: #1f7972;
+  --syn-number: #c92c78;
+  --syn-type: #2074af;
   --series-1: #268bd2;
   --series-2: #cb4b16;
   --series-3: #859900;
@@ -255,10 +255,10 @@
   --null: #657b83;
   --selection: rgba(42, 161, 152, 0.25);
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  --syn-keyword: #859900;
-  --syn-string: #2aa198;
-  --syn-number: #d33682;
-  --syn-type: #268bd2;
+  --syn-keyword: #92a800;
+  --syn-string: #2dada3;
+  --syn-number: #e279ac;
+  --syn-type: #4ca2df;
   --series-1: #268bd2;
   --series-2: #cb4b16;
   --series-3: #859900;
@@ -291,9 +291,9 @@
   --null: #8f9bb3;
   --selection: rgba(136, 192, 208, 0.25);
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
-  --syn-keyword: #81a1c1;
+  --syn-keyword: #99b3cd;
   --syn-string: #a3be8c;
-  --syn-number: #b48ead;
+  --syn-number: #c4a7bf;
   --syn-type: #8fbcbb;
   --series-1: #88c0d0;
   --series-2: #d08770;

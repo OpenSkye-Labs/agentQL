@@ -52,6 +52,11 @@ const PAIRS = [
   ["--fg", "--bg"],
   ["--fg", "--bg-elev"],
   ["--accent-fg", "--accent"],
+  // the SQL editor paints on --bg-elev
+  ["--syn-keyword", "--bg-elev"],
+  ["--syn-string", "--bg-elev"],
+  ["--syn-number", "--bg-elev"],
+  ["--syn-type", "--bg-elev"],
 ] as const;
 
 for (const { id } of THEMES) {
