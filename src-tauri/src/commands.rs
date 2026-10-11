@@ -731,6 +731,12 @@ pub fn has_provider_key(st: State<'_, AppState>, provider_id: String) -> bool {
         .is_some_and(|k| !k.is_empty())
 }
 
+/// "dark" / "light" when the OS preference is known natively, `None` to use the WebView's media query.
+#[tauri::command]
+pub async fn system_theme() -> Result<Option<&'static str>> {
+    blocking(|| Ok(crate::os_theme::detect())).await
+}
+
 #[tauri::command]
 pub fn detect_clis() -> Value {
     json!({ "claude": ai::providers::which("claude"), "codex": ai::providers::which("codex") })
