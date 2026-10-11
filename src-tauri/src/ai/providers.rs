@@ -466,7 +466,12 @@ pub async fn run_cli(
             if let Some(id) = &session.cli_session_id {
                 c.args(["resume", id]);
             }
-            c.args(["--json", "--skip-git-repo-check", "--sandbox", "read-only"])
+            // `exec resume` rejects `--sandbox`, so the sandbox goes through `-c` (accepted by both paths).
+            // approval_policy=never: `codex exec` is non-interactive and auto-denies approval requests,
+            // which silently blocked every MCP (database) tool call; writes are still gated by the in-app approval.
+            c.args(["--json", "--skip-git-repo-check"])
+                .args(["-c", "sandbox_mode=\"read-only\""])
+                .args(["-c", "approval_policy=\"never\""])
                 .args(["-c", &format!("mcp_servers.agentql.url=\"{url}\"")])
                 .args([
                     "-c",

@@ -14,8 +14,8 @@ behaviour (the `SET LOCAL` pin) is not integration-tested; the `live` suite need
 
 1 comment, addressed:
 
-| #   | Sev   | Finding                                                                                                  | Resolution                                                                                                         |
-| --- | ----- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| #   | Sev   | Finding                                                                                                     | Resolution                                                                                                             |
+| --- | ----- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | 1   | minor | Zero-row column-header fallback (`describe_columns`) ran on a pooled connection without the search_path pin | `describe_columns` takes the pin; on Postgres it describes inside a transaction after the same `SET LOCAL search_path` |
 
 ## 2026-10-11 — Codex round 2 (`codex exec review --uncommitted`, the describe fix)
