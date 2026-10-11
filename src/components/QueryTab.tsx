@@ -415,6 +415,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
             history.length
               ? history.slice(0, 15).map((h) => ({
                   label: `${h.ok ? "✓" : "✗"} ${h.sql.replace(/\s+/g, " ").slice(0, 60)}`,
+                  icon: h.source === "agent" ? <Bot size={13} /> : <span className="w-[13px]" />,
                   onSelect: () => updateTab(tab.id, { sql: h.sql }),
                 }))
               : [{ label: "No history yet", disabled: true }]

@@ -29,6 +29,8 @@ fn cfg(driver: Driver, port: u16, user: &str, database: &str) -> ConnectionConfi
         ssh: None,
         read_only: false,
         environment: None,
+        agent_scope: None,
+        agent_remote_consent_at: None,
         options: HashMap::new(),
         created_at: None,
         updated_at: None,

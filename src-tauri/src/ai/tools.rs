@@ -2,11 +2,215 @@
 //! `db::Manager`, so API-key providers and CLI providers behave identically.
 
 use super::{AgentEvent, ChatSession, Ctx, ToolDef};
-use crate::config::Driver;
+use crate::config::{Driver, ScopeEntry};
 use crate::db::mongo::MongoFind;
-use crate::db::sql::{is_read_only, split_statements};
+use crate::db::sql::{SqlConn, is_read_only, referenced_tables, split_statements, with_limit};
 use crate::db::{Live, QueryResult};
 use serde_json::{Value, json};
+use tauri::Emitter;
+
+/// The agent's allowed view of a SQL connection; `None` = unrestricted. Names compare exactly
+/// (catalog spelling), except on SQLite where table names are case-insensitive.
+/// ponytail: SQL only. Mongo/Redis stay unscoped until someone asks for db/collection scope.
+struct Scope<'a> {
+    entries: Option<&'a [ScopeEntry]>,
+    fold: bool,
+}
+
+/// Always from the store, not the live session: the user can change the scope while connected.
+fn stored_scope(ctx: &Ctx, connection_id: &str) -> Option<Vec<ScopeEntry>> {
+    ctx.store
+        .connections()
+        .into_iter()
+        .find(|c| c.id == connection_id)
+        .and_then(|c| c.agent_scope)
+}
+
+impl<'a> Scope<'a> {
+    fn new(entries: Option<&'a [ScopeEntry]>, driver: Driver) -> Self {
+        Scope {
+            entries,
+            fold: driver == Driver::Sqlite,
+        }
+    }
+    fn same(&self, a: &str, b: &str) -> bool {
+        if self.fold {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a == b
+        }
+    }
+    fn schema_allowed(&self, schema: &str) -> bool {
+        self.entries
+            .is_none_or(|e| e.iter().any(|x| self.same(&x.schema, schema)))
+    }
+    fn table_allowed(&self, schema: &str, table: &str) -> bool {
+        self.entries.is_none_or(|e| {
+            e.iter().any(|x| {
+                self.same(&x.schema, schema)
+                    && x.table.as_deref().is_none_or(|t| self.same(t, table))
+            })
+        })
+    }
+}
+
+/// Functions that read data by name or run SQL from a string, so the parsed table list cannot see
+/// what they touch. Refused while a scope is set.
+/// ponytail: blocklist of the known Postgres/MySQL readers; the upgrade is an allowlist of pure functions.
+const DYNAMIC_SQL_FUNCTIONS: &[&str] = &[
+    "query_to_xml",
+    "query_to_xmlschema",
+    "query_to_xml_and_xmlschema",
+    "table_to_xml",
+    "table_to_xmlschema",
+    "table_to_xml_and_xmlschema",
+    "cursor_to_xml",
+    "cursor_to_xmlschema",
+    "schema_to_xml",
+    "schema_to_xmlschema",
+    "schema_to_xml_and_xmlschema",
+    "database_to_xml",
+    "database_to_xmlschema",
+    "database_to_xml_and_xmlschema",
+    "dblink",
+    "dblink_exec",
+    "dblink_open",
+    "dblink_fetch",
+    "dblink_get_result",
+    "pg_read_file",
+    "pg_read_binary_file",
+    "pg_stat_file",
+    "pg_ls_dir",
+    "pg_ls_logdir",
+    "pg_ls_waldir",
+    "ts_stat",
+    "lo_get",
+    "lo_open",
+    "loread",
+    "lo_import",
+    "lo_export",
+    "pg_logical_slot_get_changes",
+    "pg_logical_slot_peek_changes",
+    "load_file",
+];
+
+const OUT_OF_SCOPE: &str = "is outside the agent scope for this connection (the user picks it with the Scope button in the assistant). Do not try to reach it another way.";
+
+/// Enforce the connection's agent scope on SQL the model wants to run, using the parsed table list.
+/// An unqualified name is taken as `<current schema>.<name>` and must exist there (so a search_path
+/// fallthrough to another schema cannot slip past). Unparsable SQL is refused while a scope is set.
+async fn check_sql_scope(
+    c: &SqlConn,
+    driver: Driver,
+    scope: &Scope<'_>,
+    sql: &str,
+) -> crate::error::Result<()> {
+    if scope.entries.is_none() {
+        return Ok(());
+    }
+    // MySQL runs `/*! ... */` and `/*+ ... */` comment bodies that the parser only sees as whitespace.
+    if sql.contains("/*!") || sql.contains("/*+") {
+        return Err(
+            "executable comments (/*! */, /*+ */) are not allowed while an agent scope is set"
+                .into(),
+        );
+    }
+    let Some(refs) = referenced_tables(driver, sql) else {
+        return Err("could not parse this SQL to check it against the agent scope; simplify it and qualify table names with their schema".into());
+    };
+    if let Some(st) = refs.opaque.first() {
+        return Err(format!("{st} statements are not allowed while an agent scope is set; use list_tables / describe_table instead.").into());
+    }
+    if let Some(f) = refs.functions.iter().find(|f| {
+        let bare = f.rsplit('.').next().unwrap_or(f);
+        // SQLite's pragma_* table functions read metadata of any table by name.
+        DYNAMIC_SQL_FUNCTIONS.contains(&bare) || bare.starts_with("pragma_")
+    }) {
+        return Err(format!("{f}() reads data outside the parsed table list and is not allowed while an agent scope is set.").into());
+    }
+    let mut current: Option<(String, Vec<String>)> = None;
+    for (schema, table) in refs.tables {
+        let ok = match schema.as_deref() {
+            Some(sch) => scope.table_allowed(sch, &table),
+            None => {
+                if current.is_none() {
+                    let cs = c.current_schema().await?;
+                    let names = c.tables(&cs).await?.into_iter().map(|t| t.name).collect();
+                    current = Some((cs, names));
+                }
+                let (cs, names) = current.as_ref().expect("set above");
+                names.iter().any(|n| scope.same(n, &table)) && scope.table_allowed(cs, &table)
+            }
+        };
+        if !ok {
+            let full = schema.map(|s| format!("{s}.{table}")).unwrap_or(table);
+            return Err(
+                format!("'{full}' {OUT_OF_SCOPE} Qualify table names with their schema.").into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Default schema for unqualified calls: the first one the agent may see.
+async fn default_schema(c: &SqlConn, scope: &Scope<'_>) -> crate::error::Result<String> {
+    Ok(c.schemas()
+        .await?
+        .into_iter()
+        .find(|s| scope.schema_allowed(s))
+        .unwrap_or_default())
+}
+
+/// Chart sources run SQL on the agent's behalf too: same scope check, same audit trail.
+async fn run_agent_chart(
+    ctx: &Ctx,
+    session: &ChatSession,
+    conn: &crate::db::Session,
+    scope: &Scope<'_>,
+    source: &Value,
+) -> crate::error::Result<QueryResult> {
+    let sql = match (&conn.live, source.get("sql").and_then(|s| s.as_str())) {
+        (Live::Sql(c), Some(sql)) => {
+            check_sql_scope(c, conn.config.driver, scope, sql).await?;
+            Some(sql)
+        }
+        _ => None,
+    };
+    let started = std::time::Instant::now();
+    let res = run_chart_source(ctx, &session.connection_id, source)
+        .await
+        .map(|r| vec![r]);
+    if let Some(sql) = sql {
+        record_history(ctx, session, sql, started.elapsed().as_millis(), &res);
+    }
+    res.map(|mut v| v.remove(0))
+}
+
+/// Every statement the agent executes lands in the normal query history, tagged with the session.
+fn record_history(
+    ctx: &Ctx,
+    session: &ChatSession,
+    sql: &str,
+    ms: u128,
+    res: &crate::error::Result<Vec<QueryResult>>,
+) {
+    let mut entry = json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "connection_id": session.connection_id,
+        "sql": sql,
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "duration_ms": ms,
+        "ok": res.is_ok(),
+        "source": "agent",
+        "session_id": session.id,
+    });
+    if let Ok(results) = res {
+        entry["rows"] = json!(results.iter().map(|r| r.rows.len()).sum::<usize>());
+    }
+    if ctx.store.push_history(entry.clone()).is_ok() {
+        let _ = ctx.app.emit("history:added", &entry);
+    }
+}
 
 pub struct ToolOutput {
     pub content: String,
@@ -141,21 +345,30 @@ pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
     }
     match &conn.live {
         Live::Sql(c) => {
+            let scope_entries = stored_scope(ctx, &session.connection_id);
+            let scope = Scope::new(scope_entries.as_deref(), cfg.driver);
+            if scope_entries.is_some() {
+                s.push_str(
+                    "The user limited your view of this database to the schemas and tables listed below. \
+                     Never query anything else (including information_schema or pg_catalog); use describe_table for metadata.\n",
+                );
+            }
             if let Ok(schemas) = c.schemas().await {
                 s.push_str("\nSchemas and tables:\n");
                 let mut budget = 150usize;
-                for schema in schemas.iter().take(10) {
+                for schema in schemas.iter().filter(|x| scope.schema_allowed(x)).take(10) {
                     if let Ok(tables) = c.tables(schema).await {
-                        let names: Vec<&str> = tables
+                        let visible: Vec<&str> = tables
                             .iter()
-                            .take(budget)
+                            .filter(|t| scope.table_allowed(schema, &t.name))
                             .map(|t| t.name.as_str())
                             .collect();
+                        let names = &visible[..visible.len().min(budget)];
                         budget = budget.saturating_sub(names.len());
                         s.push_str(&format!(
                             "- {schema}: {}{}\n",
                             names.join(", "),
-                            if tables.len() > names.len() {
+                            if visible.len() > names.len() {
                                 ", …"
                             } else {
                                 ""
@@ -219,17 +432,31 @@ async fn execute_inner(
     let conn = ctx.manager.get(&session.connection_id).await?;
     let settings = ctx.store.settings();
     let writes_allowed = settings.agent_allow_writes && !conn.config.read_only;
+    let scope_entries = stored_scope(ctx, &session.connection_id);
+    let scope = Scope::new(scope_entries.as_deref(), conn.config.driver);
 
     match (&conn.live, name) {
-        (Live::Sql(c), "list_schemas") => Ok(ok(serde_json::to_string(&c.schemas().await?)?, None)),
+        (Live::Sql(c), "list_schemas") => {
+            let schemas: Vec<String> = c
+                .schemas()
+                .await?
+                .into_iter()
+                .filter(|s| scope.schema_allowed(s))
+                .collect();
+            Ok(ok(serde_json::to_string(&schemas)?, None))
+        }
         (Live::Sql(c), "list_tables") => {
             let schema = match str_arg(input, "schema") {
                 Some(s) => s.to_string(),
-                None => c.schemas().await?.into_iter().next().unwrap_or_default(),
+                None => default_schema(c, &scope).await?,
             };
+            if !scope.schema_allowed(&schema) {
+                return Ok(err(format!("schema '{schema}' {OUT_OF_SCOPE}")));
+            }
             let tables = c.tables(&schema).await?;
             let lines: Vec<String> = tables
                 .iter()
+                .filter(|t| scope.table_allowed(&schema, &t.name))
                 .map(|t| {
                     format!(
                         "{} ({}{})",
@@ -247,8 +474,11 @@ async fn execute_inner(
             let table = str_arg(input, "table").ok_or("table is required")?;
             let schema = match str_arg(input, "schema") {
                 Some(s) => s.to_string(),
-                None => c.schemas().await?.into_iter().next().unwrap_or_default(),
+                None => default_schema(c, &scope).await?,
             };
+            if !scope.table_allowed(&schema, table) {
+                return Ok(err(format!("'{schema}.{table}' {OUT_OF_SCOPE}")));
+            }
             let d = c.table_details(&schema, table).await?;
             let mut s = format!("Table {schema}.{table}\nColumns:\n");
             for col in &d.columns {
@@ -301,6 +531,7 @@ async fn execute_inner(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(200)
                 .min(2000) as u32;
+            check_sql_scope(c, conn.config.driver, &scope, sql).await?;
             let read_only = is_read_only(conn.config.driver, sql);
             if !read_only {
                 if !writes_allowed {
@@ -314,12 +545,26 @@ async fn execute_inner(
                 {
                     return Ok(err("The user declined to run this statement."));
                 }
+                // The scope may have been narrowed while the card was waiting.
+                let fresh = stored_scope(ctx, &session.connection_id);
+                let scope = Scope::new(fresh.as_deref(), conn.config.driver);
+                check_sql_scope(c, conn.config.driver, &scope, sql).await?;
             }
-            let results = if read_only {
-                c.run_read_only(sql, limit).await?
+            // Bare SELECTs get the row cap pushed into the database so it stops scanning early;
+            // one extra row so the client-side `truncated` flag still fires.
+            let sql = split_statements(sql)
+                .iter()
+                .map(|st| with_limit(conn.config.driver, st, limit + 1))
+                .collect::<Vec<_>>()
+                .join("\n;\n");
+            let started = std::time::Instant::now();
+            let res = if read_only {
+                c.run_read_only(&sql, limit).await
             } else {
-                c.run(sql, limit).await?
+                c.run(&sql, limit).await
             };
+            record_history(ctx, session, &sql, started.elapsed().as_millis(), &res);
+            let results = res?;
             let mut text = String::new();
             for r in &results {
                 text.push_str(&format_result(r, 50));
@@ -336,15 +581,18 @@ async fn execute_inner(
                 .get("analyze")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            check_sql_scope(c, conn.config.driver, &scope, sql).await?;
             if analyze && !is_read_only(conn.config.driver, sql) {
                 return Ok(err(
                     "EXPLAIN ANALYZE would execute a write statement; run plain explain instead.",
                 ));
             }
             let stmt = split_statements(sql).into_iter().next().unwrap_or_default();
-            let r = c
-                .run_one_read_only(&c.explain_sql(&stmt, analyze), 5000)
-                .await?;
+            let explain = c.explain_sql(&stmt, analyze);
+            let started = std::time::Instant::now();
+            let res = c.run_one_read_only(&explain, 5000).await.map(|r| vec![r]);
+            record_history(ctx, session, &explain, started.elapsed().as_millis(), &res);
+            let r = res?.remove(0);
             let plan: Vec<String> = r
                 .rows
                 .iter()
@@ -505,7 +753,7 @@ async fn execute_inner(
         }
         (_, "create_chart") => {
             let spec = chart_spec(input, &conn.config.driver)?;
-            let data = run_chart_source(ctx, &session.connection_id, &spec["source"]).await?;
+            let data = run_agent_chart(ctx, session, &conn, &scope, &spec["source"]).await?;
             let summary = format!(
                 "Chart '{}' ready: {} rows, columns {}",
                 spec["title"].as_str().unwrap_or(""),
@@ -531,7 +779,7 @@ async fn execute_inner(
             let mut notes = vec![];
             for c in charts {
                 let spec = chart_spec(c, &conn.config.driver)?;
-                match run_chart_source(ctx, &session.connection_id, &spec["source"]).await {
+                match run_agent_chart(ctx, session, &conn, &scope, &spec["source"]).await {
                     Ok(data) => {
                         notes.push(format!(
                             "✓ {} ({} rows)",

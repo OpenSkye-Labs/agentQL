@@ -21,6 +21,12 @@ export interface SshConfig {
   auth: SshAuth;
 }
 
+/** One allowed item of the agent scope: a whole schema (no table) or a single table. */
+export interface ScopeEntry {
+  schema: string;
+  table?: string;
+}
+
 export type Environment = "dev" | "staging" | "production";
 export const ENVIRONMENTS: Environment[] = ["dev", "staging", "production"];
 
@@ -49,6 +55,10 @@ export interface ConnectionConfig {
   read_only: boolean;
   environment?: Environment | null;
   options: Record<string, string>;
+  /** Schemas/tables the AI agent may see; absent = everything. */
+  agent_scope?: ScopeEntry[] | null;
+  /** When the user allowed sending this connection's schema and data to a remote LLM provider. */
+  agent_remote_consent_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -223,7 +233,7 @@ export type AgentEvent =
   | { kind: "text_delta"; text: string }
   | { kind: "tool_call"; id: string; name: string; input: unknown }
   | { kind: "tool_result"; id: string; content: string; is_error: boolean; display: unknown }
-  | { kind: "approval_request"; id: string; description: string; statement: string }
+  | { kind: "approval_request"; id: string; approval_kind: "write" | "consent"; description: string; statement: string }
   | { kind: "status"; text: string }
   | { kind: "done"; session: ChatSession }
   | { kind: "error"; message: string };
@@ -279,4 +289,7 @@ export interface HistoryEntry {
   duration_ms: number;
   ok: boolean;
   rows?: number;
+  /** Set when the AI agent ran the statement. */
+  source?: "agent";
+  session_id?: string;
 }

@@ -101,6 +101,8 @@ pub enum AgentEvent {
     },
     ApprovalRequest {
         id: String,
+        /// `write` (run a statement) or `consent` (send schema/data to a remote provider).
+        approval_kind: String,
         description: String,
         statement: String,
     },
@@ -194,6 +196,17 @@ impl Ctx {
         description: &str,
         statement: &str,
     ) -> bool {
+        self.request_decision(session_id, "write", description, statement)
+            .await
+    }
+
+    pub async fn request_decision(
+        &self,
+        session_id: &str,
+        kind: &str,
+        description: &str,
+        statement: &str,
+    ) -> bool {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
         self.agent
@@ -205,6 +218,7 @@ impl Ctx {
             session_id,
             &AgentEvent::ApprovalRequest {
                 id: id.clone(),
+                approval_kind: kind.into(),
                 description: description.into(),
                 statement: statement.into(),
             },
@@ -225,6 +239,91 @@ fn provider_for(ctx: &Ctx, id: &str) -> Result<LlmProvider> {
         .ok_or_else(|| {
             AppError::Msg("LLM provider not configured. Open Settings → AI providers.".into())
         })
+}
+
+/// API providers talking to a non-local base URL send the user's schema and data off the machine.
+/// CLI providers count as local: the user already configured those tools' own data policy.
+pub fn is_remote_provider(p: &LlmProvider) -> bool {
+    if matches!(p.kind.as_str(), "claude_cli" | "codex_cli") {
+        return false;
+    }
+    match p
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+    {
+        None => true,
+        Some(base) => !url::Url::parse(base).is_ok_and(|u| {
+            u.host_str().is_some_and(|h| {
+                let h = h.trim_matches(['[', ']']);
+                h == "localhost"
+                    || h.ends_with(".localhost")
+                    || h == "host.docker.internal"
+                    || h.parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
+            })
+        }),
+    }
+}
+
+/// First-use consent per connection before anything reaches a remote provider.
+/// Resolved through the same card as write approvals; remembered on the connection.
+async fn ensure_remote_consent(
+    ctx: &Ctx,
+    session: &ChatSession,
+    provider: &LlmProvider,
+) -> Result<()> {
+    if !is_remote_provider(provider) {
+        return Ok(());
+    }
+    let Some(conn) = ctx
+        .store
+        .connections()
+        .into_iter()
+        .find(|c| c.id == session.connection_id)
+    else {
+        return Err(AppError::Msg("connection not found".into()));
+    };
+    if conn.agent_remote_consent_at.is_some() {
+        return Ok(());
+    }
+    let scope = match &conn.agent_scope {
+        None => "every schema and table on this connection".to_string(),
+        Some(s) => format!("{} scoped item(s) you picked for the agent", s.len()),
+    };
+    let statement = format!(
+        "{} is a remote service. While you chat, AgentQL sends it:
+         • schema and table names ({scope})
+         • column names, types, indexes and foreign keys of tables the agent inspects
+         • the SQL it runs and the result rows it requests (truncated per query)
+         Nothing has been sent yet. You can revoke this later in the connection settings.",
+        provider.name
+    );
+    let allowed = ctx
+        .request_decision(
+            &session.id,
+            "consent",
+            &format!(
+                "Share this connection's schema and data with {}?",
+                provider.name
+            ),
+            &statement,
+        )
+        .await;
+    if !allowed {
+        return Err(AppError::Msg(
+            "Not sent. Allow sharing to use this provider, or switch to a local one (CLI or a localhost base URL)."
+                .into(),
+        ));
+    }
+    // Reload: the user may have edited connections while the card was waiting.
+    let mut list = ctx.store.connections();
+    let Some(conn) = list.iter_mut().find(|c| c.id == session.connection_id) else {
+        return Err(AppError::Msg("connection not found".into()));
+    };
+    conn.agent_remote_consent_at = Some(chrono::Utc::now().to_rfc3339());
+    ctx.store.save_connections(&list)
 }
 
 /// One user turn: append message, run the model with tools until it stops, persist.
@@ -254,6 +353,8 @@ pub async fn run_turn(ctx: Ctx, session_id: String, user_text: String) -> Result
 async fn run_turn_inner(ctx: &Ctx, session_id: &str, user_text: String) -> Result<ChatSession> {
     let mut session = ctx.load_session(session_id)?;
     let provider = provider_for(ctx, &session.provider_id)?;
+    // Before the message is even stored: a decline leaves the session untouched.
+    ensure_remote_consent(ctx, &session, &provider).await?;
     if session.messages.is_empty() {
         session.title = user_text
             .chars()
@@ -344,4 +445,39 @@ async fn run_turn_inner(ctx: &Ctx, session_id: &str, user_text: String) -> Resul
         ctx.save_session(&mut session)?;
     }
     Ok(session)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn remote_detection() {
+        let p = |kind: &str, base: Option<&str>| LlmProvider {
+            kind: kind.into(),
+            base_url: base.map(str::to_string),
+            ..Default::default()
+        };
+        assert!(is_remote_provider(&p("anthropic", None)));
+        assert!(is_remote_provider(&p(
+            "openai_compatible",
+            Some("https://127.example.com/v1")
+        )));
+        assert!(is_remote_provider(&p(
+            "openai_compatible",
+            Some("http://192.168.1.9:11434/v1")
+        )));
+        assert!(!is_remote_provider(&p(
+            "openai_compatible",
+            Some("http://localhost:11434/v1")
+        )));
+        assert!(!is_remote_provider(&p(
+            "openai_compatible",
+            Some("http://127.0.0.1:8080")
+        )));
+        assert!(!is_remote_provider(&p(
+            "openai_compatible",
+            Some("http://[::1]:8080/v1")
+        )));
+        assert!(!is_remote_provider(&p("claude_cli", None)));
+    }
 }

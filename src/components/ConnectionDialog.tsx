@@ -500,6 +500,12 @@ export function ConnectionDialog({
           label="Read-only connection"
           description="Blocks write statements from the editor, the grid and the agent."
         />
+        <Switch
+          checked={!!cfg.agent_remote_consent_at}
+          onChange={(v) => set("agent_remote_consent_at", v ? new Date().toISOString() : null)}
+          label="Share schema and data with remote AI providers"
+          description="Asked on first use in the assistant. Local providers (CLI, localhost) never need it."
+        />
         {sql && cfg.driver === "postgres" && (
           <Field
             label="Extra options"

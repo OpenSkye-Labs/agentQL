@@ -82,3 +82,12 @@ Append-only record of shipped behaviour. Newest at the bottom.
   edits always go through the SQL preview. The preview and the pending-changes bar say the batch runs in one transaction.
   Known limits: the prompt is SQL-only (Redis/Mongo connections get the badge but no write prompt yet, tracked in TASKS.md),
   and side effects hidden in functions (`SELECT setval(...)`, `pg_terminate_backend`) are invisible to a static classifier.
+- AI trust and audit (M2): first-use consent card per connection before a remote API provider (Anthropic/OpenAI/compatible
+  with a non-localhost base URL) receives any schema or data, stored as `agent_remote_consent_at` on the connection and
+  revocable in the connection dialog; CLI providers and localhost base URLs skip it. Per-connection agent scope (`agent_scope`,
+  whole schemas or single tables, picked from the "Scope" pill in the assistant) is enforced in the tool layer: list/describe
+  tools filter or refuse, and run_sql / explain_sql / charts parse the SQL with sqlparser to check every referenced table
+  (unparsable SQL is refused while a scope is set). Every statement the agent executes lands in the normal query history
+  tagged `source: "agent"` with its session id (backend writes `history.json` under a lock; the UI appends through the same
+  command). run_sql pushes `LIMIT <limit>` into bare SELECTs that have no LIMIT/OFFSET/FETCH/lock clause so the database
+  stops scanning early.
