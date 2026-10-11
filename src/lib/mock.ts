@@ -2,7 +2,7 @@
  * In-page fake of the Tauri IPC surface for visual QA in a plain browser (`?mock=1`, dev only).
  * No network, no backend: every command answers from the sample data below.
  */
-import type { ChatSession, ConnectionConfig, QueryResult, Settings, TableInfo } from "./types";
+import type { ChatSession, ConnectionConfig, QueryResult, ScopeEntry, Settings, TableInfo } from "./types";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -423,6 +423,12 @@ const handlers: Record<string, Handler> = {
   kv_set: () => null,
   read_text_file: () => "select 1;\n",
   write_text_file: () => null,
+  history_add: () => null,
+  set_agent_scope: (a) => {
+    const c = connections.find((x) => x.id === a.id);
+    if (c) c.agent_scope = (a.scope as ScopeEntry[] | null) ?? null;
+    return null;
+  },
   ai_list_sessions: () => [{ ...session, messages: [] }],
   ai_get_session: () => session,
   ai_create_session: () => ({ ...session, id: "s2", title: "New chat", messages: [] }),
