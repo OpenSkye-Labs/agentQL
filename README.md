@@ -56,7 +56,7 @@ SSH tunnel (agent, key file, or password). Passwords live in the OS keychain.
     <td><img src="assets/demo/agent-chart.webp" alt="Assistant inspecting the schema, running SQL and returning a chart"><br><sub><b>Agent</b> · inspects the schema, writes and runs SQL, explains the result and returns a chart you can pin to a dashboard. Every step is visible.</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/demo/agent-approval.webp" alt="The agent asking for approval before running an UPDATE"><br><sub><b>Writes need your approval</b> · reads run in READ ONLY transactions enforced by the database; a write stops on an approval card showing the exact statement.</sub></td>
+    <td><img src="assets/demo/agent-approval.webp" alt="The agent asking for approval before running an UPDATE"><br><sub><b>Writes need your approval</b> · reads run in a database-enforced read-only context (READ ONLY transactions on Postgres and MySQL, <code>PRAGMA query_only</code> on SQLite); a write stops on an approval card showing the exact statement.</sub></td>
     <td><img src="assets/demo/dashboard.webp" alt="Dashboard with four charts including one added by the agent"><br><sub><b>Dashboards</b> · charts from your queries or the agent's, auto-refresh, and the agent can propose a whole dashboard.</sub></td>
   </tr>
   <tr>
@@ -69,9 +69,10 @@ SSH tunnel (agent, key file, or password). Passwords live in the OS keychain.
 The assistant is a tool-using agent, not a text box that pastes SQL. On each turn it can list tables, describe
 columns and foreign keys, run read-only SQL, explain a plan, create a chart, propose a dashboard, scan Redis or query
 MongoDB, and it shows every step with the query it ran and the rows it got back. The guard rails are enforced below
-the model, not in the prompt: reads happen inside `READ ONLY` transactions, writes stop on an approval card with the
-exact statement, each connection can scope which schemas and tables the agent may see, and everything it ran lands
-in the normal query history tagged `agent`. It works with your Anthropic or OpenAI key, any OpenAI-compatible
+the model, not in the prompt: reads run in a database-enforced read-only context (`READ ONLY` transactions on
+Postgres and MySQL, `PRAGMA query_only` on SQLite), writes stop on an approval card with the exact statement, each
+connection can scope which schemas and tables the agent may see, and every SQL statement it runs lands in the
+normal query history tagged `agent`. It works with your Anthropic or OpenAI key, any OpenAI-compatible
 endpoint such as Ollama, or your existing Claude Code or Codex CLI subscription through a local MCP endpoint.
 
 ## Install
