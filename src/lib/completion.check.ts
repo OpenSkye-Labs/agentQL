@@ -17,12 +17,12 @@ const catalog = {
       { table: "orders", name: "id", data_type: "int" },
       { table: "orders", name: "customer_id", data_type: "int" },
       { table: "customers", name: "id", data_type: "int" },
-      { table: "Claim", name: "candidateId", data_type: "uuid" },
+      { table: "Order", name: "customerId", data_type: "uuid" },
     ],
     foreign_keys: [
       { table: "orders", columns: ["customer_id"], ref_schema: "public", ref_table: "customers", ref_columns: ["id"] },
       { table: "order_items", columns: ["order_id"], ref_schema: "public", ref_table: "orders", ref_columns: ["id"] },
-      { table: "Claim", columns: ["candidateId"], ref_schema: "public", ref_table: "Candidate", ref_columns: ["id"] },
+      { table: "Order", columns: ["customerId"], ref_schema: "public", ref_table: "Customer", ref_columns: ["id"] },
     ],
   },
   audit: {
@@ -50,12 +50,12 @@ assert.deepEqual(
 assert.equal(ns["public.orders"], ns.orders);
 assert.deepEqual(ns.order_items, []);
 // mixed-case columns get a quoted `apply` (lang-sql quotes table names itself, not custom column objects)
-const claimNs = buildNamespace(
-  { public: [{ schema: "public", name: "Claim", kind: "table", row_estimate: null }] },
+const orderNs = buildNamespace(
+  { public: [{ schema: "public", name: "Order", kind: "table", row_estimate: null }] },
   catalog,
 ) as Record<string, { label: string; apply?: string }[]>;
-const claimCols = claimNs.Claim;
-assert.deepEqual(claimCols, [{ label: "candidateId", type: "property", detail: "uuid", apply: '"candidateId"' }]);
+const orderCols = orderNs.Order;
+assert.deepEqual(orderCols, [{ label: "customerId", type: "property", detail: "uuid", apply: '"customerId"' }]);
 const mysqlNs = buildNamespace({ public: tables.public }, catalog, "`") as Record<
   string,
   { label: string; apply?: string }[]
@@ -84,11 +84,11 @@ assert.deepEqual(joins, ["customers c ON c.id = o.customer_id", "order_items o2 
 assert.deepEqual(joinSuggestions("select 1", catalog), []);
 // quoted identifiers survive; cross-schema reverse FKs are found and schema-qualified; MySQL uses backticks
 assert.equal(ident("orders", '"'), "orders");
-assert.equal(ident("Candidate", '"'), '"Candidate"');
+assert.equal(ident("Customer", '"'), '"Customer"');
 assert.equal(ident('we"ird', '"'), '"we""ird"');
 assert.deepEqual(
-  joinSuggestions('select * from "Claim" join ', catalog).map((c) => c.label),
-  ['"Candidate" c ON c.id = "Claim"."candidateId"'],
+  joinSuggestions('select * from "Order" join ', catalog).map((c) => c.label),
+  ['"Customer" c ON c.id = "Order"."customerId"'],
 );
 // a schema-qualified source keeps its join targets qualified (it is probably outside the search path)
 assert.deepEqual(
@@ -100,8 +100,8 @@ assert.deepEqual(
   ["orders o ON o.customer_id = c.id", "audit.events e ON e.customer_id = c.id"],
 );
 assert.deepEqual(
-  joinSuggestions("select * from Claim join ", catalog, "`").map((c) => c.label),
-  ["`Candidate` c ON c.id = Claim.`candidateId`"],
+  joinSuggestions("select * from Order join ", catalog, "`").map((c) => c.label),
+  ["`Customer` c ON c.id = Order.`customerId`"],
 );
 
 // the completion source at the very end of the document still sees the JOIN context
