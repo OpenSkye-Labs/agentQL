@@ -121,3 +121,4 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - Primary buttons use the theme's `--accent-fg` again: an unlayered `button { color: inherit }` reset in index.css was out-ranking every Tailwind `text-*` utility.
 - Connecting to `localhost` on Windows no longer stalls: the IPv4 loopback is preferred when the name resolves to both (skipped under verify-full).
 - README showcase: 33 s walkthrough GIF plus seven feature stills recorded on the neutral demo dataset (`assets/demo/`), and a "How agentic is it?" section.
+- Browser mock (`?mock=1`) is a neutral demo: a fictional `shop` store (Postgres, Redis, Mongo) with seeded rows, real foreign keys and a "Sales overview" dashboard; chat prompts play scripted agent runs (revenue chart, top customers, write approval, fallback) through real `ai:event`s.
