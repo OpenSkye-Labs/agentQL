@@ -120,3 +120,4 @@ Append-only record of shipped behaviour. Newest at the bottom.
   Nord, Dracula, One Dark) are token blocks in `index.css`; `pnpm check` verifies tokens and WCAG AA contrast.
 - Primary buttons use the theme's `--accent-fg` again: an unlayered `button { color: inherit }` reset in index.css was out-ranking every Tailwind `text-*` utility.
 - Connecting to `localhost` on Windows no longer stalls: the IPv4 loopback is preferred when the name resolves to both (skipped under verify-full).
+- Browser mock (`?mock=1`) is a neutral demo: a fictional `shop` store (Postgres, Redis, Mongo) with seeded rows, real foreign keys and a "Sales overview" dashboard; chat prompts play scripted agent runs (revenue chart, top customers, write approval, fallback) through real `ai:event`s.
