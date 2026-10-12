@@ -15,3 +15,7 @@ Codex round 3:
 
 - P2 Stopping mid-answer dropped text the user had already seen — applied: `stop()` saves finished and half-streamed
   text to the session before the cancelled `done` goes out.
+
+CodeRabbit round 1:
+
+- Minor: the seeded answer said `public` holds 10 tables; it holds 9 plus the view (`audit_log` is in `audit`) — applied.

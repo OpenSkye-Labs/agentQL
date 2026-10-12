@@ -977,7 +977,7 @@ export function seededSession(): ChatSession {
           {
             type: "text",
             text:
-              "`public` holds **10 tables and 1 view** for the store:\n\n- `customers` → `orders` → `order_items` ← `products`\n- `products` belong to `categories` and `suppliers`\n- each order has `payments` and `shipments`; `reviews` link `products` and `customers`\n- `v_recent_orders` is the last 500 orders with the customer's email\n\nMost of the 182,400 orders are delivered:\n\n" +
+              "`public` holds **9 tables and 1 view** for the store:\n\n- `customers` → `orders` → `order_items` ← `products`\n- `products` belong to `categories` and `suppliers`\n- each order has `payments` and `shipments`; `reviews` link `products` and `customers`\n- `v_recent_orders` is the last 500 orders with the customer's email\n\nMost of the 182,400 orders are delivered:\n\n" +
               markdownTable(RESULTS.status()),
           },
         ],
