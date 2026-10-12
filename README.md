@@ -11,6 +11,12 @@
 [![Release](https://github.com/OpenSkye-Labs/agentQL/actions/workflows/release.yml/badge.svg)](https://github.com/OpenSkye-Labs/agentQL/actions/workflows/release.yml)
 [![Version](https://img.shields.io/github/v/release/OpenSkye-Labs/agentQL?label=version&color=blue)](https://github.com/OpenSkye-Labs/agentQL/releases/latest)
 
+<p align="center">
+  <img src="assets/demo/showcase.gif" alt="AgentQL walkthrough: browse a table, ER diagram, run a query, ask the agent for a chart, approve or deny a write, dashboard" width="960">
+  <br>
+  <sub>Walkthrough on the built-in demo dataset: browse, ER diagram, query, ask the agent for a chart, a write that needs your approval, dashboard.</sub>
+</p>
+
 A native, cross-platform database client with an agent built in. Think TablePlus / DBeaver, plus an assistant
 that can read your schema, run queries, optimise SQL and build dashboards — using **your** Claude or OpenAI API
 key, or your existing **Claude Code** / **Codex (ChatGPT)** subscription.
@@ -37,6 +43,36 @@ SSH tunnel (agent, key file, or password). Passwords live in the OS keychain.
   write, renders charts inline and proposes whole dashboards you can save and auto-refresh.
 - **Safety** — read-only connections and agent reads are enforced _by the database_ (READ ONLY transactions /
   `PRAGMA query_only`), not just by parsing.
+
+## What it looks like
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/demo/grid.webp" alt="Virtualised grid browsing a 182k-row orders table"><br><sub><b>Grid</b> · virtualised, keyboard-first, inline edits become reviewable SQL, FK click-through, environment badges.</sub></td>
+    <td width="50%"><img src="assets/demo/erd.webp" alt="ER diagram of the public schema"><br><sub><b>ER diagram</b> · auto-laid-out from the live catalogue; click a table to open it, export SVG/PNG. Schema diff with copy-as-migration next door.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/demo/query.webp" alt="SQL editor with alias-aware completion and results"><br><sub><b>Editor</b> · alias-aware completion, JOIN suggestions from foreign keys, run the statement under the cursor, EXPLAIN, vim keymap, snippets, saved-query versions.</sub></td>
+    <td><img src="assets/demo/agent-chart.webp" alt="Assistant inspecting the schema, running SQL and returning a chart"><br><sub><b>Agent</b> · inspects the schema, writes and runs SQL, explains the result and returns a chart you can pin to a dashboard. Every step is visible.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/demo/agent-approval.webp" alt="The agent asking for approval before running an UPDATE"><br><sub><b>Writes need your approval</b> · reads run in READ ONLY transactions enforced by the database; a write stops on an approval card showing the exact statement.</sub></td>
+    <td><img src="assets/demo/dashboard.webp" alt="Dashboard with four charts including one added by the agent"><br><sub><b>Dashboards</b> · charts from your queries or the agent's, auto-refresh, and the agent can propose a whole dashboard.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="assets/demo/theme-dracula.webp" alt="Redis key browser in the Dracula theme"><br><sub><b>Redis and MongoDB too</b> · SCAN-based key browser with a console, Mongo find/aggregate and document editing. Ten themes, Dracula shown; Follow-system works on Linux, macOS and Windows.</sub></td>
+  </tr>
+</table>
+
+### How agentic is it?
+
+The assistant is a tool-using agent, not a text box that pastes SQL. On each turn it can list tables, describe
+columns and foreign keys, run read-only SQL, explain a plan, create a chart, propose a dashboard, scan Redis or query
+MongoDB, and it shows every step with the query it ran and the rows it got back. The guard rails are enforced below
+the model, not in the prompt: reads happen inside `READ ONLY` transactions, writes stop on an approval card with the
+exact statement, each connection can scope which schemas and tables the agent may see, and everything it ran lands
+in the normal query history tagged `agent`. It works with your Anthropic or OpenAI key, any OpenAI-compatible
+endpoint such as Ollama, or your existing Claude Code or Codex CLI subscription through a local MCP endpoint.
 
 ## Install
 
