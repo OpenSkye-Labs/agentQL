@@ -131,3 +131,9 @@ Append-only record of shipped behaviour. Newest at the bottom.
   methods/opclasses (hnsw, ivfflat …) and the agent gets a pgvector guide when the extension is installed. Verified
   with `PROBE_PGVECTOR=… cargo test --test probe pgvector_probe -- --ignored`. The demo products table has a
   `vector(384)` embedding.
+- Structure tab edits the table: add / edit / drop column (context menu or row ⋯), add / drop index, drop foreign
+  key, rename / drop table. Each action generates per-driver DDL (`src/lib/ddl.ts`: Postgres one ALTER per change
+  with `USING` casts; MySQL `RENAME COLUMN` and `ALTER COLUMN SET|DROP DEFAULT`, with `MODIFY` only for type or
+  nullability changes and a warning about attributes it resets; MariaDB defaults verbatim; SQLite rename-only with
+  a rebuild note) and opens it in a query tab for review; nothing runs until executed there. Hidden on read-only
+  connections and views.

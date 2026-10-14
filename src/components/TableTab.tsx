@@ -7,6 +7,7 @@ import type { Cell, ForeignKeyInfo, QueryResult, RowChange, TableDetails } from 
 import { fmtCount, fmtDuration } from "../lib/format";
 import { keyFilter } from "../lib/sql";
 import { ResultGrid, type GridEdit } from "./ResultGrid";
+import { StructureView } from "./StructureView";
 import { Button, Dialog, Input, Select, Spinner, Tooltip, Empty } from "./ui";
 
 type TTab = Extract<Tab, { kind: "table" }>;
@@ -435,7 +436,13 @@ export function TableTab({ tab }: { tab: TTab }) {
           )}
         </>
       ) : (
-        <Structure details={details} schema={tab.schema} table={tab.table} />
+        <StructureView
+          details={details}
+          conn={conn}
+          schema={tab.schema}
+          table={tab.table}
+          editable={!conn.read_only && tab.tableKind === "table"}
+        />
       )}
 
       <Dialog
@@ -457,99 +464,6 @@ export function TableTab({ tab }: { tab: TTab }) {
           {preview?.length ? ";" : ""}
         </pre>
       </Dialog>
-    </div>
-  );
-}
-
-function Structure({ details, schema, table }: { details: TableDetails | null; schema: string; table: string }) {
-  const toast = useStore((s) => s.toast);
-  if (!details)
-    return (
-      <div className="flex h-full items-center justify-center gap-2 text-xs text-muted">
-        <Spinner /> Loading structure…
-      </div>
-    );
-  return (
-    <div className="flex-1 overflow-auto scroll p-4 text-xs selectable">
-      <h2 className="mb-2 text-sm font-semibold">
-        {schema}.{table}
-      </h2>
-      <table className="mb-6 w-full border-collapse">
-        <thead>
-          <tr className="text-left text-muted">
-            <th className="border-b border-border py-1 pr-3 font-medium">#</th>
-            <th className="border-b border-border py-1 pr-3 font-medium">Column</th>
-            <th className="border-b border-border py-1 pr-3 font-medium">Type</th>
-            <th className="border-b border-border py-1 pr-3 font-medium">Nullable</th>
-            <th className="border-b border-border py-1 pr-3 font-medium">Default</th>
-            <th className="border-b border-border py-1 pr-3 font-medium">Extra / comment</th>
-          </tr>
-        </thead>
-        <tbody className="font-mono">
-          {details.columns.map((c) => (
-            <tr key={c.name} className="hover:bg-hover">
-              <td className="border-b border-border py-1 pr-3 text-faint">{c.position}</td>
-              <td className={clsx("border-b border-border py-1 pr-3", c.is_primary && "font-semibold text-accent")}>
-                {c.name}
-                {c.is_primary && <span className="ml-1 text-[10px]">PK</span>}
-              </td>
-              <td className="border-b border-border py-1 pr-3">{c.data_type}</td>
-              <td className="border-b border-border py-1 pr-3 text-muted">{c.nullable ? "yes" : "no"}</td>
-              <td className="border-b border-border py-1 pr-3 text-muted">{c.default ?? ""}</td>
-              <td className="border-b border-border py-1 pr-3 text-muted font-sans">
-                {[c.extra, c.comment].filter(Boolean).join(" · ")}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="grid gap-6 md:grid-cols-2 mb-6">
-        <div>
-          <h3 className="mb-1 font-semibold">Indexes ({details.indexes.length})</h3>
-          {details.indexes.length === 0 && <p className="text-muted">None</p>}
-          <ul className="space-y-1 font-mono">
-            {details.indexes.map((i) => (
-              <li key={i.name} className="rounded border border-border bg-elev px-2 py-1">
-                <span className={clsx(i.primary && "text-accent")}>{i.name}</span>{" "}
-                <span className="text-muted">({i.columns.join(", ")})</span>
-                {i.unique && <span className="ml-1 rounded bg-accent-soft px-1 text-[10px]">unique</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <h3 className="mb-1 font-semibold">Foreign keys ({details.foreign_keys.length})</h3>
-          {details.foreign_keys.length === 0 && <p className="text-muted">None</p>}
-          <ul className="space-y-1 font-mono">
-            {details.foreign_keys.map((f) => (
-              <li key={f.name} className="rounded border border-border bg-elev px-2 py-1">
-                {f.name}: ({f.columns.join(", ")}) → {f.ref_schema ? `${f.ref_schema}.` : ""}
-                {f.ref_table}({f.ref_columns.join(", ")})
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-      {details.ddl && (
-        <div>
-          <div className="mb-1 flex items-center gap-2">
-            <h3 className="font-semibold">DDL</h3>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                void navigator.clipboard.writeText(details.ddl!);
-                toast("DDL copied", "success");
-              }}
-            >
-              <Copy size={12} /> Copy
-            </Button>
-          </div>
-          <pre className="overflow-auto scroll rounded-md border border-border bg-sunken p-3 font-mono whitespace-pre-wrap">
-            {details.ddl}
-          </pre>
-        </div>
-      )}
     </div>
   );
 }
