@@ -126,3 +126,8 @@ Append-only record of shipped behaviour. Newest at the bottom.
   fold/unfold-all, Ctrl+F search, a Format button and a parse check on Save; Edit widens the panel and a maximize
   toggle takes the whole grid area instead of handing the value to the single-line in-cell input.
   Every fifth demo order carries a deep `shipping_address` payload so the mock shows large JSON.
+- pgvector: `vector` columns decode from the binary wire format to float arrays (grid shows `[384 dims] 0.12, …`,
+  inspector shows the full array, typing `[…]` into a cell updates it); describe_table reports non-btree index
+  methods/opclasses (hnsw, ivfflat …) and the agent gets a pgvector guide when the extension is installed. Verified
+  with `PROBE_PGVECTOR=… cargo test --test probe pgvector_probe -- --ignored`. The demo products table has a
+  `vector(384)` embedding.

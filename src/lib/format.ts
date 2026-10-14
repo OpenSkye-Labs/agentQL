@@ -13,6 +13,14 @@ export function cellText(v: Cell): string {
   return JSON.stringify(v);
 }
 
+/** Grid rendering: like `cellText`, but long numeric arrays (embeddings) collapse to their dimension and head. */
+export function cellPreview(v: Cell): string {
+  if (Array.isArray(v) && v.length > 16 && v.every((x) => typeof x === "number")) {
+    return `[${v.length} dims] ${v.slice(0, 4).join(", ")}, …`;
+  }
+  return cellText(v);
+}
+
 /** Full rendering for inspectors / editors. */
 export function cellFull(v: Cell): string {
   if (v === null || v === undefined) return "";

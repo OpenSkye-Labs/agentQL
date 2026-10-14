@@ -299,6 +299,7 @@ export const SPECS: Record<string, TableSpec> = {
       ["tags", "text[]"],
       ["attributes", "jsonb"],
       ["created_at", "timestamptz", "now()"],
+      ["embedding", "vector(384)"],
     ],
     fks: [
       ["category_id", "categories"],
@@ -317,6 +318,8 @@ export const SPECS: Record<string, TableSpec> = {
         r() < 0.2 ? ["bestseller"] : [],
         { color: pick(r, ["black", "white", "sand", "olive", "navy"]), weight_g: int(r, 40, 4000) },
         ts((1_840 - i) * 0.4 * DAY),
+        // Last so the other columns keep their seeded values; decoded pgvector cells are plain float arrays.
+        Array.from({ length: 384 }, () => +(r() * 2 - 1).toFixed(4)),
       ];
     },
   },
