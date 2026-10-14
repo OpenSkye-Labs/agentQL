@@ -128,9 +128,11 @@ fn pg_vector(b: &[u8]) -> Option<Value> {
     let dim = u16::from_be_bytes([*b.first()?, *b.get(1)?]) as usize;
     let data = b.get(4..4 + dim * 4)?;
     Some(Value::Array(
-        data.chunks_exact(4)
+        data.as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| {
-                let f = f32::from_be_bytes([c[0], c[1], c[2], c[3]]);
+                let f = f32::from_be_bytes(*c);
                 num_f64(f.to_string().parse().unwrap_or(f as f64))
             })
             .collect(),
