@@ -13,3 +13,13 @@ Codex round 2:
 
 - P2 The read-only viewer was not contenteditable and had no `tabindex`, so it could not take keyboard focus for
   Ctrl+F or arrow scrolling — applied: `tabindex="0"` + `aria-readonly` on the read-only content element.
+
+CodeRabbit round 1:
+
+- Minor: clicking another cell (or the same cell, or Close) while a draft existed reset it with no prompt —
+  applied: every inspector move goes through `openInspector`, which no-ops on the same cell and asks
+  "Discard unsaved edit?" when the draft differs from the text it started from.
+- Minor: the inspector's Copy ignored a rejected clipboard write — applied: one `copy()` helper with an error toast,
+  used by all five clipboard calls in the grid.
+- Minor: Escape with the search panel open cancelled the draft instead of closing the panel — applied: Escape
+  closes the panel first (CodeRabbit's suggested fix).

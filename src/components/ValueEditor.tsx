@@ -11,7 +11,14 @@ import {
   syntaxHighlighting,
   unfoldAll,
 } from "@codemirror/language";
-import { highlightSelectionMatches, openSearchPanel, search, searchKeymap } from "@codemirror/search";
+import {
+  closeSearchPanel,
+  highlightSelectionMatches,
+  openSearchPanel,
+  search,
+  searchKeymap,
+  searchPanelOpen,
+} from "@codemirror/search";
 import { json } from "@codemirror/lang-json";
 import { classHighlighter } from "@lezer/highlight";
 
@@ -76,7 +83,16 @@ export const ValueEditor = forwardRef<ValueEditorHandle, Props>(function ValueEd
         EditorView.lineWrapping,
         keymap.of([
           { key: "Mod-Enter", run: () => (cbs.current.onSubmit?.(), true) },
-          { key: "Escape", run: () => (cbs.current.onCancel?.(), true) },
+          {
+            key: "Escape",
+            run: (v) => {
+              // Escape closes the search panel first; only a second Escape cancels the draft.
+              if (searchPanelOpen(v.state)) return closeSearchPanel(v);
+              if (!cbs.current.onCancel) return false;
+              cbs.current.onCancel();
+              return true;
+            },
+          },
           ...defaultKeymap,
           ...historyKeymap,
           ...foldKeymap,

@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import type { Cell, Column, ForeignKeyInfo, QueryResult } from "../lib/types";
 import { cellFull, cellText, isBytes, parseCell } from "../lib/format";
+import { errMsg } from "../lib/api";
+import { useStore } from "../lib/store";
 import { ValueEditor, type ValueEditorHandle } from "./ValueEditor";
 import { ContextMenu, Button } from "./ui";
 
@@ -67,6 +69,18 @@ export function ResultGrid({
   const [draft, setDraft] = useState<string | null>(null);
   const [draftErr, setDraftErr] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(false);
+  // Text the draft started from; leaving the inspector only asks when the draft differs from it.
+  const draftStart = useRef<string | null>(null);
+  const toast = useStore((st) => st.toast);
+  const copy = (text: string) =>
+    navigator.clipboard.writeText(text).catch((e) => toast(`Copy failed: ${errMsg(e)}`, "error"));
+  /** Move or close the inspector, confirming first when an unsaved draft would be lost. */
+  const openInspector = (cell: { r: number; c: number } | null) => {
+    if (cell && inspect && cell.r === inspect.r && cell.c === inspect.c) return;
+    // ponytail: native confirm(), same as the delete prompts elsewhere.
+    if (draft !== null && draft !== draftStart.current && !confirm("Discard unsaved edit?")) return;
+    setInspect(cell);
+  };
   const valueEditor = useRef<ValueEditorHandle>(null);
   const [widths, setWidths] = useState<number[]>([]);
   const [clientSort, setClientSort] = useState<{ column: number; desc: boolean } | null>(null);
@@ -198,7 +212,7 @@ export function ResultGrid({
           )
           .join("\n");
       }
-      void navigator.clipboard.writeText(text);
+      void copy(text);
     },
     [sel, anchor, order, result.rows, cols, edits],
   );
@@ -230,7 +244,7 @@ export function ResultGrid({
       copySelection(e.shiftKey);
     } else if (e.key === " ") {
       e.preventDefault();
-      setInspect(sel);
+      openInspector(sel);
     } else if ((e.key === "Delete" || e.key === "Backspace") && editable) {
       e.preventDefault();
       if (e.shiftKey) {
@@ -293,19 +307,17 @@ export function ResultGrid({
     const cellOf = (cc: Column, i: number) =>
       edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`)! : row[i];
     return [
-      { label: "Copy value", onSelect: () => void navigator.clipboard.writeText(cellFull(v)) },
+      { label: "Copy value", onSelect: () => void copy(cellFull(v)) },
       {
         label: "Copy row as JSON",
         onSelect: () =>
-          void navigator.clipboard.writeText(
-            JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, cellOf(cc, i)])), null, 2),
-          ),
+          void copy(JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, cellOf(cc, i)])), null, 2)),
       },
       {
         label: "Copy row as TSV",
-        onSelect: () => void navigator.clipboard.writeText(cols.map((cc, i) => cellText(cellOf(cc, i))).join("\t")),
+        onSelect: () => void copy(cols.map((cc, i) => cellText(cellOf(cc, i))).join("\t")),
       },
-      { label: "View value", onSelect: () => setInspect(menuCell) },
+      { label: "View value", onSelect: () => openInspector(menuCell) },
       ...(onFollowFk && fkByCol.has(c.name) && v !== null
         ? [
             {
@@ -490,10 +502,10 @@ export function ResultGrid({
                           onMouseDown={(e) => {
                             setSel({ r: vi.index, c: ci });
                             if (!e.shiftKey) setAnchor({ r: vi.index, c: ci });
-                            setInspect((i) => (i ? { r: vi.index, c: ci } : i));
+                            if (inspect) openInspector({ r: vi.index, c: ci });
                           }}
                           onDoubleClick={() =>
-                            editable ? startEdit(vi.index, ci) : setInspect({ r: vi.index, c: ci })
+                            editable ? startEdit(vi.index, ci) : openInspector({ r: vi.index, c: ci })
                           }
                         >
                           {isEditing ? (
@@ -611,7 +623,7 @@ export function ResultGrid({
             >
               {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => setInspect(null)} aria-label="Close inspector">
+            <Button variant="ghost" size="icon" onClick={() => openInspector(null)} aria-label="Close inspector">
               <X size={13} />
             </Button>
           </div>
@@ -643,21 +655,22 @@ export function ResultGrid({
           <div className="flex gap-1 border-t border-border p-1.5">
             {draft === null ? (
               <>
-                <Button size="sm" onClick={() => void navigator.clipboard.writeText(cellFull(inspectValue))}>
+                <Button size="sm" onClick={() => void copy(cellFull(inspectValue))}>
                   Copy
                 </Button>
                 {editable && (
                   <Button
                     size="sm"
-                    onClick={() =>
-                      setDraft(
+                    onClick={() => {
+                      const start =
                         inspectValue === null
                           ? ""
                           : inspectJson
                             ? JSON.stringify(inspectValue, null, 2)
-                            : cellFull(inspectValue),
-                      )
-                    }
+                            : cellFull(inspectValue);
+                      draftStart.current = start;
+                      setDraft(start);
+                    }}
                   >
                     Edit
                   </Button>
