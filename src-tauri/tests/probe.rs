@@ -148,6 +148,60 @@ async fn postgres_probe() {
     );
 }
 
+/// pgvector round trip: `PROBE_PGVECTOR="host=127.0.0.1 port=5440 user=u password=p db=d"` against a database
+/// holding `items(id, label, emb vector(3))` with rows `[1,0.5,0.1]`, `[0,-0.25,2]`, NULL and an hnsw index.
+#[tokio::test]
+#[ignore]
+async fn pgvector_probe() {
+    let Ok(spec) = std::env::var("PROBE_PGVECTOR") else {
+        return;
+    };
+    let kv = parse(&spec);
+    let m = Manager::new(std::env::temp_dir().as_path());
+    let secrets = ConnectionSecrets {
+        password: kv.get("password").cloned(),
+        ..Default::default()
+    };
+    let sess = m
+        .connect(config(Driver::Postgres, &kv), &secrets)
+        .await
+        .expect("connect");
+    let Live::Sql(db) = &sess.live else { panic!() };
+    let r = db
+        .run_one_read_only("SELECT id, emb FROM items ORDER BY id", 10)
+        .await
+        .unwrap();
+    println!("== rows: {}", serde_json::to_string(&r.rows).unwrap());
+    assert_eq!(r.rows[0][1], serde_json::json!([1.0, 0.5, 0.1]));
+    assert_eq!(r.rows[1][1], serde_json::json!([0.0, -0.25, 2.0]));
+    assert!(r.rows[2][1].is_null());
+    let knn = db
+        .run_one_read_only(
+            "SELECT id, emb <=> '[1,0.5,0.1]' AS d FROM items WHERE emb IS NOT NULL ORDER BY d LIMIT 2",
+            10,
+        )
+        .await
+        .unwrap();
+    println!("== knn: {}", serde_json::to_string(&knn.rows).unwrap());
+    assert_eq!(knn.rows[0][0], serde_json::json!(1));
+    let d = db.table_details("public", "items").await.unwrap();
+    let idx = d
+        .indexes
+        .iter()
+        .find(|i| i.name == "items_emb_hnsw")
+        .unwrap();
+    println!("== index def: {:?}", idx.definition);
+    assert!(idx.definition.as_deref().unwrap().contains("USING hnsw"));
+    assert_eq!(
+        d.columns
+            .iter()
+            .find(|c| c.name == "emb")
+            .unwrap()
+            .data_type,
+        "vector(3)"
+    );
+}
+
 #[tokio::test]
 #[ignore]
 async fn redis_probe() {

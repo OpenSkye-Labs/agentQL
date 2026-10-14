@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { Cell, Column, ForeignKeyInfo, QueryResult } from "../lib/types";
-import { cellFull, cellText, isBytes, parseCell } from "../lib/format";
+import { cellFull, cellPreview, cellText, isBytes, parseCell } from "../lib/format";
 import { errMsg } from "../lib/api";
 import { useStore } from "../lib/store";
 import { ValueEditor, type ValueEditorHandle } from "./ValueEditor";
@@ -121,7 +121,7 @@ export function ResultGrid({
     setWidths(
       cols.map((c, ci) => {
         let w = measure(c.name) + measure(c.type_name.toLowerCase()) * 0.85 + 44;
-        for (const row of result.rows.slice(0, 50)) w = Math.max(w, measure(cellText(row[ci]).slice(0, 80)) + 18);
+        for (const row of result.rows.slice(0, 50)) w = Math.max(w, measure(cellPreview(row[ci]).slice(0, 80)) + 18);
         return Math.min(420, Math.max(MIN_W, Math.ceil(w)));
       }),
     );
@@ -541,7 +541,7 @@ export function ResultGrid({
                                 typeof v === "boolean" && "text-accent",
                               )}
                             >
-                              {cellText(v)}
+                              {cellPreview(v)}
                             </span>
                           )}
                           {fk && (

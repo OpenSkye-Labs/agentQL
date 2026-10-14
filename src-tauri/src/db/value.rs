@@ -90,6 +90,8 @@ pub fn pg_value(row: &sqlx::postgres::PgRow, i: usize) -> Value {
             v.microseconds
         ))),
         "JSON" | "JSONB" => get!(Value, |v| v),
+        // ponytail: `vector` only; halfvec (f16) and sparsevec (index/value pairs) need their own arms.
+        "VECTOR" => raw.as_bytes().ok().and_then(pg_vector),
         "BYTEA" => get!(Vec<u8>, |v| bytes_value(&v)),
         "INET" | "CIDR" => get!(IpNetwork, |v| Value::String(v.to_string())),
         "MACADDR" => get!(MacAddress, |v| Value::String(v.to_string())),
@@ -118,6 +120,21 @@ pub fn pg_value(row: &sqlx::postgres::PgRow, i: usize) -> Value {
             Err(_) => raw.as_bytes().map(bytes_value).unwrap_or(Value::Null),
         }
     })
+}
+
+/// pgvector binary send format: u16 dimension, u16 unused, then `dim` big-endian f32s.
+/// Each float is rendered through its shortest f32 representation so `0.1` stays `0.1`, not `0.10000000149`.
+fn pg_vector(b: &[u8]) -> Option<Value> {
+    let dim = u16::from_be_bytes([*b.first()?, *b.get(1)?]) as usize;
+    let data = b.get(4..4 + dim * 4)?;
+    Some(Value::Array(
+        data.chunks_exact(4)
+            .map(|c| {
+                let f = f32::from_be_bytes([c[0], c[1], c[2], c[3]]);
+                num_f64(f.to_string().parse().unwrap_or(f as f64))
+            })
+            .collect(),
+    ))
 }
 
 fn format_interval(months: i32, days: i32, micros: i64) -> String {
@@ -245,4 +262,35 @@ pub fn sqlite_value(row: &sqlx::sqlite::SqliteRow, i: usize) -> Value {
                 .map(|b| bytes_value(&b))
         })
         .unwrap_or(Value::Null)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vec_bytes(vals: &[f32]) -> Vec<u8> {
+        let mut b = (vals.len() as u16).to_be_bytes().to_vec();
+        b.extend_from_slice(&[0, 0]);
+        for v in vals {
+            b.extend_from_slice(&v.to_be_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn pg_vector_decodes_floats() {
+        assert_eq!(
+            pg_vector(&vec_bytes(&[1.0, -0.5, 0.1])),
+            Some(json!([1.0, -0.5, 0.1]))
+        );
+        assert_eq!(pg_vector(&vec_bytes(&[])), Some(json!([])));
+    }
+
+    #[test]
+    fn pg_vector_rejects_short_buffers() {
+        let mut b = vec_bytes(&[1.0, 2.0]);
+        b.truncate(b.len() - 1);
+        assert_eq!(pg_vector(&b), None);
+        assert_eq!(pg_vector(&[0, 1]), None);
+    }
 }
