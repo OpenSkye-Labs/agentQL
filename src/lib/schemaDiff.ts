@@ -1,5 +1,6 @@
-import type { ColumnInfo, ForeignKeyInfo, SchemaObject } from "./types.ts";
+import type { ForeignKeyInfo, SchemaObject } from "./types.ts";
 import { quoteIdent, type QuoteDriver } from "./sql.ts";
+import { columnDef, oneLine } from "./ddl.ts";
 
 export type DiffStatus = "added" | "removed" | "changed" | "same";
 
@@ -49,25 +50,6 @@ export function compareSchemas(left: SchemaObject[], right: SchemaObject[]): Obj
     const status: DiffStatus = !a ? "added" : !b ? "removed" : leftDdl === rightDdl ? "same" : "changed";
     return { name, kind: (b ?? a)!.table.kind, status, left: a, right: b, leftDdl, rightDdl };
   });
-}
-
-const isMysql = (driver: QuoteDriver) => driver === "mysql" || driver === "mariadb";
-// MySQL reports string defaults unquoted. Only a strict allow-list (or MySQL 8's DEFAULT_GENERATED flag) is
-// emitted verbatim; everything else is quoted so a default from the other database can never become code.
-const isExpression = (c: ColumnInfo) =>
-  /DEFAULT_GENERATED/i.test(c.extra ?? "") ||
-  /^(-?\d+(\.\d+)?|NULL|CURRENT_(TIMESTAMP|DATE|TIME)(\(\d*\))?|b'[01]+')$/i.test(c.default ?? "");
-
-/** Keep names and DDL from the other database on one comment line: no CR/LF, no comment terminator. */
-const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").replace(/\*\//g, "* /");
-
-function columnDef(driver: QuoteDriver, c: ColumnInfo) {
-  let s = `${quoteIdent(driver, c.name)} ${c.data_type}`;
-  if (!c.nullable) s += " NOT NULL";
-  if (c.default != null)
-    s += ` DEFAULT ${isMysql(driver) && !isExpression(c) ? `'${c.default.replace(/'/g, "''")}'` : c.default}`;
-  if (c.extra) s += /auto_increment/i.test(c.extra) ? " AUTO_INCREMENT" : ` /* ${oneLine(c.extra)} */`;
-  return s;
 }
 
 const comment = (text: string) =>
