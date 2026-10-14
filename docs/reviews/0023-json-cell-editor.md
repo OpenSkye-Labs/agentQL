@@ -23,3 +23,5 @@ CodeRabbit round 1:
   used by all five clipboard calls in the grid.
 - Minor: Escape with the search panel open cancelled the draft instead of closing the panel — applied: Escape
   closes the panel first (CodeRabbit's suggested fix).
+
+Codex round 3 (`codex exec review --base dev`, after the CodeRabbit fixes): no actionable findings.
