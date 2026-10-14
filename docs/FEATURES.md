@@ -122,3 +122,7 @@ Append-only record of shipped behaviour. Newest at the bottom.
 - Connecting to `localhost` on Windows no longer stalls: the IPv4 loopback is preferred when the name resolves to both (skipped under verify-full).
 - README showcase: 33 s walkthrough GIF plus seven feature stills recorded on the neutral demo dataset (`assets/demo/`), and a "How agentic is it?" section.
 - Browser mock (`?mock=1`) is a neutral demo: a fictional `shop` store (Postgres, Redis, Mongo) with seeded rows, real foreign keys and a "Sales overview" dashboard; chat prompts play scripted agent runs (revenue chart, top customers, write approval, fallback) through real `ai:event`s.
+- Cell inspector is a CodeMirror viewer/editor (`ValueEditor`): JSON columns get syntax colours, per-level folding,
+  fold/unfold-all, Ctrl+F search, a Format button and a parse check on Save; Edit widens the panel and a maximize
+  toggle takes the whole grid area instead of handing the value to the single-line in-cell input.
+  Every fifth demo order carries a deep `shipping_address` payload so the mock shows large JSON.

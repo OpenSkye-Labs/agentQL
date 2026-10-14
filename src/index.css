@@ -488,6 +488,31 @@ body {
 .cm-editor .cm-content {
   caret-color: var(--fg);
 }
+/* Search panel (cell inspector) */
+.cm-editor .cm-panels {
+  background: var(--bg-elev);
+  color: var(--fg);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.cm-editor .cm-panel input,
+.cm-editor .cm-panel button {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  padding: 1px 5px;
+  margin: 2px 2px;
+}
+.cm-editor .cm-searchMatch {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+}
+.cm-editor .cm-searchMatch-selected {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
 .cm-tooltip {
   background: var(--bg-elev) !important;
   border: 1px solid var(--border) !important;

@@ -340,7 +340,7 @@ export const SPECS: Record<string, TableSpec> = {
       orderStatus(i, r),
       money(12 + r() * r() * 480),
       "USD",
-      ((c) => ({ city: c[0], country: c[1] }))(pick(r, CITIES)),
+      ((c) => (i % 5 === 0 ? bigAddress(i, r, c) : { city: c[0], country: c[1] }))(pick(r, CITIES)),
       ts((182_400 - i) * 0.0045 * DAY),
     ],
   },
@@ -489,6 +489,36 @@ export const SPECS: Record<string, TableSpec> = {
     },
   },
 };
+
+/** Every fifth order carries a full carrier payload so the grid and inspector show deep, wide JSON. */
+function bigAddress(i: number, r: () => number, c: readonly string[]): Cell {
+  const events = Array.from({ length: 6 + (i % 7) }, (_, k) => ({
+    seq: k + 1,
+    at: ts((182_400 - i) * 0.0045 * DAY + k * 0.3 * DAY),
+    status: pick(r, ["label_created", "picked_up", "in_transit", "customs", "out_for_delivery", "delivered"]),
+    facility: {
+      code: `${c[1]}-${int(r, 10, 99)}`,
+      geo: { lat: +(r() * 180 - 90).toFixed(5), lng: +(r() * 360 - 180).toFixed(5) },
+    },
+    note: k % 3 === 0 ? null : pick(r, ["Left at reception", "Signature required", "Rerouted via hub", "Scanned"]),
+  }));
+  return {
+    recipient: { name: `${pick(r, ADJ)} Recipient`, phone: `+1-555-${int(r, 1000, 9999)}`, email: null },
+    line1: `${int(r, 1, 999)} ${pick(r, ["Market", "Oak", "Harbour", "Station"])} St`,
+    line2: i % 10 === 0 ? `Apt ${int(r, 1, 40)}` : null,
+    city: c[0],
+    country: c[1],
+    postal_code: String(int(r, 10_000, 99_999)),
+    geo: { lat: +(r() * 180 - 90).toFixed(6), lng: +(r() * 360 - 180).toFixed(6), accuracy_m: int(r, 3, 120) },
+    delivery_windows: [
+      { day: "mon", from: "09:00", to: "12:00" },
+      { day: "thu", from: "13:00", to: "18:00" },
+    ],
+    preferences: { leave_safe: r() < 0.5, signature: r() < 0.3, instructions: "Ring twice; gate code 4471#" },
+    carrier: { name: pick(r, ["UPS", "DHL", "FedEx"]), service: "express", tracking: `1Z${int(r, 1e8, 9e8)}`, events },
+    validated: { provider: "loqate", score: +r().toFixed(3), flags: ["normalized", "geocoded"] },
+  };
+}
 
 function rowAt(table: string, i: number): Cell[] {
   return SPECS[table].row(i, rng(hash(table) + i));
