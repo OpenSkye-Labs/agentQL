@@ -534,27 +534,38 @@ async fn execute_inner(
             if !d.indexes.is_empty() {
                 s.push_str("Indexes:\n");
                 for i in &d.indexes {
-                    // Access method from the catalog; the opclass + WITH options come from the definition, anchored on
-                    // `USING <method> (` so a quoted index or column name containing " USING " cannot mislead it.
-                    let method = i
-                        .method
-                        .as_deref()
-                        .filter(|m| *m != "btree")
-                        .map(|m| {
-                            let anchor = format!(" USING {m} (");
-                            match i.definition.as_deref().and_then(|d| d.find(&anchor)) {
-                                Some(at) => i.definition.as_deref().unwrap()[at..].to_string(),
-                                None => format!(" USING {m}"),
-                            }
-                        })
-                        .unwrap_or_default();
-                    s.push_str(&format!(
-                        "- {} ({}){}{}\n",
-                        i.name,
-                        i.columns.join(", "),
-                        if i.unique { " UNIQUE" } else { "" },
-                        method
-                    ));
+                    // Non-btree indexes (hnsw, ivfflat, gin, gist …) print method, opclasses and options, all from the
+                    // catalog so a quoted name containing "USING" cannot mislead the output.
+                    match i.method.as_deref().filter(|m| *m != "btree") {
+                        Some(m) => {
+                            let cols: Vec<String> = i
+                                .columns
+                                .iter()
+                                .enumerate()
+                                .map(|(k, c)| match i.opclasses.get(k) {
+                                    Some(oc) => format!("{c} {oc}"),
+                                    None => c.clone(),
+                                })
+                                .collect();
+                            s.push_str(&format!(
+                                "- {} USING {m} ({}){}{}\n",
+                                i.name,
+                                cols.join(", "),
+                                if i.options.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" WITH ({})", i.options.join(", "))
+                                },
+                                if i.unique { " UNIQUE" } else { "" }
+                            ));
+                        }
+                        None => s.push_str(&format!(
+                            "- {} ({}){}\n",
+                            i.name,
+                            i.columns.join(", "),
+                            if i.unique { " UNIQUE" } else { "" }
+                        )),
+                    }
                 }
             }
             if !d.foreign_keys.is_empty() {

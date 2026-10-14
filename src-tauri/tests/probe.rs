@@ -192,6 +192,9 @@ async fn pgvector_probe() {
         .unwrap();
     println!("== index def: {:?}", idx.definition);
     assert!(idx.definition.as_deref().unwrap().contains("USING hnsw"));
+    assert_eq!(idx.method.as_deref(), Some("hnsw"));
+    assert_eq!(idx.opclasses, vec!["vector_cosine_ops"]);
+    assert_eq!(idx.options, vec!["m=16", "ef_construction=64"]);
     assert_eq!(
         d.columns
             .iter()

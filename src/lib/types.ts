@@ -112,6 +112,8 @@ export interface IndexInfo {
   definition: string | null;
   /** Access method (`btree`, `hnsw`, …); Postgres only. */
   method?: string | null;
+  opclasses?: string[];
+  options?: string[];
 }
 export interface ForeignKeyInfo {
   name: string;

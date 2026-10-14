@@ -825,7 +825,8 @@ impl SqlConn {
                     .await?;
                 let idx = self
                     .rows(&format!(
-                        "SELECT c.relname AS name, pg_get_indexdef(i.indexrelid) AS def, i.indisunique AS uniq, i.indisprimary AS pk, am.amname AS method, \
+                        "SELECT c.relname AS name, pg_get_indexdef(i.indexrelid) AS def, i.indisunique AS uniq, i.indisprimary AS pk, am.amname AS method, array_to_string(c.reloptions, ',') AS opts, \
+                         (SELECT string_agg(oc.opcname, ',' ORDER BY u.ord) FROM unnest(i.indclass) WITH ORDINALITY AS u(oid, ord) JOIN pg_opclass oc ON oc.oid = u.oid) AS opclasses, \
                          (SELECT string_agg(pg_get_indexdef(i.indexrelid, k, true), ',' ORDER BY k) FROM generate_series(1, array_length(i.indkey::int[], 1)) k) AS cols \
                          FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_am am ON am.oid = c.relam WHERE i.indrelid = format('%I.%I', {s}, {t})::regclass ORDER BY c.relname"
                     ))
@@ -862,6 +863,8 @@ impl SqlConn {
                         primary: take_bool(&mut r, "pk"),
                         definition: opt_str(&mut r, "def"),
                         method: opt_str(&mut r, "method"),
+                        opclasses: split_csv(opt_str(&mut r, "opclasses")),
+                        options: split_csv(opt_str(&mut r, "opts")),
                     })
                     .collect();
                 let foreign_keys: Vec<ForeignKeyInfo> = fks
@@ -957,6 +960,8 @@ impl SqlConn {
                                 columns: split_csv(opt_str(&mut r, "cols")),
                                 definition: None,
                                 method: None,
+                                opclasses: Vec::new(),
+                                options: Vec::new(),
                                 name,
                             }
                         })
@@ -1004,6 +1009,8 @@ impl SqlConn {
                         primary: take_str(&mut r, "origin") == "pk",
                         definition: None,
                         method: None,
+                        opclasses: Vec::new(),
+                        options: Vec::new(),
                         name,
                     });
                 }
