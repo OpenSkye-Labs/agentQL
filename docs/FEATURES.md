@@ -133,5 +133,7 @@ Append-only record of shipped behaviour. Newest at the bottom.
   `vector(384)` embedding.
 - Structure tab edits the table: add / edit / drop column (context menu or row ⋯), add / drop index, drop foreign
   key, rename / drop table. Each action generates per-driver DDL (`src/lib/ddl.ts`: Postgres one ALTER per change
-  with `USING` casts, MySQL `CHANGE`/`MODIFY` with the full definition, SQLite rename-only with a rebuild note) and
-  opens it in a query tab for review; nothing runs until executed there. Hidden on read-only connections and views.
+  with `USING` casts; MySQL `RENAME COLUMN` and `ALTER COLUMN SET|DROP DEFAULT`, with `MODIFY` only for type or
+  nullability changes and a warning about attributes it resets; MariaDB defaults verbatim; SQLite rename-only with
+  a rebuild note) and opens it in a query tab for review; nothing runs until executed there. Hidden on read-only
+  connections and views.

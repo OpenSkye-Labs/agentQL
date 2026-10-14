@@ -136,7 +136,7 @@ export function StructureView({
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100"
                           aria-label={`Actions for ${c.name}`}
                         >
                           <MoreHorizontal size={13} />
