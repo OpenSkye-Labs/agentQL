@@ -55,6 +55,9 @@ pub struct IndexInfo {
     pub unique: bool,
     pub primary: bool,
     pub definition: Option<String>,
+    /// Access method from the catalog (`btree`, `hnsw`, `gin` …); Postgres only.
+    #[serde(default)]
+    pub method: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

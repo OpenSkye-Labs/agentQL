@@ -825,9 +825,9 @@ impl SqlConn {
                     .await?;
                 let idx = self
                     .rows(&format!(
-                        "SELECT c.relname AS name, pg_get_indexdef(i.indexrelid) AS def, i.indisunique AS uniq, i.indisprimary AS pk, \
+                        "SELECT c.relname AS name, pg_get_indexdef(i.indexrelid) AS def, i.indisunique AS uniq, i.indisprimary AS pk, am.amname AS method, \
                          (SELECT string_agg(pg_get_indexdef(i.indexrelid, k, true), ',' ORDER BY k) FROM generate_series(1, array_length(i.indkey::int[], 1)) k) AS cols \
-                         FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = format('%I.%I', {s}, {t})::regclass ORDER BY c.relname"
+                         FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_am am ON am.oid = c.relam WHERE i.indrelid = format('%I.%I', {s}, {t})::regclass ORDER BY c.relname"
                     ))
                     .await?;
                 let fks = self
@@ -861,6 +861,7 @@ impl SqlConn {
                         unique: take_bool(&mut r, "uniq"),
                         primary: take_bool(&mut r, "pk"),
                         definition: opt_str(&mut r, "def"),
+                        method: opt_str(&mut r, "method"),
                     })
                     .collect();
                 let foreign_keys: Vec<ForeignKeyInfo> = fks
@@ -955,6 +956,7 @@ impl SqlConn {
                                 unique: take_i64(&mut r, "non_unique") == 0,
                                 columns: split_csv(opt_str(&mut r, "cols")),
                                 definition: None,
+                                method: None,
                                 name,
                             }
                         })
@@ -1001,6 +1003,7 @@ impl SqlConn {
                         unique: take_i64(&mut r, "unique") == 1,
                         primary: take_str(&mut r, "origin") == "pk",
                         definition: None,
+                        method: None,
                         name,
                     });
                 }

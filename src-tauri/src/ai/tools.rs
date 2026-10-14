@@ -343,7 +343,7 @@ pub fn definitions(driver: Driver) -> Vec<ToolDef> {
 
 /// Appended to the system prompt when the `vector` extension is installed.
 const PGVECTOR_GUIDE: &str = "\npgvector is installed. Vector cells arrive as JSON float arrays. \
-    Distance operators: <-> L2, <=> cosine, <#> negative inner product, <+> L1; the operator must match the index \
+    Distance operators: <-> L2, <=> cosine, <#> negative inner product, <+> L1 (pgvector 0.7+ only); the operator must match the index \
     opclass (vector_l2_ops / vector_cosine_ops / vector_ip_ops) and the query must be `ORDER BY col <op> q LIMIT k` for \
     the index to be used (describe_table shows the index method and options). \
     Tuning per session: SET hnsw.ef_search = N; SET ivfflat.probes = N. \
@@ -534,13 +534,19 @@ async fn execute_inner(
             if !d.indexes.is_empty() {
                 s.push_str("Indexes:\n");
                 for i in &d.indexes {
-                    // Access method + opclass + WITH options for non-btree indexes (hnsw, ivfflat, gin, gist …).
+                    // Access method from the catalog; the opclass + WITH options come from the definition, anchored on
+                    // `USING <method> (` so a quoted index or column name containing " USING " cannot mislead it.
                     let method = i
-                        .definition
+                        .method
                         .as_deref()
-                        .and_then(|d| d.split_once(" USING "))
-                        .filter(|(_, m)| !m.starts_with("btree"))
-                        .map(|(_, m)| format!(" USING {m}"))
+                        .filter(|m| *m != "btree")
+                        .map(|m| {
+                            let anchor = format!(" USING {m} (");
+                            match i.definition.as_deref().and_then(|d| d.find(&anchor)) {
+                                Some(at) => i.definition.as_deref().unwrap()[at..].to_string(),
+                                None => format!(" USING {m}"),
+                            }
+                        })
                         .unwrap_or_default();
                     s.push_str(&format!(
                         "- {} ({}){}{}\n",

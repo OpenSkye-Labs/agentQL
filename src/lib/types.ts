@@ -110,6 +110,8 @@ export interface IndexInfo {
   unique: boolean;
   primary: boolean;
   definition: string | null;
+  /** Access method (`btree`, `hnsw`, …); Postgres only. */
+  method?: string | null;
 }
 export interface ForeignKeyInfo {
   name: string;
