@@ -1,3 +1,4 @@
+import { clsx } from "clsx";
 import { Bot, KeyRound } from "lucide-react";
 import { useStore, useActiveTab, useConnection } from "../lib/store";
 import { driverLabel } from "../lib/types";
@@ -13,7 +14,11 @@ export function StatusBar({ onToggleChat }: { onToggleChat: () => void }) {
   const chatOpen = useStore((s) => s.chatOpen);
   return (
     <footer
-      className="flex h-6 items-center gap-3 border-t border-border bg-elev px-3 text-[11px] text-muted"
+      className={clsx(
+        "flex h-6 items-center gap-3 border-t px-3 text-[11px] text-muted",
+        // Production tints the whole bar so the environment stays visible from any tab.
+        conn?.environment === "production" ? "border-danger/40 bg-danger-soft" : "border-border bg-elev",
+      )}
       role="contentinfo"
     >
       {conn ? (

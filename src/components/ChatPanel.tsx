@@ -35,7 +35,7 @@ import {
   type Message,
   type QueryResult,
 } from "../lib/types";
-import { Button, Menu, Spinner, Empty, Tooltip } from "./ui";
+import { Button, Menu, Spinner, Empty, Tooltip, EnvBadge } from "./ui";
 import { Markdown } from "./Markdown";
 import { ChartCard } from "./ChartCard";
 import { AgentScopeDialog } from "./AgentScopeDialog";
@@ -95,6 +95,10 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
   const provider = providers.find((p) => p.id === providerId);
   const streaming: Turn | null = session ? (turns[session.id] ?? null) : null;
   const approval = streaming?.approval ?? null;
+  // The session's own connection, not the active tab's: the write runs where the session is bound.
+  const prodWrite =
+    approval?.kind === "write" &&
+    connections.find((c) => c.id === session?.connection_id)?.environment === "production";
   const busy = !!streaming;
   const patchTurn = useCallback(
     (id: string, f: (t: Turn) => Turn) =>
@@ -410,13 +414,17 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
             ) : null}
             {approval && (
               <div
-                className="rounded-xl border border-warning/50 bg-warning/10 p-3"
+                className={clsx(
+                  "rounded-xl border p-3",
+                  prodWrite ? "border-danger/60 bg-danger-soft" : "border-warning/50 bg-warning/10",
+                )}
                 role="region"
                 aria-live="assertive"
                 aria-label="Approval required"
               >
                 <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold">
-                  <Lock size={12} className="text-warning" /> {approval.description}
+                  <Lock size={12} className={prodWrite ? "text-danger" : "text-warning"} /> {approval.description}
+                  {prodWrite && <EnvBadge env="production" className="ml-auto" />}
                 </div>
                 <pre
                   className={clsx(
@@ -429,17 +437,20 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
                 <div className="flex gap-2">
                   <Button
                     size="sm"
-                    variant="primary"
-                    autoFocus
+                    variant={prodWrite ? "danger" : "primary"}
+                    autoFocus={!prodWrite}
                     onClick={() => {
                       void api.aiResolveApproval(approval.id, true);
                       patchTurn(session!.id, (t) => ({ ...t, approval: null }));
                     }}
                   >
-                    <Check size={12} /> {approval.kind === "consent" ? "Allow" : "Run it"}
+                    <Check size={12} />{" "}
+                    {approval.kind === "consent" ? "Allow" : prodWrite ? "Run on production" : "Run it"}
                   </Button>
+                  {/* On production, Enter lands on Deny: a stray keypress must not write. */}
                   <Button
                     size="sm"
+                    autoFocus={prodWrite}
                     onClick={() => {
                       void api.aiResolveApproval(approval.id, false);
                       patchTurn(session!.id, (t) => ({ ...t, approval: null }));

@@ -30,6 +30,7 @@
   --success: #1f8f5a;
   --warning: #9a6414;
   --danger: #d23f3f;
+  --danger-fg: #ffffff;
   --danger-soft: #fde8e8;
   --null: #7b8290;
   --selection: rgba(59, 108, 246, 0.18);
@@ -68,6 +69,7 @@
   --success: #4cc38a;
   --warning: #e0a94a;
   --danger: #f2605f;
+  --danger-fg: #111111;
   --danger-soft: #3a2224;
   --null: #7f879a;
   --selection: rgba(108, 147, 255, 0.25);
@@ -106,6 +108,7 @@
     --success: #4cc38a;
     --warning: #e0a94a;
     --danger: #f2605f;
+    --danger-fg: #111111;
     --danger-soft: #3a2224;
     --null: #7f879a;
     --selection: rgba(108, 147, 255, 0.25);
@@ -143,6 +146,7 @@
   --success: #1a7f37;
   --warning: #9a6700;
   --danger: #d1242f;
+  --danger-fg: #ffffff;
   --danger-soft: #ffebe9;
   --null: #6e7781;
   --selection: rgba(9, 105, 218, 0.18);
@@ -179,6 +183,7 @@
   --success: #3fb950;
   --warning: #d29922;
   --danger: #f85149;
+  --danger-fg: #111111;
   --danger-soft: #3c1e20;
   --null: #7d8590;
   --selection: rgba(68, 147, 248, 0.25);
@@ -215,6 +220,7 @@
   --success: #6b7a00;
   --warning: #9a7400;
   --danger: #dc322f;
+  --danger-fg: #ffffff;
   --danger-soft: #f6dccf;
   --null: #839496;
   --selection: rgba(38, 139, 210, 0.2);
@@ -251,6 +257,7 @@
   --success: #859900;
   --warning: #b58900;
   --danger: #dc322f;
+  --danger-fg: #ffffff;
   --danger-soft: #3b2225;
   --null: #657b83;
   --selection: rgba(42, 161, 152, 0.25);
@@ -287,6 +294,7 @@
   --success: #a3be8c;
   --warning: #ebcb8b;
   --danger: #bf616a;
+  --danger-fg: #111111;
   --danger-soft: #4c3439;
   --null: #8f9bb3;
   --selection: rgba(136, 192, 208, 0.25);
@@ -323,6 +331,7 @@
   --success: #50fa7b;
   --warning: #f1fa8c;
   --danger: #ff5555;
+  --danger-fg: #111111;
   --danger-soft: #4a2a32;
   --null: #7a86b8;
   --selection: rgba(189, 147, 249, 0.25);
@@ -359,6 +368,7 @@
   --success: #98c379;
   --warning: #e5c07b;
   --danger: #e06c75;
+  --danger-fg: #111111;
   --danger-soft: #3d2a2e;
   --null: #7f848e;
   --selection: rgba(97, 175, 239, 0.22);
@@ -396,6 +406,7 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
   --color-danger-soft: var(--danger-soft);
   --font-sans: var(--font-ui);
   --font-mono: var(--font-mono);

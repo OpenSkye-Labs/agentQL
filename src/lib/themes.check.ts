@@ -52,6 +52,7 @@ const PAIRS = [
   ["--fg", "--bg"],
   ["--fg", "--bg-elev"],
   ["--accent-fg", "--accent"],
+  ["--danger-fg", "--danger"],
   // the SQL editor paints on --bg-elev
   ["--syn-keyword", "--bg-elev"],
   ["--syn-string", "--bg-elev"],
