@@ -1,6 +1,6 @@
 [package]
 name = "agentql"
-version = "0.2.0"
+version = "0.3.0"
 description = "AgentQL - an agentic, cross-platform database client"
 authors = ["aindong"]
 edition = "2024"

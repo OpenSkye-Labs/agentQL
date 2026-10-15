@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/OpenSkye-Labs/agentQL/compare/v0.2.0...v0.3.0) (2026-10-15)
+
+
+### Features
+
+* decode pgvector columns, surface index methods, pgvector guide for the agent ([#24](https://github.com/OpenSkye-Labs/agentQL/issues/24)) ([9befe20](https://github.com/OpenSkye-Labs/agentQL/commit/9befe203e72f05e43a97948efd6b4b0ab337d3ea))
+* edit table structure as reviewable DDL from the structure tab ([#25](https://github.com/OpenSkye-Labs/agentQL/issues/25)) ([fd4f7bd](https://github.com/OpenSkye-Labs/agentQL/commit/fd4f7bd01b8b345d7124c5a4af806568dde9e35f))
+* JSON cell inspector with folding, search and in-panel editing ([#23](https://github.com/OpenSkye-Labs/agentQL/issues/23)) ([12786e7](https://github.com/OpenSkye-Labs/agentQL/commit/12786e7aac0d2a34b0796637ae42a6e8ba915b6c))
+* make production connections and agent writes to them stand out ([#26](https://github.com/OpenSkye-Labs/agentQL/issues/26)) ([47645e3](https://github.com/OpenSkye-Labs/agentQL/commit/47645e3a8ea5db99877185bf2d14b2bdd2116bf7))
+* neutral demo dataset and scripted agent runs in the browser mock ([#21](https://github.com/OpenSkye-Labs/agentQL/issues/21)) ([0a64d19](https://github.com/OpenSkye-Labs/agentQL/commit/0a64d198f2a4fd984efedcb00bf8c9946eea3a91))
+
+
+### Bug Fixes
+
+* prefer IPv4 for localhost connections ([#20](https://github.com/OpenSkye-Labs/agentQL/issues/20)) ([2bf81dd](https://github.com/OpenSkye-Labs/agentQL/commit/2bf81dd578f9070399873e8ca605972cb16b04a5))
+
 ## [0.2.0](https://github.com/OpenSkye-Labs/agentQL/compare/v0.1.0...v0.2.0) (2026-10-11)
 
 
