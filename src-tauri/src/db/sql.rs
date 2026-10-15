@@ -31,6 +31,46 @@ pub struct SqlConn {
 
 // ---------------------------------------------------------------- connect
 
+/// `localhost` resolves to `::1` first on Windows, and Docker Desktop (and most local servers) only answer on
+/// `127.0.0.1`; the IPv6 attempt then sits in the OS connect timeout longer than our pool timeout, so the UI
+/// looked stuck on "connecting". Prefer the IPv4 address when the name resolves to one.
+/// Skipped under `verify-full`, where TLS must verify the certificate against the hostname.
+/// ponytail: only `localhost` is rewritten, and an IPv6-only local server would need the IPv6 fallback
+/// (retry with the original name on refusal) if anyone hits it.
+fn connect_host(host: &str, port: u16, ssl_mode: Option<&str>) -> String {
+    use std::net::ToSocketAddrs as _;
+    if !host.eq_ignore_ascii_case("localhost") || ssl_mode == Some("verify-full") {
+        return host.to_string();
+    }
+    (host, port)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.find(|a| a.is_ipv4()))
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|| host.to_string())
+}
+
+#[cfg(test)]
+mod connect_host_tests {
+    use super::connect_host;
+
+    #[test]
+    fn localhost_prefers_ipv4_and_other_hosts_are_untouched() {
+        assert_eq!(
+            connect_host("localhost", 5432, Some("disable")),
+            "127.0.0.1"
+        );
+        assert_eq!(connect_host("LOCALHOST", 5432, None), "127.0.0.1");
+        assert_eq!(
+            connect_host("localhost", 5432, Some("verify-full")),
+            "localhost"
+        );
+        assert_eq!(connect_host("db.internal", 5432, None), "db.internal");
+        assert_eq!(connect_host("127.0.0.1", 5432, None), "127.0.0.1");
+        assert_eq!(connect_host("::1", 5432, None), "::1");
+    }
+}
+
 impl SqlConn {
     pub async fn connect(c: &ConnectionConfig, s: &ConnectionSecrets) -> Result<SqlConn> {
         let pool = match c.driver {
@@ -39,7 +79,11 @@ impl SqlConn {
                     Some(url) => PgConnectOptions::from_str(url)
                         .map_err(|e| AppError::Msg(format!("invalid url: {e}")))?,
                     None => PgConnectOptions::new()
-                        .host(&c.host)
+                        .host(&connect_host(
+                            &c.host,
+                            if c.port == 0 { 5432 } else { c.port },
+                            c.ssl_mode.as_deref(),
+                        ))
                         .port(if c.port == 0 { 5432 } else { c.port })
                         .username(&c.user)
                         .database(if c.database.is_empty() {
@@ -92,7 +136,11 @@ impl SqlConn {
                         .map_err(|e| AppError::Msg(format!("invalid url: {e}")))?,
                     None => {
                         let mut o = MySqlConnectOptions::new()
-                            .host(&c.host)
+                            .host(&connect_host(
+                                &c.host,
+                                if c.port == 0 { 3306 } else { c.port },
+                                c.ssl_mode.as_deref(),
+                            ))
                             .port(if c.port == 0 { 3306 } else { c.port })
                             .username(&c.user);
                         if !c.database.is_empty() {
@@ -777,9 +825,10 @@ impl SqlConn {
                     .await?;
                 let idx = self
                     .rows(&format!(
-                        "SELECT c.relname AS name, pg_get_indexdef(i.indexrelid) AS def, i.indisunique AS uniq, i.indisprimary AS pk, \
+                        "SELECT c.relname AS name, pg_get_indexdef(i.indexrelid) AS def, i.indisunique AS uniq, i.indisprimary AS pk, am.amname AS method, array_to_string(c.reloptions, ',') AS opts, \
+                         (SELECT string_agg(oc.opcname, ',' ORDER BY u.ord) FROM unnest(i.indclass) WITH ORDINALITY AS u(oid, ord) JOIN pg_opclass oc ON oc.oid = u.oid) AS opclasses, \
                          (SELECT string_agg(pg_get_indexdef(i.indexrelid, k, true), ',' ORDER BY k) FROM generate_series(1, array_length(i.indkey::int[], 1)) k) AS cols \
-                         FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = format('%I.%I', {s}, {t})::regclass ORDER BY c.relname"
+                         FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_am am ON am.oid = c.relam WHERE i.indrelid = format('%I.%I', {s}, {t})::regclass ORDER BY c.relname"
                     ))
                     .await?;
                 let fks = self
@@ -813,6 +862,9 @@ impl SqlConn {
                         unique: take_bool(&mut r, "uniq"),
                         primary: take_bool(&mut r, "pk"),
                         definition: opt_str(&mut r, "def"),
+                        method: opt_str(&mut r, "method"),
+                        opclasses: split_csv(opt_str(&mut r, "opclasses")),
+                        options: split_csv(opt_str(&mut r, "opts")),
                     })
                     .collect();
                 let foreign_keys: Vec<ForeignKeyInfo> = fks
@@ -907,6 +959,9 @@ impl SqlConn {
                                 unique: take_i64(&mut r, "non_unique") == 0,
                                 columns: split_csv(opt_str(&mut r, "cols")),
                                 definition: None,
+                                method: None,
+                                opclasses: Vec::new(),
+                                options: Vec::new(),
                                 name,
                             }
                         })
@@ -953,6 +1008,9 @@ impl SqlConn {
                         unique: take_i64(&mut r, "unique") == 1,
                         primary: take_str(&mut r, "origin") == "pk",
                         definition: None,
+                        method: None,
+                        opclasses: Vec::new(),
+                        options: Vec::new(),
                         name,
                     });
                 }

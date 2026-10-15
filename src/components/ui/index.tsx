@@ -31,7 +31,7 @@ export function Button({
         variant === "primary" &&
           "border-transparent bg-accent text-accent-fg hover:brightness-110 active:brightness-95",
         variant === "ghost" && "border-transparent hover:bg-hover active:bg-active",
-        variant === "danger" && "border-transparent bg-danger text-white hover:brightness-110",
+        variant === "danger" && "border-transparent bg-danger text-danger-fg hover:brightness-110",
         className,
       )}
       {...props}
@@ -122,7 +122,7 @@ export function Switch({
       >
         <span
           className={clsx(
-            "absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow transition-transform",
+            "absolute left-0 top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow transition-transform",
             checked ? "translate-x-[18px]" : "translate-x-0.5",
           )}
         />
@@ -305,9 +305,26 @@ const ENV_CLASS: Record<Environment, string> = {
   production: "bg-danger/15 text-danger",
 };
 
-/** Small environment tag (dev / staging / production). Renders nothing when unset. */
-export function EnvBadge({ env, className }: { env?: Environment | null; className?: string }) {
+const ENV_COLOR: Record<Environment, string> = {
+  dev: "var(--success)",
+  staging: "var(--warning)",
+  production: "var(--danger)",
+};
+
+/** Small environment tag (dev / staging / production). Renders nothing when unset. `dot` is the compact form
+ *  for crowded rows like tabs; the status bar keeps the spelled-out tag. */
+export function EnvBadge({ env, className, dot }: { env?: Environment | null; className?: string; dot?: boolean }) {
   if (!env) return null;
+  if (dot)
+    return (
+      <span
+        role="img"
+        aria-label={`Environment: ${env}`}
+        title={`Environment: ${env}`}
+        className={clsx("h-1.5 w-1.5 rounded-full", className)}
+        style={{ background: ENV_COLOR[env] }}
+      />
+    );
   return (
     <span
       className={clsx("rounded px-1 text-[10px] font-medium uppercase tracking-wide", ENV_CLASS[env], className)}

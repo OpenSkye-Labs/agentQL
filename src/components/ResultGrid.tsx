@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { clsx } from "clsx";
-import { ArrowDown, ArrowUp, ArrowUpRight, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Maximize2,
+  Minimize2,
+  Search,
+  X,
+} from "lucide-react";
 import type { Cell, Column, ForeignKeyInfo, QueryResult } from "../lib/types";
-import { cellFull, cellText, parseCell } from "../lib/format";
+import { cellFull, cellPreview, cellText, isBytes, parseCell } from "../lib/format";
+import { errMsg } from "../lib/api";
+import { useStore } from "../lib/store";
+import { ValueEditor, type ValueEditorHandle } from "./ValueEditor";
 import { ContextMenu, Button } from "./ui";
 
 export interface GridEdit {
@@ -52,6 +65,23 @@ export function ResultGrid({
   const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null);
   const [editing, setEditing] = useState<{ r: number; c: number; text: string } | null>(null);
   const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
+  // Draft text while the inspector panel is in edit mode; null = viewing.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [draftErr, setDraftErr] = useState<string | null>(null);
+  const [maximized, setMaximized] = useState(false);
+  // Text the draft started from; leaving the inspector only asks when the draft differs from it.
+  const draftStart = useRef<string | null>(null);
+  const toast = useStore((st) => st.toast);
+  const copy = (text: string) =>
+    navigator.clipboard.writeText(text).catch((e) => toast(`Copy failed: ${errMsg(e)}`, "error"));
+  /** Move or close the inspector, confirming first when an unsaved draft would be lost. */
+  const openInspector = (cell: { r: number; c: number } | null) => {
+    if (cell && inspect && cell.r === inspect.r && cell.c === inspect.c) return;
+    // ponytail: native confirm(), same as the delete prompts elsewhere.
+    if (draft !== null && draft !== draftStart.current && !confirm("Discard unsaved edit?")) return;
+    setInspect(cell);
+  };
+  const valueEditor = useRef<ValueEditorHandle>(null);
   const [widths, setWidths] = useState<number[]>([]);
   const [clientSort, setClientSort] = useState<{ column: number; desc: boolean } | null>(null);
   const [menuCell, setMenuCell] = useState<{ r: number; c: number } | null>(null);
@@ -91,7 +121,7 @@ export function ResultGrid({
     setWidths(
       cols.map((c, ci) => {
         let w = measure(c.name) + measure(c.type_name.toLowerCase()) * 0.85 + 44;
-        for (const row of result.rows.slice(0, 50)) w = Math.max(w, measure(cellText(row[ci]).slice(0, 80)) + 18);
+        for (const row of result.rows.slice(0, 50)) w = Math.max(w, measure(cellPreview(row[ci]).slice(0, 80)) + 18);
         return Math.min(420, Math.max(MIN_W, Math.ceil(w)));
       }),
     );
@@ -182,7 +212,7 @@ export function ResultGrid({
           )
           .join("\n");
       }
-      void navigator.clipboard.writeText(text);
+      void copy(text);
     },
     [sel, anchor, order, result.rows, cols, edits],
   );
@@ -214,7 +244,7 @@ export function ResultGrid({
       copySelection(e.shiftKey);
     } else if (e.key === " ") {
       e.preventDefault();
-      setInspect(sel);
+      openInspector(sel);
     } else if ((e.key === "Delete" || e.key === "Backspace") && editable) {
       e.preventDefault();
       if (e.shiftKey) {
@@ -277,19 +307,17 @@ export function ResultGrid({
     const cellOf = (cc: Column, i: number) =>
       edits?.has(`${rowIdx}:${cc.name}`) ? edits.get(`${rowIdx}:${cc.name}`)! : row[i];
     return [
-      { label: "Copy value", onSelect: () => void navigator.clipboard.writeText(cellFull(v)) },
+      { label: "Copy value", onSelect: () => void copy(cellFull(v)) },
       {
         label: "Copy row as JSON",
         onSelect: () =>
-          void navigator.clipboard.writeText(
-            JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, cellOf(cc, i)])), null, 2),
-          ),
+          void copy(JSON.stringify(Object.fromEntries(cols.map((cc, i) => [cc.name, cellOf(cc, i)])), null, 2)),
       },
       {
         label: "Copy row as TSV",
-        onSelect: () => void navigator.clipboard.writeText(cols.map((cc, i) => cellText(cellOf(cc, i))).join("\t")),
+        onSelect: () => void copy(cols.map((cc, i) => cellText(cellOf(cc, i))).join("\t")),
       },
-      { label: "View value", onSelect: () => setInspect(menuCell) },
+      { label: "View value", onSelect: () => openInspector(menuCell) },
       ...(onFollowFk && fkByCol.has(c.name) && v !== null
         ? [
             {
@@ -310,14 +338,53 @@ export function ResultGrid({
     ];
   })();
 
+  useEffect(() => {
+    setDraft(null);
+    setDraftErr(null);
+  }, [inspect]);
+
   const inspectValue = (() => {
     if (!inspect || inspect.r >= order.length || inspect.c >= cols.length) return undefined;
     const key = `${order[inspect.r]}:${cols[inspect.c].name}`;
     return edits?.has(key) ? edits.get(key)! : result.rows[order[inspect.r]]?.[inspect.c];
   })();
+  const inspectJson =
+    !!inspect &&
+    inspectValue !== undefined &&
+    (/JSON/i.test(cols[inspect.c].type_name) ||
+      (typeof inspectValue === "object" && inspectValue !== null && !isBytes(inspectValue)));
+
+  const formatDraft = () => {
+    if (draft === null) return;
+    try {
+      valueEditor.current?.setValue(JSON.stringify(JSON.parse(draft), null, 2));
+    } catch (e) {
+      setDraftErr(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const saveDraft = () => {
+    if (!inspect || draft === null) return;
+    if (inspectJson && draft.trim() !== "") {
+      try {
+        JSON.parse(draft);
+      } catch (e) {
+        setDraftErr(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+    }
+    const rowIdx = order[inspect.r];
+    const col = cols[inspect.c];
+    onEdit?.({
+      rowIndex: rowIdx,
+      column: col.name,
+      value: parseCell(draft, col.type_name, result.rows[rowIdx][inspect.c]),
+    });
+    setDraft(null);
+  };
 
   return (
-    <div className={clsx("flex h-full min-h-0", className)}>
+    <div className={clsx("relative flex h-full min-h-0", className)}>
       <ContextMenu items={menuItems}>
         <div
           ref={parentRef}
@@ -435,10 +502,10 @@ export function ResultGrid({
                           onMouseDown={(e) => {
                             setSel({ r: vi.index, c: ci });
                             if (!e.shiftKey) setAnchor({ r: vi.index, c: ci });
-                            setInspect((i) => (i ? { r: vi.index, c: ci } : i));
+                            if (inspect) openInspector({ r: vi.index, c: ci });
                           }}
                           onDoubleClick={() =>
-                            editable ? startEdit(vi.index, ci) : setInspect({ r: vi.index, c: ci })
+                            editable ? startEdit(vi.index, ci) : openInspector({ r: vi.index, c: ci })
                           }
                         >
                           {isEditing ? (
@@ -474,7 +541,7 @@ export function ResultGrid({
                                 typeof v === "boolean" && "text-accent",
                               )}
                             >
-                              {cellText(v)}
+                              {cellPreview(v)}
                             </span>
                           )}
                           {fk && (
@@ -505,29 +572,127 @@ export function ResultGrid({
         </div>
       </ContextMenu>
       {inspect && inspectValue !== undefined && (
-        <aside className="flex w-80 shrink-0 flex-col border-l border-border bg-elev" aria-label="Cell inspector">
+        <aside
+          className={clsx(
+            "flex shrink-0 flex-col border-l border-border bg-elev",
+            maximized ? "absolute inset-0 z-10" : draft === null ? "w-80" : "w-[32rem]",
+          )}
+          aria-label="Cell inspector"
+        >
           <div className="flex h-7 items-center gap-2 border-b border-border px-2 text-xs">
             <span className="font-semibold truncate">{cols[inspect.c].name}</span>
             <span className="text-faint">{cols[inspect.c].type_name}</span>
             <span className="flex-1" />
-            <Button variant="ghost" size="icon" onClick={() => setInspect(null)} aria-label="Close inspector">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => valueEditor.current?.search()}
+              aria-label="Search value"
+              title="Search (Ctrl+F)"
+            >
+              <Search size={13} />
+            </Button>
+            {inspectJson && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => valueEditor.current?.foldAll()}
+                  aria-label="Fold all"
+                  title="Fold all"
+                >
+                  <ChevronsDownUp size={13} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => valueEditor.current?.unfoldAll()}
+                  aria-label="Unfold all"
+                  title="Unfold all"
+                >
+                  <ChevronsUpDown size={13} />
+                </Button>
+              </>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMaximized((m) => !m)}
+              aria-label={maximized ? "Restore inspector" : "Maximize inspector"}
+              title={maximized ? "Restore" : "Maximize"}
+            >
+              {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => openInspector(null)} aria-label="Close inspector">
               <X size={13} />
             </Button>
           </div>
-          <textarea
-            readOnly
-            value={inspectValue === null ? "NULL" : cellFull(inspectValue)}
-            className="flex-1 resize-none bg-elev p-2 font-mono text-xs outline-none selectable"
-            aria-label="Cell value"
-          />
+          {draft === null ? (
+            <ValueEditor
+              key="view"
+              ref={valueEditor}
+              readOnly
+              json={inspectJson}
+              value={inspectValue === null ? "NULL" : cellFull(inspectValue)}
+              ariaLabel="Cell value"
+            />
+          ) : (
+            <ValueEditor
+              key="edit"
+              ref={valueEditor}
+              json={inspectJson}
+              value={draft}
+              onChange={(t) => {
+                setDraft(t);
+                setDraftErr(null);
+              }}
+              onSubmit={saveDraft}
+              onCancel={() => setDraft(null)}
+              ariaLabel={`Edit ${cols[inspect.c].name}`}
+            />
+          )}
+          {draftErr && <div className="border-t border-border px-2 py-1 text-xs text-danger">{draftErr}</div>}
           <div className="flex gap-1 border-t border-border p-1.5">
-            <Button size="sm" onClick={() => void navigator.clipboard.writeText(cellFull(inspectValue))}>
-              Copy
-            </Button>
-            {editable && (
-              <Button size="sm" onClick={() => startEdit(inspect.r, inspect.c)}>
-                Edit
-              </Button>
+            {draft === null ? (
+              <>
+                <Button size="sm" onClick={() => void copy(cellFull(inspectValue))}>
+                  Copy
+                </Button>
+                {editable && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const start =
+                        inspectValue === null
+                          ? ""
+                          : inspectJson
+                            ? JSON.stringify(inspectValue, null, 2)
+                            : cellFull(inspectValue);
+                      draftStart.current = start;
+                      setDraft(start);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                )}
+              </>
+            ) : (
+              <>
+                <Button size="sm" onClick={saveDraft} title="Ctrl/Cmd+Enter">
+                  Save
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setDraft(null)} title="Escape">
+                  Cancel
+                </Button>
+                {inspectJson && (
+                  <Button size="sm" variant="ghost" onClick={formatDraft} title="Pretty-print the JSON">
+                    Format
+                  </Button>
+                )}
+                <span className="flex-1 self-center text-right text-[11px] text-faint">
+                  Ctrl+F search · Ctrl+Enter save
+                </span>
+              </>
             )}
           </div>
         </aside>

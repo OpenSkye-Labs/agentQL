@@ -82,6 +82,7 @@ M4 Schema tools (M)
 - [x] Foreign-key click-through in the grid
 - [x] ER diagram per schema (auto-layout, pan/zoom, export SVG/PNG)
 - [x] Schema diff between two connections/databases, copy as migration
+- [x] Structure editing: add/edit/drop column, add/drop index, drop FK, rename/drop table as reviewable DDL
 
 M5 Scale (M)
 

@@ -55,6 +55,14 @@ pub struct IndexInfo {
     pub unique: bool,
     pub primary: bool,
     pub definition: Option<String>,
+    /// Access method from the catalog (`btree`, `hnsw`, `gin` …); Postgres only.
+    #[serde(default)]
+    pub method: Option<String>,
+    /// Operator class per key column (`vector_cosine_ops` …) and storage options (`m=16`); Postgres only.
+    #[serde(default)]
+    pub opclasses: Vec<String>,
+    #[serde(default)]
+    pub options: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

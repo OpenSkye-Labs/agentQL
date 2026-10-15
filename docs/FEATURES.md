@@ -119,3 +119,25 @@ Append-only record of shipped behaviour. Newest at the bottom.
   WebKitGTK's `prefers-color-scheme` only follows the GTK theme. Named themes (GitHub light/dark, Solarized light/dark,
   Nord, Dracula, One Dark) are token blocks in `index.css`; `pnpm check` verifies tokens and WCAG AA contrast.
 - Primary buttons use the theme's `--accent-fg` again: an unlayered `button { color: inherit }` reset in index.css was out-ranking every Tailwind `text-*` utility.
+- Connecting to `localhost` on Windows no longer stalls: the IPv4 loopback is preferred when the name resolves to both (skipped under verify-full).
+- README showcase: 33 s walkthrough GIF plus seven feature stills recorded on the neutral demo dataset (`assets/demo/`), and a "How agentic is it?" section.
+- Browser mock (`?mock=1`) is a neutral demo: a fictional `shop` store (Postgres, Redis, Mongo) with seeded rows, real foreign keys and a "Sales overview" dashboard; chat prompts play scripted agent runs (revenue chart, top customers, write approval, fallback) through real `ai:event`s.
+- Cell inspector is a CodeMirror viewer/editor (`ValueEditor`): JSON columns get syntax colours, per-level folding,
+  fold/unfold-all, Ctrl+F search, a Format button and a parse check on Save; Edit widens the panel and a maximize
+  toggle takes the whole grid area instead of handing the value to the single-line in-cell input.
+  Every fifth demo order carries a deep `shipping_address` payload so the mock shows large JSON.
+- pgvector: `vector` columns decode from the binary wire format to float arrays (grid shows `[384 dims] 0.12, …`,
+  inspector shows the full array, typing `[…]` into a cell updates it); describe_table reports non-btree index
+  methods/opclasses (hnsw, ivfflat …) and the agent gets a pgvector guide when the extension is installed. Verified
+  with `PROBE_PGVECTOR=… cargo test --test probe pgvector_probe -- --ignored`. The demo products table has a
+  `vector(384)` embedding.
+- Structure tab edits the table: add / edit / drop column (context menu or row ⋯), add / drop index, drop foreign
+  key, rename / drop table. Each action generates per-driver DDL (`src/lib/ddl.ts`: Postgres one ALTER per change
+  with `USING` casts; MySQL `RENAME COLUMN` and `ALTER COLUMN SET|DROP DEFAULT`, with `MODIFY` only for type or
+  nullability changes and a warning about attributes it resets; MariaDB defaults verbatim; SQLite rename-only with
+  a rebuild note) and opens it in a query tab for review; nothing runs until executed there. Hidden on read-only
+  connections and views.
+- Production is louder where it matters (impeccable polish pass, PRODUCT.md added): tabs mark the environment with a
+  dot instead of a repeated badge, the status bar tints red on production, and an agent write to a production
+  connection gets a red approval card with "Run on production" and Deny focused, so Enter cannot approve it. New
+  `--danger-fg` token per theme, contrast-checked, fixes white-on-red danger buttons in dark themes.

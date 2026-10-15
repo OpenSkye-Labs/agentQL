@@ -259,5 +259,5 @@ const gen = obj(
 );
 gen.details.columns[1].default = "uuid()";
 gen.details.columns[1].extra = "DEFAULT_GENERATED";
-assert.ok(migrationSql("mysql", "s", compareSchemas([], [gen])).includes("DEFAULT uuid() /* DEFAULT_GENERATED */"));
+assert.ok(migrationSql("mysql", "s", compareSchemas([], [gen])).includes("DEFAULT (uuid()) /* DEFAULT_GENERATED */"));
 console.log("diff.check ok");

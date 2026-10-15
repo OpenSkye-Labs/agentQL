@@ -341,6 +341,17 @@ pub fn definitions(driver: Driver) -> Vec<ToolDef> {
     defs
 }
 
+/// Appended to the system prompt when the `vector` extension is installed.
+const PGVECTOR_GUIDE: &str = "\npgvector is installed. Vector cells arrive as JSON float arrays. \
+    Distance operators: <-> L2, <=> cosine, <#> negative inner product, <+> L1 (pgvector 0.7+ only); the operator must match the index \
+    opclass (vector_l2_ops / vector_cosine_ops / vector_ip_ops) and the query must be `ORDER BY col <op> q LIMIT k` for \
+    the index to be used (describe_table shows the index method and options). \
+    Tuning per session: SET hnsw.ef_search = N; SET ivfflat.probes = N. \
+    For experiments: measure recall by comparing the indexed top-k with an exact scan (SET LOCAL enable_indexscan = off), \
+    time both with explain_sql, check vector_dims(col) and vector_norm(col), find a row's neighbours with a subquery on its id, \
+    and near-duplicates with a self-join under a distance threshold. \
+    Never select whole vector columns for many rows; project dims/norm/distance or LIMIT a handful.\n";
+
 pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
     let Ok(conn) = ctx.manager.get(&session.connection_id).await else {
         return "You are AgentQL, a database assistant. The connection is currently offline."
@@ -371,6 +382,13 @@ pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
                     "The user limited your view of this database to the schemas and tables listed below. \
                      Never query anything else (including information_schema or pg_catalog); use describe_table for metadata.\n",
                 );
+            }
+            if cfg.driver == Driver::Postgres
+                && c.run_one_read_only("SELECT 1 FROM pg_extension WHERE extname = 'vector'", 1)
+                    .await
+                    .is_ok_and(|r| !r.rows.is_empty())
+            {
+                s.push_str(PGVECTOR_GUIDE);
             }
             if let Ok(schemas) = c.schemas().await {
                 s.push_str("\nSchemas and tables:\n");
@@ -516,12 +534,38 @@ async fn execute_inner(
             if !d.indexes.is_empty() {
                 s.push_str("Indexes:\n");
                 for i in &d.indexes {
-                    s.push_str(&format!(
-                        "- {} ({}){}\n",
-                        i.name,
-                        i.columns.join(", "),
-                        if i.unique { " UNIQUE" } else { "" }
-                    ));
+                    // Non-btree indexes (hnsw, ivfflat, gin, gist …) print method, opclasses and options, all from the
+                    // catalog so a quoted name containing "USING" cannot mislead the output.
+                    match i.method.as_deref().filter(|m| *m != "btree") {
+                        Some(m) => {
+                            let cols: Vec<String> = i
+                                .columns
+                                .iter()
+                                .enumerate()
+                                .map(|(k, c)| match i.opclasses.get(k) {
+                                    Some(oc) => format!("{c} {oc}"),
+                                    None => c.clone(),
+                                })
+                                .collect();
+                            s.push_str(&format!(
+                                "- {} USING {m} ({}){}{}\n",
+                                i.name,
+                                cols.join(", "),
+                                if i.options.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" WITH ({})", i.options.join(", "))
+                                },
+                                if i.unique { " UNIQUE" } else { "" }
+                            ));
+                        }
+                        None => s.push_str(&format!(
+                            "- {} ({}){}\n",
+                            i.name,
+                            i.columns.join(", "),
+                            if i.unique { " UNIQUE" } else { "" }
+                        )),
+                    }
                 }
             }
             if !d.foreign_keys.is_empty() {
