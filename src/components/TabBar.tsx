@@ -98,7 +98,7 @@ export function TabBar() {
                 <span className="truncate flex-1" title={t.kind === "query" ? t.filePath : undefined}>
                   {t.title}
                 </span>
-                <EnvBadge env={conn?.environment} className="shrink-0" />
+                <EnvBadge env={conn?.environment} dot className="shrink-0" />
                 {t.kind !== "welcome" && (
                   <button
                     onClick={(e) => {

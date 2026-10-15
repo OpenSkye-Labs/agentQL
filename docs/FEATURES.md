@@ -137,3 +137,7 @@ Append-only record of shipped behaviour. Newest at the bottom.
   nullability changes and a warning about attributes it resets; MariaDB defaults verbatim; SQLite rename-only with
   a rebuild note) and opens it in a query tab for review; nothing runs until executed there. Hidden on read-only
   connections and views.
+- Production is louder where it matters (impeccable polish pass, PRODUCT.md added): tabs mark the environment with a
+  dot instead of a repeated badge, the status bar tints red on production, and an agent write to a production
+  connection gets a red approval card with "Run on production" and Deny focused, so Enter cannot approve it. New
+  `--danger-fg` token per theme, contrast-checked, fixes white-on-red danger buttons in dark themes.
