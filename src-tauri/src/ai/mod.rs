@@ -296,6 +296,7 @@ async fn ensure_remote_consent(
         "{} is a remote service. While you chat, AgentQL sends it:
          • schema and table names ({scope})
          • column names, types, indexes and foreign keys of tables the agent inspects
+         • your data-dictionary notes and metrics for those tables
          • the SQL it runs and the result rows it requests (truncated per query)
          Nothing has been sent yet. You can revoke this later in the connection settings.",
         provider.name

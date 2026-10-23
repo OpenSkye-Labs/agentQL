@@ -2,7 +2,7 @@
 //! `db::Manager`, so API-key providers and CLI providers behave identically.
 
 use super::{AgentEvent, ChatSession, Ctx, ToolDef};
-use crate::config::{Driver, ScopeEntry};
+use crate::config::{Driver, Note, ScopeEntry};
 use crate::db::mongo::MongoFind;
 use crate::db::sql::{
     SqlConn, SqlRefs, is_read_only, referenced_tables, split_statements, with_limit,
@@ -54,6 +54,69 @@ impl<'a> Scope<'a> {
             })
         })
     }
+}
+
+/// Characters of notes in the system prompt; describe_table returns a table's notes in full.
+const NOTES_BUDGET: usize = 6000;
+
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The user's data dictionary for in-scope tables as prompt lines: per table its note, then column notes, then
+/// metrics, cut at `budget` characters with a marker. Empty when nothing is visible.
+/// ponytail: a metric is visible when its anchor table is; one that joins an out-of-scope table still shows.
+fn render_notes(notes: &[Note], scope: &Scope<'_>, budget: usize) -> String {
+    let rank = |n: &Note| match (&n.column, &n.metric) {
+        (None, None) => 0,
+        (Some(_), _) => 1,
+        _ => 2,
+    };
+    let mut visible: Vec<&Note> = notes
+        .iter()
+        .filter(|n| scope.table_allowed(&n.schema, &n.table))
+        .collect();
+    if visible.is_empty() {
+        return String::new();
+    }
+    visible.sort_by(|a, b| {
+        (&a.schema, &a.table, rank(a), &a.column, &a.metric).cmp(&(
+            &b.schema,
+            &b.table,
+            rank(b),
+            &b.column,
+            &b.metric,
+        ))
+    });
+    let mut body = String::new();
+    let mut current: Option<(&str, &str)> = None;
+    for n in visible {
+        let mut chunk = String::new();
+        if current != Some((&n.schema, &n.table)) {
+            current = Some((&n.schema, &n.table));
+            chunk.push_str(&format!("- {}.{}", n.schema, n.table));
+            if rank(n) == 0 {
+                chunk.push_str(&format!(": {}\n", one_line(&n.text)));
+            } else {
+                chunk.push('\n');
+            }
+        }
+        match (&n.column, &n.metric) {
+            (Some(c), _) => chunk.push_str(&format!("  - {c}: {}\n", one_line(&n.text))),
+            (None, Some(m)) => chunk.push_str(&format!("  - metric {m} = {}\n", one_line(&n.text))),
+            (None, None) => {}
+        }
+        if body.len() + chunk.len() > budget {
+            body.push_str(
+                "- … more notes truncated; describe_table returns a table's notes in full\n",
+            );
+            break;
+        }
+        body.push_str(&chunk);
+    }
+    format!(
+        "\nData dictionary (notes the user wrote about meaning and metrics; prefer them over guesses from names):\n{body}"
+    )
 }
 
 /// Functions that read data by name or run SQL from a string, so the parsed table list cannot see
@@ -287,6 +350,14 @@ pub fn definitions(driver: Driver) -> Vec<ToolDef> {
                 &["sql"],
             ),
             t(
+                "save_note",
+                "Propose a data-dictionary note: what a table or a column means (enum values, units, caveats), or a named \
+                 metric (set `metric` to its name and `text` to its SQL definition). The user approves it first; it is stored in \
+                 AgentQL, never in the database. Empty text deletes the note.",
+                json!({"schema": {"type": "string"}, "table": {"type": "string"}, "column": {"type": "string"}, "metric": {"type": "string"}, "text": {"type": "string"}}),
+                &["table", "text"],
+            ),
+            t(
                 "explain_sql",
                 "Return the database's execution plan for a query (EXPLAIN). Use to optimise queries; set analyze=true to actually run it and get real timings (read-only queries only).",
                 json!({"sql": {"type": "string"}, "analyze": {"type": "boolean"}}),
@@ -417,6 +488,12 @@ pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
                     }
                 }
             }
+            match ctx.store.notes(&session.connection_id) {
+                Ok(notes) => s.push_str(&render_notes(&notes, &scope, NOTES_BUDGET)),
+                Err(e) => s.push_str(&format!(
+                    "\nThe user's data dictionary could not be read: {e}\n"
+                )),
+            }
         }
         Live::Mongo(m) => {
             if let Ok(dbs) = m.databases().await {
@@ -517,10 +594,26 @@ async fn execute_inner(
                 return Ok(err(format!("'{schema}.{table}' {OUT_OF_SCOPE}")));
             }
             let d = c.table_details(&schema, table).await?;
+            let (notes, notes_err): (Vec<Note>, _) = match ctx.store.notes(&session.connection_id) {
+                Ok(all) => (
+                    all.into_iter()
+                        .filter(|n| scope.same(&n.schema, &schema) && scope.same(&n.table, table))
+                        .collect(),
+                    None,
+                ),
+                Err(e) => (vec![], Some(e)),
+            };
+            let col_note = |col: &str| {
+                notes
+                    .iter()
+                    .find(|n| n.column.as_deref().is_some_and(|c| scope.same(c, col)))
+                    .map(|n| format!(" -- {}", one_line(&n.text)))
+                    .unwrap_or_default()
+            };
             let mut s = format!("Table {schema}.{table}\nColumns:\n");
             for col in &d.columns {
                 s.push_str(&format!(
-                    "- {} {}{}{}{}\n",
+                    "- {} {}{}{}{}{}\n",
                     col.name,
                     col.data_type,
                     if col.is_primary { " PK" } else { "" },
@@ -528,7 +621,8 @@ async fn execute_inner(
                     col.default
                         .as_ref()
                         .map(|v| format!(" DEFAULT {v}"))
-                        .unwrap_or_default()
+                        .unwrap_or_default(),
+                    col_note(&col.name)
                 ));
             }
             if !d.indexes.is_empty() {
@@ -580,12 +674,92 @@ async fn execute_inner(
                     ));
                 }
             }
+            let mut table_level: Vec<&Note> = notes.iter().filter(|n| n.column.is_none()).collect();
+            table_level.sort_by_key(|n| &n.metric);
+            if let Some(e) = notes_err {
+                s.push_str(&format!("Notes could not be read: {e}\n"));
+            }
+            if !table_level.is_empty() {
+                s.push_str("Notes (from the user's data dictionary):\n");
+                for n in table_level {
+                    match &n.metric {
+                        Some(m) => s.push_str(&format!("- metric {m} = {}\n", one_line(&n.text))),
+                        None => s.push_str(&format!("- {}\n", one_line(&n.text))),
+                    }
+                }
+            }
             Ok(ok(
                 s,
                 Some(
                     json!({"type": "table_details", "schema": schema, "table": table, "details": d}),
                 ),
             ))
+        }
+        (Live::Sql(c), "save_note") => {
+            let table = str_arg(input, "table").ok_or("table is required")?;
+            let schema = match str_arg(input, "schema") {
+                Some(s) => s.to_string(),
+                None => default_schema(c, &scope).await?,
+            };
+            if !scope.table_allowed(&schema, table) {
+                return Ok(err(format!("'{schema}.{table}' {OUT_OF_SCOPE}")));
+            }
+            let note = Note {
+                schema: schema.clone(),
+                table: table.to_string(),
+                column: str_arg(input, "column").map(str::to_string),
+                metric: str_arg(input, "metric").map(str::to_string),
+                text: input
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+            };
+            if note.column.is_some() && note.metric.is_some() {
+                return Ok(err("Set either column or metric, not both."));
+            }
+            // Notes on tables or columns that do not exist would only mislead later turns.
+            let d = c.table_details(&schema, table).await?;
+            if d.columns.is_empty() {
+                return Ok(err(format!(
+                    "'{schema}.{table}' does not exist; check list_tables."
+                )));
+            }
+            if let Some(col) = &note.column
+                && !d.columns.iter().any(|x| scope.same(&x.name, col))
+            {
+                return Ok(err(format!("'{schema}.{table}' has no column '{col}'.")));
+            }
+            let target = match (&note.column, &note.metric) {
+                (Some(col), _) => format!("Column {schema}.{table}.{col}"),
+                (None, Some(m)) => format!("Metric '{m}' on {schema}.{table}"),
+                (None, None) => format!("Table {schema}.{table}"),
+            };
+            let shown = if note.text.is_empty() {
+                "(delete this note)"
+            } else {
+                note.text.as_str()
+            };
+            if !ctx
+                .request_decision(
+                    &session.id,
+                    "note",
+                    "The agent wants to save a data-dictionary note",
+                    &format!("{target}\n\n{shown}"),
+                )
+                .await
+            {
+                return Ok(err("The user declined to save this note."));
+            }
+            // The scope may have been narrowed while the card was waiting.
+            let fresh = stored_scope(ctx, &session.connection_id);
+            if !Scope::new(fresh.as_deref(), conn.config.driver).table_allowed(&schema, table) {
+                return Ok(err(format!("'{schema}.{table}' {OUT_OF_SCOPE}")));
+            }
+            ctx.store.save_note(&session.connection_id, note)?;
+            let _ = ctx.app.emit("notes:changed", &session.connection_id);
+            Ok(ok(format!("Saved the note for {target}."), None))
         }
         (Live::Sql(c), "run_sql") => {
             let sql = str_arg(input, "sql").ok_or("sql is required")?;
@@ -1113,5 +1287,49 @@ mod tests {
         let ok =
             static_scope_check(pg, "select * from public.t, lateral jsonb_each(t.doc) x").unwrap();
         assert_eq!(ok.tables, vec![(Some("public".into()), "t".into())]);
+    }
+
+    fn n(table: &str, column: Option<&str>, metric: Option<&str>, text: &str) -> Note {
+        Note {
+            schema: "public".into(),
+            table: table.into(),
+            column: column.map(Into::into),
+            metric: metric.map(Into::into),
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn notes_render_scoped_and_budgeted() {
+        let notes = vec![
+            n(
+                "orders",
+                None,
+                Some("revenue"),
+                "SUM(total) WHERE status <> 3",
+            ),
+            n("orders", Some("status"), None, "3 = cancelled"),
+            n("orders", None, None, "One row per order"),
+            n("secrets", None, None, "do not leak"),
+        ];
+        let all = Scope::new(None, Driver::Postgres);
+        let s = render_notes(&notes, &all, 10_000);
+        let order = |needle: &str| s.find(needle).unwrap_or_else(|| panic!("{needle} in {s}"));
+        assert!(order("public.orders: One row per order") < order("status: 3 = cancelled"));
+        assert!(order("status: 3 = cancelled") < order("metric revenue = SUM(total)"));
+        assert!(s.contains("public.secrets"));
+
+        let only_orders = [ScopeEntry {
+            schema: "public".into(),
+            table: Some("orders".into()),
+        }];
+        let scoped = Scope::new(Some(&only_orders), Driver::Postgres);
+        let s = render_notes(&notes, &scoped, 10_000);
+        assert!(s.contains("orders") && !s.contains("secrets") && !s.contains("leak"));
+
+        let tiny = render_notes(&notes, &all, 60);
+        assert!(tiny.contains("truncated"), "{tiny}");
+        assert!(!tiny.contains("leak"));
+        assert_eq!(render_notes(&[], &all, 100), "");
     }
 }

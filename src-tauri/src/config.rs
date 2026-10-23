@@ -141,6 +141,28 @@ pub struct ScopeEntry {
     pub table: Option<String>,
 }
 
+/// One data-dictionary entry the agent reads, stored in `notes.json`, never in the database.
+/// `column` set = column note, `metric` set = named metric (`text` is its definition), neither = table note.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Note {
+    pub schema: String,
+    pub table: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<String>,
+    pub text: String,
+}
+
+impl Note {
+    fn same_target(&self, o: &Note) -> bool {
+        self.schema == o.schema
+            && self.table == o.table
+            && self.column == o.column
+            && self.metric == o.metric
+    }
+}
+
 /// Secrets travel with the config only in memory / over IPC, never to connections.json.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConnectionSecrets {
@@ -290,6 +312,59 @@ impl Store {
         list.insert(0, entry);
         list.truncate(500);
         self.write("history.json", &list)
+    }
+
+    /// `notes.json`: connection id -> notes. A file that exists but does not parse is an error,
+    /// so a write can never replace the user's notes with a fresh map.
+    fn notes_file(&self) -> Result<HashMap<String, Vec<Note>>> {
+        match std::fs::read(self.path("notes.json")) {
+            Ok(data) => serde_json::from_slice(&data).map_err(|e| {
+                AppError::Msg(format!(
+                    "notes.json is not valid JSON ({e}); fix or remove it before notes can be read or saved"
+                ))
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn notes_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn notes(&self, connection_id: &str) -> Result<Vec<Note>> {
+        Ok(self.notes_file()?.remove(connection_id).unwrap_or_default())
+    }
+
+    /// Insert or replace the note for the same target; blank text deletes it.
+    pub fn save_note(&self, connection_id: &str, mut note: Note) -> Result<()> {
+        if note.column.is_some() && note.metric.is_some() {
+            return Err(AppError::Msg(
+                "a note is for a column or a metric, not both".into(),
+            ));
+        }
+        note.text = note.text.trim().to_string();
+        let _g = Self::notes_lock();
+        let mut all = self.notes_file()?;
+        let list = all.entry(connection_id.to_string()).or_default();
+        list.retain(|n| !n.same_target(&note));
+        if !note.text.is_empty() {
+            list.push(note);
+        }
+        if list.is_empty() {
+            all.remove(connection_id);
+        }
+        self.write("notes.json", &all)
+    }
+
+    pub fn delete_notes(&self, connection_id: &str) -> Result<()> {
+        let _g = Self::notes_lock();
+        let mut all = self.notes_file()?;
+        if all.remove(connection_id).is_some() {
+            self.write("notes.json", &all)?;
+        }
+        Ok(())
     }
 
     pub fn save_settings(&self, s: &Settings) -> Result<()> {
@@ -515,6 +590,68 @@ mod tests {
             "mongodb+srv://u:p%20w@cluster.x.net/db"
         );
         assert_eq!(pct_decode("a%2Fb%"), "a/b%");
+    }
+
+    fn note(column: Option<&str>, metric: Option<&str>, text: &str) -> Note {
+        Note {
+            schema: "public".into(),
+            table: "orders".into(),
+            column: column.map(Into::into),
+            metric: metric.map(Into::into),
+            text: text.into(),
+        }
+    }
+
+    fn temp_store(name: &str) -> Store {
+        let dir = std::env::temp_dir().join(format!("agentql-notes-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        Store::new(dir)
+    }
+
+    #[test]
+    fn notes_upsert_delete_and_isolation() {
+        let st = temp_store("upsert");
+        st.save_note("a", note(None, None, "One row per order"))
+            .unwrap();
+        st.save_note("a", note(Some("status"), None, "3 = cancelled"))
+            .unwrap();
+        st.save_note("a", note(None, Some("revenue"), "SUM(total)"))
+            .unwrap();
+        st.save_note("b", note(None, None, "other connection"))
+            .unwrap();
+        // Same target replaces, it does not duplicate.
+        st.save_note(
+            "a",
+            note(Some("status"), None, "3 = cancelled, 4 = refunded"),
+        )
+        .unwrap();
+        let a = st.notes("a").unwrap();
+        assert_eq!(a.len(), 3);
+        assert!(a.iter().any(|n| n.text == "3 = cancelled, 4 = refunded"));
+        // Empty text deletes.
+        st.save_note("a", note(None, Some("revenue"), "  "))
+            .unwrap();
+        assert_eq!(st.notes("a").unwrap().len(), 2);
+        assert_eq!(st.notes("b").unwrap().len(), 1);
+        st.delete_notes("a").unwrap();
+        assert!(st.notes("a").unwrap().is_empty());
+        assert_eq!(st.notes("b").unwrap().len(), 1);
+        assert!(
+            st.save_note("a", note(Some("c"), Some("m"), "both"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn notes_corrupt_file_is_never_overwritten() {
+        let st = temp_store("corrupt");
+        std::fs::write(st.dir().join("notes.json"), b"{ not json").unwrap();
+        assert!(st.notes("a").is_err());
+        assert!(st.save_note("a", note(None, None, "x")).is_err());
+        assert_eq!(
+            std::fs::read(st.dir().join("notes.json")).unwrap(),
+            b"{ not json"
+        );
     }
 }
 
