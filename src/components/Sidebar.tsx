@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import {
+  BookText,
   Bot,
   ChevronDown,
   ChevronRight,
@@ -260,6 +261,15 @@ function ConnectionNode({
       disabled: !connected,
       onSelect: () => openTab({ kind: "diff", connectionId: conn.id, title: "Schema diff" }),
     },
+    ...(isSql(conn.driver)
+      ? [
+          {
+            label: "Data dictionary",
+            icon: <BookText size={13} />,
+            onSelect: () => openTab({ kind: "notes", connectionId: conn.id, title: `Notes · ${conn.name}` }),
+          },
+        ]
+      : []),
     {
       label: "Refresh",
       icon: <RefreshCw size={13} />,

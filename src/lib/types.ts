@@ -65,6 +65,16 @@ export interface ConnectionConfig {
   updated_at?: string | null;
 }
 
+/** One data-dictionary entry the agent reads. `column` set = column note, `metric` set = named metric whose
+ * `text` is its definition, neither = table note. Stored in AgentQL (`notes.json`), never in the database. */
+export interface Note {
+  schema: string;
+  table: string;
+  column?: string | null;
+  metric?: string | null;
+  text: string;
+}
+
 export interface ConnectionSecrets {
   password?: string | null;
   ssh_password?: string | null;
@@ -245,7 +255,13 @@ export type AgentEvent =
   | { kind: "text_delta"; text: string }
   | { kind: "tool_call"; id: string; name: string; input: unknown }
   | { kind: "tool_result"; id: string; content: string; is_error: boolean; display: unknown }
-  | { kind: "approval_request"; id: string; approval_kind: "write" | "consent"; description: string; statement: string }
+  | {
+      kind: "approval_request";
+      id: string;
+      approval_kind: "write" | "consent" | "note";
+      description: string;
+      statement: string;
+    }
   | { kind: "status"; text: string }
   | { kind: "done"; session: ChatSession }
   | { kind: "error"; message: string };

@@ -16,6 +16,7 @@ const DashboardTab = lazy(() => import("./components/DashboardTab").then((m) => 
 const ChatPanel = lazy(() => import("./components/ChatPanel").then((m) => ({ default: m.ChatPanel })));
 const ErdTab = lazy(() => import("./components/ErdTab").then((m) => ({ default: m.ErdTab })));
 const SchemaDiffTab = lazy(() => import("./components/SchemaDiffTab").then((m) => ({ default: m.SchemaDiffTab })));
+const NotesTab = lazy(() => import("./components/NotesTab").then((m) => ({ default: m.NotesTab })));
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { SHORTCUTS_EVENT, ShortcutsDialog } from "./components/ShortcutsDialog";
@@ -120,6 +121,7 @@ export default function App() {
                         {t.kind === "dashboard" && <DashboardTab tab={t} />}
                         {t.kind === "erd" && <ErdTab tab={t} />}
                         {t.kind === "diff" && <SchemaDiffTab tab={t} />}
+                        {t.kind === "notes" && <NotesTab tab={t} />}
                       </Suspense>
                     </ErrorBoundary>
                   </div>

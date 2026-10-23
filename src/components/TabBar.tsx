@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import {
+  BookText,
   Bot,
   Database,
   FileCode2,
@@ -25,6 +26,7 @@ const icons: Record<Tab["kind"], React.ReactNode> = {
   mongo: <Braces size={13} />,
   erd: <Network size={13} />,
   diff: <GitCompare size={13} />,
+  notes: <BookText size={13} />,
   welcome: <Database size={13} />,
 };
 

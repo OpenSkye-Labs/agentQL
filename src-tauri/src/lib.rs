@@ -106,6 +106,8 @@ pub fn run() {
             commands::classify_sql,
             commands::history_add,
             commands::set_agent_scope,
+            commands::notes_list,
+            commands::note_save,
             commands::schema_catalog,
             commands::schema_objects,
             commands::save_file,
