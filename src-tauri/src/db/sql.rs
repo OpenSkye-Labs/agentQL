@@ -2,6 +2,7 @@
 //! dynamic result decoding, schema introspection and table editing helpers.
 
 use super::value::{mysql_value, pg_value, sqlite_value};
+use super::{BATCH_ROWS, Batch, Stop};
 use super::{
     CatalogColumn, CatalogForeignKey, Column, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult,
     RowChange, SchemaCatalog, SchemaObject, TableDetails, TableInfo, TableQuery,
@@ -333,62 +334,77 @@ impl SqlConn {
         Ok(res)
     }
 
-    /// Column metadata for a statement; `search_path` pins the Postgres schema the same way
-    /// `run_one_opts` did, so the headers describe the query that actually ran.
     /// Stream a read-only statement's rows to `tx` in batches without collecting them (export). Same enforcement as
-    /// `run_read_only`: a read-only transaction on Postgres/MySQL, `query_only` on SQLite. Stops early when `stop`
-    /// is set or the receiver is gone. Returns the number of rows sent.
+    /// `run_read_only`: a read-only transaction on Postgres/MySQL, `query_only` on SQLite. Returns the rows sent; stops
+    /// early when `stop` fires or the receiver is gone.
+    /// ponytail: the read-only setup mirrors `run_one_opts`' read-only arms; harden both together, or fold them into one
+    /// macro if a third caller appears.
     pub async fn stream_read_only(
         &self,
         sql: &str,
-        tx: &tokio::sync::mpsc::Sender<crate::export::Batch>,
-        stop: &std::sync::atomic::AtomicBool,
+        tx: &tokio::sync::mpsc::Sender<Batch>,
+        stop: &Stop,
     ) -> Result<u64> {
-        let sent = match &self.pool {
+        let (sent, header) = match &self.pool {
             Pool::Pg(p) => {
-                let mut t = p.begin().await?;
+                // A connection of its own, out of the pool: on cancel it is dropped (socket closed) instead of rolled
+                // back, because a rollback would first read and discard every remaining row of the result.
+                // ponytail: the server keeps executing until it next writes to the closed socket; send a cancel request
+                // (pg_cancel_backend) if long server-side queries after Cancel become a problem.
+                let mut conn = p.acquire().await?.detach();
+                let mut t = sqlx::Connection::begin(&mut conn).await?;
                 sqlx::query("SET TRANSACTION READ ONLY")
                     .execute(&mut *t)
                     .await?;
                 let r = stream_batches!(&mut *t, sql, pg_value, tx, stop);
-                let _ = t.rollback().await;
+                if stop.is_set() {
+                    drop(t);
+                    drop(conn);
+                } else {
+                    let _ = t.rollback().await;
+                    let _ = sqlx::Connection::close(conn).await;
+                }
                 r?
             }
             Pool::My(p) => {
+                let mut conn = p.acquire().await?.detach();
                 // START TRANSACTION is not preparable on MySQL; SET TRANSACTION (next txn only) + begin() is.
-                let mut conn = p.acquire().await?;
                 sqlx::query("SET TRANSACTION READ ONLY")
-                    .execute(&mut *conn)
+                    .execute(&mut conn)
                     .await?;
-                let mut t = sqlx::Connection::begin(&mut *conn).await?;
+                let mut t = sqlx::Connection::begin(&mut conn).await?;
                 let r = stream_batches!(&mut *t, sql, mysql_value, tx, stop);
-                let _ = t.rollback().await;
+                if stop.is_set() {
+                    drop(t);
+                    drop(conn);
+                } else {
+                    let _ = t.rollback().await;
+                    let _ = sqlx::Connection::close(conn).await;
+                }
                 r?
             }
             Pool::Lite(p) => {
-                let mut conn = p.acquire().await?;
-                sqlx::query("PRAGMA query_only = 1")
-                    .execute(&mut *conn)
-                    .await?;
-                let r = stream_batches!(&mut *conn, sql, sqlite_value, tx, stop);
-                let _ = sqlx::query("PRAGMA query_only = 0")
-                    .execute(&mut *conn)
-                    .await;
+                // Its own read-only connection: the app's SQLite pool has a single connection, which a long export
+                // would otherwise hold, stalling every other query on this database until it finished.
+                let opts = (*p.connect_options()).clone().read_only(true);
+                let mut conn = opts.connect().await?;
+                let r = stream_batches!(&mut conn, sql, sqlite_value, tx, stop);
+                drop(conn);
                 r?
             }
         };
-        if sent == 0 {
+        if !header && !stop.is_set() {
             // Zero rows: still write the header.
             let cols = self.describe_columns(sql, None).await.unwrap_or_default();
             let _ = tx
-                .send(crate::export::Batch::Columns(
-                    cols.into_iter().map(|c| c.name).collect(),
-                ))
+                .send(Batch::Columns(cols.into_iter().map(|c| c.name).collect()))
                 .await;
         }
         Ok(sent)
     }
 
+    /// Column metadata for a statement; `search_path` pins the Postgres schema the same way
+    /// `run_one_opts` did, so the headers describe the query that actually ran.
     async fn describe_columns(&self, sql: &str, search_path: Option<&str>) -> Result<Vec<Column>> {
         let to_columns = |cols: &[sqlx::postgres::PgColumn]| -> Vec<Column> {
             cols.iter()
@@ -1405,53 +1421,63 @@ macro_rules! exec_stream {
 }
 use exec_stream;
 
-/// Like `exec_stream`, but hands rows to a channel in batches instead of collecting them (export). Evaluates to
-/// `Result<u64>`: the rows sent.
+/// Like `exec_stream`, but hands rows to a channel in batches instead of collecting them (export). A batch goes out
+/// when full or 250 ms after the previous one, so progress keeps moving on slow results. Evaluates to
+/// `Result<(rows sent, header sent)>`.
 macro_rules! stream_batches {
     ($exec:expr, $sql:expr, $conv:path, $tx:expr, $stop:expr) => {{
-        use crate::export::{BATCH_ROWS, Batch};
-        use std::sync::atomic::Ordering;
         let mut stream = sqlx::query($sql).fetch($exec);
         let mut buf: Vec<Vec<Value>> = Vec::with_capacity(BATCH_ROWS);
         let mut sent: u64 = 0;
-        let mut out: Result<u64> = Ok(0);
+        let mut header = false;
+        let mut last_send = Instant::now();
+        let mut failure: Option<sqlx::Error> = None;
         loop {
-            if $stop.load(Ordering::Relaxed) {
-                break;
-            }
-            match stream.next().await {
+            // Race the next row against Cancel: the database may take a long time to produce it.
+            let item = tokio::select! {
+                biased;
+                _ = $stop.wait() => break,
+                item = stream.next() => item,
+            };
+            let row = match item {
                 None => break,
                 Some(Err(e)) => {
-                    out = Err(e.into());
+                    failure = Some(e);
                     break;
                 }
-                Some(Ok(row)) => {
-                    if sent == 0 && buf.is_empty() {
-                        let cols = row.columns().iter().map(|c| c.name().to_string()).collect();
-                        if $tx.send(Batch::Columns(cols)).await.is_err() {
-                            break;
-                        }
-                    }
-                    buf.push((0..row.len()).map(|i| $conv(&row, i)).collect());
-                    if buf.len() >= BATCH_ROWS {
-                        sent += buf.len() as u64;
-                        if $tx
-                            .send(Batch::Rows(std::mem::take(&mut buf)))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
+                Some(Ok(row)) => row,
+            };
+            if !header {
+                header = true;
+                let cols = row.columns().iter().map(|c| c.name().to_string()).collect();
+                if $tx.send(Batch::Columns(cols)).await.is_err() {
+                    break;
+                }
+            }
+            buf.push((0..row.len()).map(|i| $conv(&row, i)).collect());
+            if buf.len() >= BATCH_ROWS || last_send.elapsed() >= Duration::from_millis(250) {
+                sent += buf.len() as u64;
+                last_send = Instant::now();
+                if $tx
+                    .send(Batch::Rows(std::mem::take(&mut buf)))
+                    .await
+                    .is_err()
+                {
+                    break;
                 }
             }
         }
         drop(stream);
-        if out.is_ok() && !buf.is_empty() && !$stop.load(Ordering::Relaxed) {
-            sent += buf.len() as u64;
-            let _ = $tx.send(Batch::Rows(buf)).await;
+        match failure {
+            Some(e) => Err::<(u64, bool), AppError>(e.into()),
+            None => {
+                if !buf.is_empty() && !$stop.is_set() {
+                    sent += buf.len() as u64;
+                    let _ = $tx.send(Batch::Rows(buf)).await;
+                }
+                Ok((sent, header))
+            }
         }
-        out.map(|_| sent)
     }};
 }
 use stream_batches;

@@ -30,6 +30,7 @@ export interface ScopeEntry {
 }
 
 export type Environment = "dev" | "staging" | "production";
+export type ExportFormat = "csv" | "json" | "sql";
 export const ENVIRONMENTS: Environment[] = ["dev", "staging", "production"];
 
 export interface WriteInfo {

@@ -50,6 +50,11 @@ impl From<serde_json::Error> for AppError {
         AppError::Msg(e.to_string())
     }
 }
+impl From<csv::Error> for AppError {
+    fn from(e: csv::Error) -> Self {
+        AppError::Msg(e.to_string())
+    }
+}
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         AppError::Msg(e.to_string())

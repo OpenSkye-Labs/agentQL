@@ -3,13 +3,13 @@ import { clsx } from "clsx";
 import { ChevronLeft, ChevronRight, Filter, Plus, RefreshCw, Save, Trash2, Undo2, Copy, Bot } from "lucide-react";
 import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
-import type { Cell, ForeignKeyInfo, QueryResult, RowChange, TableDetails } from "../lib/types";
+import type { Cell, ExportFormat, ForeignKeyInfo, QueryResult, RowChange, TableDetails } from "../lib/types";
 import { fmtCount, fmtDuration } from "../lib/format";
 import { keyFilter } from "../lib/sql";
 import { ResultGrid, type GridEdit } from "./ResultGrid";
 import { StructureView } from "./StructureView";
 import { Button, Dialog, Input, Select, Spinner, Tooltip, Empty } from "./ui";
-import { ExportMenu, useExport, type ExportFormat } from "./ExportMenu";
+import { ExportMenu, useExport } from "./ExportMenu";
 
 type TTab = Extract<Tab, { kind: "table" }>;
 const PAGE_SIZES = [100, 250, 500, 1000];

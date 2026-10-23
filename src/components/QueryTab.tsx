@@ -6,9 +6,9 @@ import { Bot, FileText, History, Keyboard, Play, Save, Sparkles, StopCircle, Wan
 import { snippetCompletion } from "@codemirror/autocomplete";
 import { api, errMsg } from "../lib/api";
 import { productionPrompt } from "../lib/production";
-import { ExportMenu, useExport, type ExportFormat } from "./ExportMenu";
+import { CANCELLED, ExportMenu, useExport } from "./ExportMenu";
 import { useStore, useConnection, type Tab } from "../lib/store";
-import type { QueryResult, SavedQuery, WriteInfo } from "../lib/types";
+import type { ExportFormat, QueryResult, SavedQuery, WriteInfo } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
 import { buildNamespace, editorCompletions, isSnippet, snippetTemplate } from "../lib/completion";
 import { countStatements } from "../lib/sql";
@@ -209,11 +209,13 @@ export function QueryTab({ tab }: { tab: QTab }) {
   const exportResult = (format: ExportFormat) => {
     const r = results?.[active];
     if (!r || !conn) return;
-    void exporter.run("query", format, async (id, path) => {
+    void exporter.run("query", format, async (id, path, cancelled) => {
       const columns = r.columns.map((c) => c.name);
       // Everything is already loaded: write it as shown. A write statement is never re-run (it would run again).
       const rerun = r.truncated && !!r.statement && (await api.classifySql(conn.driver, r.statement)).length === 0;
-      if (!rerun) return { rows: await api.exportRows(path, format, columns, r.rows), loadedOnly: r.truncated };
+      if (cancelled()) throw CANCELLED;
+      if (!rerun)
+        return { rows: await api.exportRows(path, format, columns, r.rows, conn.driver), loadedOnly: r.truncated };
       return { rows: await api.exportQuery(id, conn.id, r.statement, path, format) };
     });
   };

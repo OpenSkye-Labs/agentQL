@@ -412,19 +412,26 @@ pub fn ssh_forget_host(st: State<'_, AppState>, host: String, port: u16) -> Resu
     crate::ssh::forget_host(&st.manager.known_hosts_path, &host, port)
 }
 
+/// MySQL/MariaDB read `\'` inside a string literal as an escaped quote, so their SQL exports double backslashes.
+fn backslash_escapes(driver: Option<crate::config::Driver>) -> bool {
+    matches!(
+        driver,
+        Some(crate::config::Driver::Mysql | crate::config::Driver::Mariadb)
+    )
+}
+
 /// Write rows the UI already holds (a result whose statement must not be re-run).
 #[tauri::command]
 pub async fn export_rows(
     path: String,
-    format: String,
+    format: crate::export::Format,
     columns: Vec<String>,
     rows: Vec<Vec<Value>>,
+    driver: Option<crate::config::Driver>,
 ) -> Result<usize> {
     blocking(move || {
-        let mut w = crate::export::ExportWriter::create(
-            path.as_ref(),
-            crate::export::Format::parse(&format),
-        )?;
+        let mut w = crate::export::ExportWriter::create(path.as_ref(), format)?
+            .backslash_escapes(backslash_escapes(driver));
         w.columns(&columns)?;
         for r in &rows {
             w.row(r)?;
@@ -437,23 +444,22 @@ pub async fn export_rows(
 async fn run_export(
     app: AppHandle,
     c: &crate::db::sql::SqlConn,
-    id: String,
+    job: crate::export::Job,
     sql_text: &str,
     path: String,
-    format: &str,
+    format: crate::export::Format,
+    driver: crate::config::Driver,
 ) -> Result<usize> {
-    let progress_id = id.clone();
+    let id = job.id().to_string();
     crate::export::export_query(
         c,
-        id,
+        job,
         sql_text,
         path.into(),
-        crate::export::Format::parse(format),
+        format,
+        backslash_escapes(Some(driver)),
         move |rows| {
-            let _ = app.emit(
-                "export:progress",
-                json!({ "id": progress_id, "rows": rows }),
-            );
+            let _ = app.emit("export:progress", json!({ "id": id, "rows": rows }));
         },
     )
     .await
@@ -469,8 +475,10 @@ pub async fn export_query(
     connection_id: String,
     sql_text: String,
     path: String,
-    format: String,
+    format: crate::export::Format,
 ) -> Result<usize> {
+    // Registered first, so a Cancel during the lookups below is not lost.
+    let job = crate::export::Job::start(id);
     let s = st.manager.get(&connection_id).await?;
     let c = sql(&s).await?;
     if !crate::db::sql::is_read_only(s.config.driver, &sql_text) {
@@ -478,7 +486,7 @@ pub async fn export_query(
             "Only read-only statements can be re-run for a full export.".into(),
         ));
     }
-    run_export(app, c, id, &sql_text, path, &format).await
+    run_export(app, c, job, &sql_text, path, format, s.config.driver).await
 }
 
 /// Every row of a table, with the grid's filter and sort.
@@ -490,12 +498,14 @@ pub async fn export_table(
     connection_id: String,
     query: TableQuery,
     path: String,
-    format: String,
+    format: crate::export::Format,
 ) -> Result<usize> {
+    let job = crate::export::Job::start(id);
     let s = st.manager.get(&connection_id).await?;
     let c = sql(&s).await?;
     c.validate_filter(query.filter.as_deref())?;
-    run_export(app, c, id, &c.select_all_sql(&query), path, &format).await
+    let sql_text = c.select_all_sql(&query);
+    run_export(app, c, job, &sql_text, path, format, s.config.driver).await
 }
 
 #[tauri::command]
@@ -570,7 +580,9 @@ pub async fn write_text_file(path: String, contents: String) -> Result<()> {
     .await
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+pub(crate) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
     tauri::async_runtime::spawn_blocking(f)
         .await
         .map_err(|e| AppError::Msg(e.to_string()))?

@@ -11,6 +11,42 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Rows per message when a statement is streamed (export); with a channel of a few messages, memory stays bounded.
+pub const BATCH_ROWS: usize = 500;
+
+/// What a streamed statement hands its consumer.
+pub enum Batch {
+    Columns(Vec<String>),
+    Rows(Vec<Vec<serde_json::Value>>),
+}
+
+/// A stop signal a streaming read can wait on while it awaits the next row, so Cancel does not have to wait for the
+/// database to produce one.
+#[derive(Default)]
+pub struct Stop {
+    flag: std::sync::atomic::AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
+impl Stop {
+    pub fn stop(&self) {
+        self.flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+    pub fn is_set(&self) -> bool {
+        self.flag.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    /// Resolves once `stop` was called (immediately if it already was).
+    pub async fn wait(&self) {
+        // Registered before the check, so a stop between the two still wakes us.
+        let notified = self.notify.notified();
+        if self.is_set() {
+            return;
+        }
+        notified.await;
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Column {
     pub name: String,

@@ -382,3 +382,73 @@ async fn sqlite_catalog_implicit_fk_target() {
     m.disconnect(&c.id).await;
     std::fs::remove_file(&path).expect("remove the test database");
 }
+
+/// Cancel stops a streaming export quickly on network drivers: mid-result (no draining of the remaining rows) and
+/// while the server has not produced a first row yet. No file is left either way.
+async fn export_cancel_is_prompt(
+    c: ConnectionConfig,
+    s: ConnectionSecrets,
+    big: &str,
+    slow: Option<&str>,
+) {
+    use agentql_lib::db::sql::SqlConn;
+    use agentql_lib::export::{Format, Job, cancel, export_query};
+    use std::time::{Duration, Instant};
+    let conn = SqlConn::connect(&c, &s).await.expect("connect");
+    let dir = std::env::temp_dir().join(format!("agentql-live-export-{:?}", c.driver));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let cases = std::iter::once(("big", big)).chain(slow.map(|q| ("slow", q)));
+    for (name, sql) in cases {
+        let id = format!("live-{name}-{:?}", c.driver);
+        let out = dir.join(format!("{name}.csv"));
+        let job = Job::start(id.clone());
+        let stopper = {
+            let id = id.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                assert!(cancel(&id), "{id} should still be running when cancelled");
+                Instant::now()
+            })
+        };
+        let r = export_query(&conn, job, sql, out.clone(), Format::Csv, false, |_| {}).await;
+        let ended = Instant::now();
+        let cancelled_at = stopper.await.unwrap();
+        let lag = ended.saturating_duration_since(cancelled_at);
+        println!("{:?} {name}: returned {lag:?} after cancel", c.driver);
+        assert!(r.unwrap_err().to_string().contains("cancelled"), "{name}");
+        assert!(lag < Duration::from_secs(2), "{name}: cancel took {lag:?}");
+        assert!(!out.exists(), "{name}: no file after cancel");
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "{name}: no temp file"
+        );
+    }
+    // The pool still works afterwards.
+    assert!(conn.run_one("SELECT 1", 1).await.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn postgres_export_cancel() {
+    export_cancel_is_prompt(
+        cfg(Driver::Postgres, 55432, "postgres", "demo"),
+        secrets("secret"),
+        "SELECT g, md5(g::text) FROM generate_series(1, 20000000) g",
+        Some("SELECT pg_sleep(30)"),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn mysql_export_cancel() {
+    export_cancel_is_prompt(
+        cfg(Driver::Mysql, 53306, "root", "demo"),
+        secrets("secret"),
+        "SELECT a.TABLE_NAME, a.COLUMN_NAME, b.COLUMN_NAME FROM information_schema.COLUMNS a CROSS JOIN information_schema.COLUMNS b",
+        None,
+    )
+    .await;
+}

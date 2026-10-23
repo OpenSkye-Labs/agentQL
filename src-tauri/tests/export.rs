@@ -3,7 +3,7 @@
 
 use agentql_lib::config::{ConnectionConfig, ConnectionSecrets};
 use agentql_lib::db::sql::SqlConn;
-use agentql_lib::export::{Format, cancel, export_query};
+use agentql_lib::export::{Format, Job, cancel, export_query};
 use std::path::PathBuf;
 
 const ROWS: usize = 200_000;
@@ -45,10 +45,11 @@ async fn exports_every_row_and_cleans_up_on_cancel_or_failure() {
     let out = d.join("all.csv");
     let n = export_query(
         &c,
-        "full".into(),
+        Job::start("full".into()),
         "SELECT * FROM t ORDER BY id",
         out.clone(),
         Format::Csv,
+        false,
         |_| {},
     )
     .await
@@ -62,30 +63,34 @@ async fn exports_every_row_and_cleans_up_on_cancel_or_failure() {
         Some(format!("{ROWS},row {ROWS},100000.0").as_str())
     );
 
-    // Cancel on the first progress report: error, no file, no temp file.
+    // Cancel (here before the first row, deterministically): error, no file, no temp file. The mid-stream path is the
+    // same code: the stop is seen, the writer is dropped instead of finished.
     let out = d.join("cancelled.json");
+    let job = Job::start("stop-me".into());
+    assert!(cancel("stop-me"));
     let r = export_query(
         &c,
-        "stop-me".into(),
+        job,
         "SELECT * FROM t",
         out.clone(),
         Format::Json,
-        |_| {
-            cancel("stop-me");
-        },
+        false,
+        |_| {},
     )
     .await;
     assert!(r.unwrap_err().to_string().contains("cancelled"));
     assert!(!out.exists());
+    assert!(!cancel("stop-me"), "the job is unregistered once it ends");
 
-    // A write cannot run through the export session (SQLite query_only), and leaves no file.
+    // A write cannot run through the export session (a read-only SQLite connection), and leaves no file.
     let out = d.join("write.csv");
     let r = export_query(
         &c,
-        "w".into(),
+        Job::start("w".into()),
         "DELETE FROM t RETURNING id",
         out.clone(),
         Format::Csv,
+        false,
         |_| {},
     )
     .await;
