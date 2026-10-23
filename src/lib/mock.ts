@@ -5,7 +5,9 @@
  */
 import { createAgent } from "./mockAgent";
 import {
+  BENCH_ROWS,
   SPECS,
+  benchWide,
   catalog,
   chartDataFor,
   connections,
@@ -98,10 +100,15 @@ async function mockExport(id: string, total: number) {
 /** Persisted KV, in memory: what the app saves (a chart added to a dashboard) reads back until reload. */
 const kv: Record<string, unknown> = { dashboards, history, saved_queries: savedQueries };
 
-/** The table a statement reads, if it names one we know. ponytail: regex, not a parser; mock routing only. */
+/** The SQL with string literals and comments blanked, so a table name inside them never routes a statement.
+ * ponytail: no dollar quotes; mock routing only. */
+const codeOnly = (sql: string) => sql.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, " ");
+/** The table a statement reads FROM, if any. ponytail: regex over `codeOnly`, not a parser. */
+const fromTable = (sql: string) => /\bfrom\s+(?:"?\w+"?\.)?"?(\w+)"?/i.exec(codeOnly(sql))?.[1]?.toLowerCase() ?? null;
+/** The table a statement reads, if it is one of the demo tables. */
 const tableIn = (sql: string) => {
-  const m = /\bfrom\s+(?:"?\w+"?\.)?"?(\w+)"?/i.exec(sql);
-  return m && SPECS[m[1]] ? m[1] : null;
+  const t = fromTable(sql);
+  return t && SPECS[t] ? t : null;
 };
 const isRead = (sql: string) =>
   /^\s*(select|with|show|explain|values|table)\b/i.test(sql.replace(/^(\s*(--[^\n]*|\/\*[\s\S]*?\*\/))*/, ""));
@@ -123,6 +130,15 @@ function statements(text: string) {
 
 function runStatement(sql: string, limit: number) {
   if (!isRead(sql)) return qr([], [], sql, { affected: 1, duration_ms: 7 });
+  // Grid benchmark: the full fixture, ignoring the row limit (that is the point of the benchmark).
+  // ponytail: handed over by reference; the app pays IPC + JSON parsing for 200k rows, which the benchmark leaves out.
+  if (fromTable(sql) === "bench_wide") {
+    // count(*) and LIMIT n answer without building the full 200k-row fixture.
+    const code = codeOnly(sql);
+    const n = Number(/\blimit\s+(\d+)\s*$/i.exec(code.trim())?.[1] ?? NaN);
+    if (/\bcount\s*\(/i.test(code)) return qr([["count", "int8"]], n === 0 ? [] : [[BENCH_ROWS]], sql);
+    return { ...benchWide(Number.isFinite(n) ? Math.min(n, BENCH_ROWS) : BENCH_ROWS), statement: sql };
+  }
   if (/\b(sum|count|avg)\s*\(/i.test(sql) && /group\s+by/i.test(sql)) return { ...chartDataFor(sql), statement: sql };
   // ponytail: rows are capped at 200 so the mock stays fast; an explicit trailing LIMIT is honoured.
   const own = Number(/\blimit\s+(\d+)\s*$/i.exec(sql)?.[1] ?? Infinity);
@@ -179,7 +195,8 @@ const handlers: Record<string, Handler> = {
       .filter((s) => !isRead(s))
       .map((s) => ({
         kind: s.split(/\s+/)[0].toUpperCase(),
-        table: tableIn(s) ?? /\b(?:update|into)\s+"?(\w+)/i.exec(s)?.[1] ?? null,
+        // The write target first: `UPDATE orders … FROM customers` writes orders.
+        table: /\b(?:update|into)\s+"?(\w+)/i.exec(codeOnly(s))?.[1] ?? tableIn(s) ?? null,
       })),
   explain_query: (a) =>
     qr(

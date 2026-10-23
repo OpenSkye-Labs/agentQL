@@ -10,7 +10,8 @@ pnpm typecheck && pnpm build
 `cargo test --test export` exports a 200k-row SQLite table through the streaming path (every row on disk, cancel and
 a refused write leave no file or temp file). With the Postgres and MySQL containers below up,
 `cargo test --test live export_cancel -- --ignored --nocapture` checks that Cancel returns within two seconds
-mid-result and, on Postgres, while the server has not produced a first row (`pg_sleep`).
+mid-result and, on Postgres, while the server has not produced a first row (`pg_sleep`). Last run 2026-10-24:
+Postgres returned 0.3 ms after Cancel mid-result and during `pg_sleep(30)`, MySQL 4.5 ms mid-result.
 
 ## Live driver smoke tests
 
@@ -70,6 +71,38 @@ least two tables linked by a foreign key (the demo containers above, or `?mock=1
 - MySQL rejects `START TRANSACTION READ ONLY` over the prepared-statement protocol → use `SET TRANSACTION READ ONLY` + `begin()`.
 - RESP2 Redis returns `HGETALL` as a flat array → normalised to an object in `get_key`.
 - SQLite `DECIMAL` has REAL affinity → numbers, not strings (test expectation fixed).
+
+## Grid benchmark (M5)
+
+The browser mock serves a 200,000-row × 60-column result (mixed types, NULLs) for `SELECT * FROM bench_wide`.
+`scripts/bench-grid.js` measures it inside the page: first paint after the result arrives, 3 s of vertical and of
+horizontal scrolling (frames per second, frames over 50 ms, worst frame), and client sort on a text and a numeric
+column. Run it on a fresh page load each time:
+
+```bash
+pnpm exec vite --port 1450                       # then, with agent-browser on http://localhost:1450/?mock=1:
+# connect "shop", New query, type `SELECT * FROM bench_wide`, then
+agent-browser eval "$(cat scripts/bench-grid.js)"
+```
+
+Measured 2026-10-24 in headless Chromium 149 under WSL2 (a proxy for the app's WebKitGTK / WebView2; per-platform
+numbers are M9), fresh loads each, before (three runs) and after (six runs) the M5 grid changes:
+
+|                                      | before                                          | after                                                                              |
+| ------------------------------------ | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| first paint after the result arrives | 185–210 ms                                      | 85–95 ms                                                                           |
+| vertical scroll (400 px per frame)   | 12–14 fps, ~40 frames > 50 ms, worst 184–434 ms | 47–58 fps (51, 57, 48, 58, 57, 47; median 54), 0–4 frames > 50 ms, worst 42–176 ms |
+| horizontal scroll                    | 60 fps                                          | 60 fps                                                                             |
+| client sort, text column             | 4.0–5.7 s                                       | 0.38–0.44 s                                                                        |
+| client sort, numeric column          | ~0.35 s                                         | 0.25–0.37 s                                                                        |
+| cells mounted                        | 1,380                                           | 112                                                                                |
+
+What changed: columns are virtualised as well as rows (only cells in view are mounted), row overscan 12 → 6, and the
+client sort uses one `Intl.Collator` with each cell's text computed once (`src/lib/gridSort.ts`). The 55 fps bar is met
+in three of six runs; each slower run has 2–4 frames of 150–180 ms (garbage-collection pauses, by their shape). Next
+lever if it matters in the real webviews: memoised rows, so rows that did not change skip re-rendering while scrolling.
+Not measured: the mock hands the result over by reference, so IPC and JSON parsing of 200k rows are left out (the
+default row limit is 1,000); the 400 px-per-frame scroll is synthetic and harsher than a wheel or trackpad.
 
 ## Performance database (15 GB Postgres)
 

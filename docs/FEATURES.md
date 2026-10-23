@@ -169,3 +169,10 @@ Append-only record of shipped behaviour. Newest at the bottom.
   statement that is not read-only is never re-run (its loaded rows are written and the toast says so), and output
   goes to a temp file renamed into place only on success, so Cancel or an error leaves no partial file and never
   replaces an existing one. CSV / JSON / SQL output is unchanged (`src-tauri/src/export.rs`).
+- Grid at scale (M5): the result grid virtualises columns as well as rows, so a wide result mounts only the cells in
+  view (1,380 → ~110 on 200k × 60); vertical scrolling went from 12–14 fps to a median of 54 (47–58) in the benchmark. Client sort on a
+  text column went from ~5 s to ~0.4 s (one cached `Intl.Collator`, each cell's text computed once). Arrow keys and
+  Page Up/Down now keep the selected cell fully in view, clear of the sticky header, row numbers and scrollbars.
+  Starting an edit (Enter, F2, typing) scrolls the cell in first, and an edit whose cell is scrolled out is
+  committed as blur would. Fixed a tab crash when a column resize was released within the same frame as its last move. Benchmark fixture and
+  script: `SELECT * FROM bench_wide` in the browser mock, `scripts/bench-grid.js`, numbers in docs/TESTING.md.
