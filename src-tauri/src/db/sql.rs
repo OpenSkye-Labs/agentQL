@@ -335,6 +335,60 @@ impl SqlConn {
 
     /// Column metadata for a statement; `search_path` pins the Postgres schema the same way
     /// `run_one_opts` did, so the headers describe the query that actually ran.
+    /// Stream a read-only statement's rows to `tx` in batches without collecting them (export). Same enforcement as
+    /// `run_read_only`: a read-only transaction on Postgres/MySQL, `query_only` on SQLite. Stops early when `stop`
+    /// is set or the receiver is gone. Returns the number of rows sent.
+    pub async fn stream_read_only(
+        &self,
+        sql: &str,
+        tx: &tokio::sync::mpsc::Sender<crate::export::Batch>,
+        stop: &std::sync::atomic::AtomicBool,
+    ) -> Result<u64> {
+        let sent = match &self.pool {
+            Pool::Pg(p) => {
+                let mut t = p.begin().await?;
+                sqlx::query("SET TRANSACTION READ ONLY")
+                    .execute(&mut *t)
+                    .await?;
+                let r = stream_batches!(&mut *t, sql, pg_value, tx, stop);
+                let _ = t.rollback().await;
+                r?
+            }
+            Pool::My(p) => {
+                // START TRANSACTION is not preparable on MySQL; SET TRANSACTION (next txn only) + begin() is.
+                let mut conn = p.acquire().await?;
+                sqlx::query("SET TRANSACTION READ ONLY")
+                    .execute(&mut *conn)
+                    .await?;
+                let mut t = sqlx::Connection::begin(&mut *conn).await?;
+                let r = stream_batches!(&mut *t, sql, mysql_value, tx, stop);
+                let _ = t.rollback().await;
+                r?
+            }
+            Pool::Lite(p) => {
+                let mut conn = p.acquire().await?;
+                sqlx::query("PRAGMA query_only = 1")
+                    .execute(&mut *conn)
+                    .await?;
+                let r = stream_batches!(&mut *conn, sql, sqlite_value, tx, stop);
+                let _ = sqlx::query("PRAGMA query_only = 0")
+                    .execute(&mut *conn)
+                    .await;
+                r?
+            }
+        };
+        if sent == 0 {
+            // Zero rows: still write the header.
+            let cols = self.describe_columns(sql, None).await.unwrap_or_default();
+            let _ = tx
+                .send(crate::export::Batch::Columns(
+                    cols.into_iter().map(|c| c.name).collect(),
+                ))
+                .await;
+        }
+        Ok(sent)
+    }
+
     async fn describe_columns(&self, sql: &str, search_path: Option<&str>) -> Result<Vec<Column>> {
         let to_columns = |cols: &[sqlx::postgres::PgColumn]| -> Vec<Column> {
             cols.iter()
@@ -1340,6 +1394,57 @@ macro_rules! exec_stream {
     }};
 }
 use exec_stream;
+
+/// Like `exec_stream`, but hands rows to a channel in batches instead of collecting them (export). Evaluates to
+/// `Result<u64>`: the rows sent.
+macro_rules! stream_batches {
+    ($exec:expr, $sql:expr, $conv:path, $tx:expr, $stop:expr) => {{
+        use crate::export::{BATCH_ROWS, Batch};
+        use std::sync::atomic::Ordering;
+        let mut stream = sqlx::query($sql).fetch($exec);
+        let mut buf: Vec<Vec<Value>> = Vec::with_capacity(BATCH_ROWS);
+        let mut sent: u64 = 0;
+        let mut out: Result<u64> = Ok(0);
+        loop {
+            if $stop.load(Ordering::Relaxed) {
+                break;
+            }
+            match stream.next().await {
+                None => break,
+                Some(Err(e)) => {
+                    out = Err(e.into());
+                    break;
+                }
+                Some(Ok(row)) => {
+                    if sent == 0 && buf.is_empty() {
+                        let cols = row.columns().iter().map(|c| c.name().to_string()).collect();
+                        if $tx.send(Batch::Columns(cols)).await.is_err() {
+                            break;
+                        }
+                    }
+                    buf.push((0..row.len()).map(|i| $conv(&row, i)).collect());
+                    if buf.len() >= BATCH_ROWS {
+                        sent += buf.len() as u64;
+                        if $tx
+                            .send(Batch::Rows(std::mem::take(&mut buf)))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        drop(stream);
+        if out.is_ok() && !buf.is_empty() && !$stop.load(Ordering::Relaxed) {
+            sent += buf.len() as u64;
+            let _ = $tx.send(Batch::Rows(buf)).await;
+        }
+        out.map(|_| sent)
+    }};
+}
+use stream_batches;
 
 /// Replace the contents of single-quoted literals by spaces so lexical checks skip them.
 /// `''` stays inside the literal; with `backslash` (MySQL dialects) so does a backslash-escaped character.

@@ -3,6 +3,7 @@ pub mod commands;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod export;
 pub mod mcp;
 pub mod os_theme;
 pub mod ssh;
@@ -70,6 +71,8 @@ pub fn run() {
             commands::apply_changes,
             commands::ssh_forget_host,
             commands::export_rows,
+            commands::export_query,
+            commands::export_cancel,
             commands::redis_scan,
             commands::redis_get,
             commands::redis_command,
