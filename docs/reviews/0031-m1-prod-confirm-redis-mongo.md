@@ -1,4 +1,4 @@
-# Production prompt for Redis and Mongo writes (M1 follow-up)
+# Production prompt for Redis and Mongo writes (PR #31)
 
 Reviewed with the alleo-loop panel (correctness, requirements, maintainability, skeptic) plus a Codex cross-check
 (`codex exec --sandbox read-only` on `git diff dev...HEAD`). 0 blockers; every finding below was applied.
