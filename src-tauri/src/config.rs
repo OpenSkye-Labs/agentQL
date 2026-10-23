@@ -642,6 +642,16 @@ mod tests {
         );
     }
 
+    /// The UI sends `column: null` / `metric: null` for a table note; that must read as `None`.
+    #[test]
+    fn note_accepts_the_ui_wire_format() {
+        let n: Note = serde_json::from_str(
+            r#"{"schema":"public","table":"orders","column":null,"metric":null,"text":"x"}"#,
+        )
+        .unwrap();
+        assert_eq!(n, note(None, None, "x"));
+    }
+
     #[test]
     fn notes_corrupt_file_is_never_overwritten() {
         let st = temp_store("corrupt");

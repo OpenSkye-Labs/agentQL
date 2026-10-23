@@ -98,8 +98,9 @@ pub async fn delete_connection(st: State<'_, AppState>, id: String) -> Result<()
         .filter(|c| c.id != id)
         .collect();
     st.store.save_connections(&list)?;
-    st.store.delete_notes(&id)?;
-    st.store.delete_connection_secrets(&id)
+    // Secrets first: an unreadable notes.json must not leave a deleted connection's password behind.
+    st.store.delete_connection_secrets(&id)?;
+    st.store.delete_notes(&id)
 }
 
 #[tauri::command]

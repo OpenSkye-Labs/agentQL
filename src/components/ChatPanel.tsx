@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { clsx } from "clsx";
 import {
+  BookText,
   ArrowUp,
   Bot,
   Check,
@@ -674,6 +675,7 @@ const STEP_ICON: Record<string, React.ReactNode> = {
   list_schemas: <Database size={12} />,
   list_tables: <Database size={12} />,
   describe_table: <Table2 size={12} />,
+  save_note: <BookText size={12} />,
   run_sql: <Terminal size={12} />,
   explain_sql: <Search size={12} />,
   create_chart: <LayoutDashboard size={12} />,
@@ -702,6 +704,10 @@ function stepLabel(t: ToolRun): { title: string; detail?: string } {
       return { title: `Listed tables${name("schema") ? ` in ${name("schema")}` : ""}` };
     case "describe_table":
       return { title: `Inspected ${name("schema") ? `${name("schema")}.` : ""}${name("table")}` };
+    case "save_note": {
+      const target = [name("schema"), name("table"), name("column") || name("metric")].filter(Boolean).join(".");
+      return { title: err ? "Note not saved" : `Saved note on ${target}` };
+    }
     case "run_sql": {
       const r = disp?.type === "query_results" ? disp.results?.[disp.results.length - 1] : undefined;
       const detail = r
