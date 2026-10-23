@@ -130,6 +130,8 @@ export function NotesTab({ tab }: { tab: Extract<Tab, { kind: "notes" }> }) {
   );
 }
 
+const tableKey = (t: TableInfo) => `${t.schema}\u0000${t.name}`;
+
 function MetricForm({
   tableOptions,
   onAdd,
@@ -140,12 +142,13 @@ function MetricForm({
   exists: (n: Note) => boolean;
 }) {
   const toast = useStore((s) => s.toast);
-  // Index into tableOptions: schema and table stay separate values, so a dot in either name is harmless.
+  // NUL-joined schema/table, not a list index: it follows the table when a sidebar refresh reorders the list,
+  // and a dot in either name is harmless.
   const [picked, setPicked] = useState("");
   const [name, setName] = useState("");
   const [definition, setDefinition] = useState("");
   const [busy, setBusy] = useState(false);
-  const target = picked === "" ? undefined : tableOptions[Number(picked)];
+  const target = tableOptions.find((t) => tableKey(t) === picked);
   const note: Note | null =
     target && name.trim() && definition.trim()
       ? { schema: target.schema, table: target.name, column: null, metric: name.trim(), text: definition.trim() }
@@ -179,8 +182,8 @@ function MetricForm({
       <Field label="Table" hint={tableOptions.length ? undefined : "Connect and expand a schema in the sidebar"}>
         <Select value={picked} onChange={(e) => setPicked(e.target.value)} className="font-mono">
           <option value="">Pick a table…</option>
-          {tableOptions.map((t, i) => (
-            <option key={`${t.schema}\u0000${t.name}`} value={String(i)}>
+          {tableOptions.map((t) => (
+            <option key={tableKey(t)} value={tableKey(t)}>
               {t.schema}.{t.name}
             </option>
           ))}

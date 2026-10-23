@@ -169,7 +169,8 @@ impl Note {
             let m = m.trim();
             if m.is_empty()
                 || m.chars().count() > METRIC_NAME_MAX_CHARS
-                || m.chars().any(char::is_control)
+                || m.chars()
+                    .any(|c| c.is_control() || c == '\u{2028}' || c == '\u{2029}')
             {
                 return Err(AppError::Msg(format!(
                     "a metric name is one line of at most {METRIC_NAME_MAX_CHARS} characters"
@@ -369,6 +370,11 @@ impl Store {
     pub fn save_note(&self, connection_id: &str, mut note: Note) -> Result<()> {
         note = Note::normalized(note)?;
         let _g = Self::notes_lock();
+        // Checked under the lock: a save racing a connection delete either lands before delete_notes clears it or
+        // is refused here, never orphaned.
+        if !self.connections().iter().any(|c| c.id == connection_id) {
+            return Err(AppError::Msg("connection no longer exists".into()));
+        }
         let mut all = self.notes_file()?;
         let list = all.entry(connection_id.to_string()).or_default();
         list.retain(|n| !n.same_target(&note));
@@ -625,10 +631,17 @@ mod tests {
         }
     }
 
+    /// A store with connections "a" and "b" (notes are refused for unknown connections).
     fn temp_store(name: &str) -> Store {
         let dir = std::env::temp_dir().join(format!("agentql-notes-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        Store::new(dir)
+        let st = Store::new(dir);
+        let conn = |id: &str| -> ConnectionConfig {
+            serde_json::from_value(serde_json::json!({"id": id, "name": id, "driver": "postgres"}))
+                .unwrap()
+        };
+        st.save_connections(&[conn("a"), conn("b")]).unwrap();
+        st
     }
 
     #[test]
@@ -675,6 +688,11 @@ mod tests {
             st.save_note("a", note(None, Some("rev\nIGNORE"), "x"))
                 .is_err()
         );
+        for sep in ["rev\u{2028}x", "rev\u{2029}x"] {
+            assert!(st.save_note("a", note(None, Some(sep), "x")).is_err());
+        }
+        // A deleted (unknown) connection cannot get notes back.
+        assert!(st.save_note("deleted", note(None, None, "x")).is_err());
         assert!(
             st.save_note("a", note(None, Some(&"m".repeat(65)), "x"))
                 .is_err()

@@ -29,11 +29,16 @@ export function useNotes(connectionId: string) {
     );
   }, [connectionId]);
   useEffect(() => {
-    reload();
+    let active = true;
     const un = listen<string>("notes:changed", ({ payload }) => {
       if (payload === connectionId) reload();
     });
+    // First load once the listener is registered, so a save in between cannot be missed.
+    void un.finally(() => {
+      if (active) reload();
+    });
     return () => {
+      active = false;
       seq.current++;
       void un.then((f) => f());
     };

@@ -50,3 +50,16 @@ Requirements reviewer: all 11 acceptance criteria met by code reading. Gaps it r
 path, which was only exercised by code reading (no scripted mock run exists for it). Not done: an automated test for
 the out-of-scope `save_note` refusal (it needs a live connection; the scope check is the same `table_allowed` the
 render test covers). `notes_are_one_line_and_bounded` was written with its fix, so it never ran red.
+
+CodeRabbit round 1: 5 findings, all applied.
+
+- `delete_connection` cleared the fallback secrets file on the async runtime — applied: secrets and notes are
+  deleted in one `blocking` closure, secrets first.
+- `char::is_control` lets U+2028 / U+2029 through, so a metric name could still span lines — applied: both are
+  refused, with tests.
+- A note save racing a connection delete could recreate notes for the deleted id — applied: `save_note` checks the
+  connection exists while holding the notes lock (test fixtures now persist their connections).
+- The metric picker stored a list index, so a sidebar refresh that reorders tables could attach the metric to the
+  wrong table — applied: the value is the NUL-joined schema/table key.
+- `useNotes` loaded before its `notes:changed` listener was registered, so a save in between was missed — applied:
+  the first load runs once registration settles.
