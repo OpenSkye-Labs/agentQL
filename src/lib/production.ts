@@ -1,10 +1,13 @@
 import type { ConnectionConfig } from "./types";
 
-/** Replace control characters (C0, DEL, C1, U+2028/2029) so a name shown in a native prompt cannot fake extra lines. */
+/** Replace control characters (C0, DEL, C1, U+2028/2029) and bidi formatting marks, so a name shown in a native
+ * prompt can neither fake extra lines nor display reordered (U+202E) as something it is not. */
 export const plain = (s: string) =>
   Array.from(s, (c) => {
     const n = c.charCodeAt(0);
-    return n < 32 || (n >= 127 && n < 160) || n === 0x2028 || n === 0x2029 ? " " : c;
+    const bidi =
+      n === 0x061c || n === 0x200e || n === 0x200f || (n >= 0x202a && n <= 0x202e) || (n >= 0x2066 && n <= 0x2069);
+    return n < 32 || (n >= 127 && n < 160) || n === 0x2028 || n === 0x2029 || bidi ? " " : c;
   }).join("");
 
 const ARG_MAX = 80;

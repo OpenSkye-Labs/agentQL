@@ -61,7 +61,7 @@ M1 Safety defaults (S)
 - [x] Run-all gets its own shortcut + confirmation when >1 statement
 - [x] Per-connection environment tag (dev/staging/production), shown in tab bar + status bar
 - [x] Writes on production connections require a confirmation naming statement kind + table
-- [x] Follow-up: production write prompt for Redis commands and Mongo document edits (SQL-only today)
+- [x] Follow-up: production write prompt for Redis commands and Mongo document edits
 
 M2 AI trust and audit (M)
 

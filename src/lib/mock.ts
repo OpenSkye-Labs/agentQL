@@ -51,6 +51,13 @@ function emit(event: string, payload: unknown) {
 
 const agent = createAgent(emit, () => settings.agent_allow_writes);
 
+/** Mirror of `is_read_only_args` in src-tauri/src/db/redis.rs; keep the two in sync. */
+const REDIS_READS = new Set(
+  "GET|MGET|HGET|HGETALL|HMGET|HKEYS|HVALS|HLEN|HEXISTS|LRANGE|LLEN|LINDEX|SMEMBERS|SCARD|SISMEMBER|ZRANGE|ZRANGEBYSCORE|ZREVRANGE|ZCARD|ZSCORE|ZRANK|SCAN|SSCAN|HSCAN|ZSCAN|KEYS|TYPE|TTL|PTTL|EXISTS|STRLEN|DBSIZE|INFO|PING|ECHO|TIME|XRANGE|XREVRANGE|XLEN|XINFO|OBJECT|MEMORY|RANDOMKEY|GETRANGE|BITCOUNT|PFCOUNT|GEOPOS|GEODIST|DUMP".split(
+    "|",
+  ),
+);
+
 /** Persisted KV, in memory: what the app saves (a chart added to a dashboard) reads back until reload. */
 const kv: Record<string, unknown> = { dashboards, history, saved_queries: savedQueries };
 
@@ -154,16 +161,23 @@ const handlers: Record<string, Handler> = {
   redis_get: (a) => redisValue(String(a.key)),
   redis_command: () => ({ redis_version: "7.4.1", used_memory_human: "38.20M" }),
   redis_exec: () => "OK",
-  // ponytail: mock approximation of the backend allow-list.
   redis_is_write: (a) => {
     const first = (Array.isArray(a.cmd) ? a.cmd[0] : String(a.cmd).trim().split(/\s+/)[0]) ?? "";
-    return !/^(get|mget|hget|hgetall|hkeys|lrange|llen|smembers|scard|zrange|zcard|scan|info|ttl|type|exists|dbsize)$/i.test(
-      first,
-    );
+    return !REDIS_READS.has(String(first).toUpperCase());
   },
+  // Mirror of `pipeline_write_target` in src-tauri/src/db/mongo.rs.
   mongo_pipeline_write_target: (a) => {
+    const name = (v: unknown) =>
+      typeof v === "string"
+        ? v
+        : v && typeof v === "object" && "coll" in v
+          ? [(v as { db?: string }).db, (v as { coll: string }).coll].filter(Boolean).join(".")
+          : "?";
     const stage = (Array.isArray(a.pipeline) ? a.pipeline : []).find((s) => s && ("$out" in s || "$merge" in s));
-    return stage ? ("$out" in stage ? `$out replaces ${JSON.stringify(stage.$out)}` : "$merge into …") : null;
+    if (!stage) return null;
+    if ("$out" in stage) return `$out replaces ${name(stage.$out)}`;
+    const m = stage.$merge;
+    return `$merge into ${name(m && typeof m === "object" && "into" in m ? m.into : m)}`;
   },
   redis_info: () => ({ redis_version: "7.4.1", dbsize: "21482", used_memory_human: "38.20M" }),
   mongo_collections: () => mongoCollections,

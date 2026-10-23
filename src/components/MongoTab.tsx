@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { ChevronLeft, ChevronRight, Info, Plus, RefreshCw, Bot } from "lucide-react";
 import { api, errMsg } from "../lib/api";
@@ -20,6 +20,9 @@ export function MongoTab({ tab }: { tab: MTab }) {
   const [filter, setFilter] = useState("{}");
   const [sort, setSort] = useState("");
   const [pipeline, setPipeline] = useState('[\n  { "$match": {} },\n  { "$limit": 50 }\n]');
+  // Latest editor text, read after the async write check so a pipeline edited meanwhile is never run unseen.
+  const pipelineNow = useRef(pipeline);
+  pipelineNow.current = pipeline;
   const [limit, setLimit] = useState(50);
   const [skip, setSkip] = useState(0);
   const [docs, setDocs] = useState<Record<string, unknown>[]>([]);
@@ -63,6 +66,10 @@ export function MongoTab({ tab }: { tab: MTab }) {
             target = await api.mongoPipelineWriteTarget(p);
           } catch (e) {
             toast(`Could not check the pipeline, not running on production: ${errMsg(e)}`, "error");
+            return;
+          }
+          if (pipelineNow.current !== pipeline) {
+            toast("The pipeline changed while it was being checked; run it again.", "error");
             return;
           }
           if (target && !confirmProduction(conn, [`aggregate on ${where}: ${target}`])) return;

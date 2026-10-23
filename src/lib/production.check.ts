@@ -18,6 +18,9 @@ assert.ok(!productionPrompt({ name: "x\ny", environment: "production" }, ["DEL"]
 
 // C1 controls and Unicode line/paragraph separators break lines in some native dialogs too.
 assert.equal(plain("a\u0085b\u2028c\u2029d"), "a b c d");
+// Bidi overrides cannot visually reorder a key in the prompt.
+assert.equal(plain("user\u202Egnp.exe\u2066x\u2069"), "user gnp.exe x ");
+assert.ok(!productionPrompt(prod, ["DEL a\u202Eb"])!.includes("\u202E"));
 // The prompt sanitises actions itself, so a caller cannot forget.
 assert.ok(!productionPrompt(prod, ["DEL a\nb"])!.includes("a\nb"));
 // Long arguments are clipped one by one with a visible marker, so a later target is never hidden.

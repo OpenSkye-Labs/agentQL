@@ -42,3 +42,15 @@ Maintainability reviewer: applied.
 Also found while verifying in the browser mock: `list_connections` returned the same array the mock mutates, so a
 saved edit never re-rendered — fixed by returning a copy. The connection dialog's "Badge only for this driver" hint
 for Redis/Mongo is gone, since the tag now prompts there too.
+
+CodeRabbit round 1: 6 findings, all applied.
+
+- TASKS.md still said "SQL-only today" on the checked item — applied.
+- `redis_is_write` / `mongo_pipeline_write_target` returned bare values instead of `Result` (house rule) — applied.
+- An aggregation edited while its write check was in flight could run the old pipeline — applied: the editor text is
+  re-read after the check and a changed pipeline is refused with a toast.
+- `exec` reported success for a failed Redis command, so a failed DEL still cleared the selection — applied.
+- The mock's Redis read list was a subset of the backend's (`PING` prompted) — applied: the mock mirrors
+  `is_read_only_args`, and its `$out` / `$merge` target mirrors `pipeline_write_target`.
+- Bidi formatting marks (U+202E …) could visually reorder a key in the prompt — applied: `plain` replaces them, with
+  a check.

@@ -114,7 +114,7 @@ export function RedisTab({ tab }: { tab: RTab }) {
   };
 
   /** Structured commands: keys/values travel as separate arguments, so no quoting is involved. Resolves to
-   * whether the command was sent. */
+   * whether the command ran successfully. */
   const exec = async (args: string[]) => {
     if (!conn) return false;
     const shown = args.map((a) => (/\s|"/.test(a) ? JSON.stringify(a) : a)).join(" ");
@@ -123,10 +123,11 @@ export function RedisTab({ tab }: { tab: RTab }) {
       const out = await api.redisExec(conn.id, args);
       setLog((l) => [...l, { cmd: shown, out: typeof out === "string" ? out : JSON.stringify(out, null, 2) }]);
       afterWrite(args[0]);
+      return true;
     } catch (e) {
       toast(errMsg(e), "error");
+      return false;
     }
-    return true;
   };
 
   if (!conn) return <Empty title="Connection removed" />;
