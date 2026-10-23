@@ -141,3 +141,16 @@ Append-only record of shipped behaviour. Newest at the bottom.
   dot instead of a repeated badge, the status bar tints red on production, and an agent write to a production
   connection gets a red approval card with "Run on production" and Deny focused, so Enter cannot approve it. New
   `--danger-fg` token per theme, contrast-checked, fixes white-on-red danger buttons in dark themes.
+
+## 2026-10-23
+
+- Data dictionary (M3): per-connection notes on tables and columns plus named metrics (`revenue = SUM(total) WHERE
+  status <> 'cancelled'`), stored in `notes.json` next to `connections.json`, never in the database or in profile
+  exports. Edited inline in the structure tab (table description under the title, a Description column; works on
+  read-only connections and views) and in a "Data dictionary" tab from the connection menu, which lists every note by
+  table and adds metrics. The agent gets the in-scope notes in its system prompt (capped at ~6000 characters with a
+  truncation line), column notes next to each column and table notes/metrics in `describe_table`, and a `save_note`
+  tool that checks the table/column exists and the agent scope, then waits for a "Save note" approval card (not gated
+  by "allow writes": nothing touches the database). A `notes.json` that does not parse is reported, never overwritten;
+  deleting a connection deletes its notes; the remote-consent card now lists notes. Limit: a metric shows whenever its
+  anchor table is in scope, even if its definition joins an out-of-scope table.
