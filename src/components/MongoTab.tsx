@@ -22,7 +22,9 @@ export function MongoTab({ tab }: { tab: MTab }) {
   const [pipeline, setPipeline] = useState('[\n  { "$match": {} },\n  { "$limit": 50 }\n]');
   // Latest editor text, read after the async write check so a pipeline edited meanwhile is never run unseen.
   const pipelineNow = useRef(pipeline);
-  pipelineNow.current = pipeline;
+  useEffect(() => {
+    pipelineNow.current = pipeline;
+  }, [pipeline]);
   const [limit, setLimit] = useState(50);
   const [skip, setSkip] = useState(0);
   const [docs, setDocs] = useState<Record<string, unknown>[]>([]);

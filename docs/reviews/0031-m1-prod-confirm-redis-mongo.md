@@ -54,3 +54,8 @@ CodeRabbit round 1: 6 findings, all applied.
   `is_read_only_args`, and its `$out` / `$merge` target mirrors `pipeline_write_target`.
 - Bidi formatting marks (U+202E …) could visually reorder a key in the prompt — applied: `plain` replaces them, with
   a check.
+
+CodeRabbit round 2: 1 finding, applied.
+
+- `pipelineNow.current` was written during render — applied: updated from an effect after commit, which is when the
+  async check reads it.
