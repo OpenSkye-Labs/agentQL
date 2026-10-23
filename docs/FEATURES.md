@@ -145,5 +145,6 @@ Append-only record of shipped behaviour. Newest at the bottom.
   write, Save value, TTL changes and Delete key ask first with the command shown; the write check is the backend's
   read-only allow-list (`redis_is_write`, unknown commands count as writes, a failed check runs nothing). Mongo document
   insert / replace / delete ask with the document id and collection, and an aggregation with `$out` / `$merge`
-  (`mongo_pipeline_writes`) asks on every run. The prompt text is shared with SQL (`src/lib/production.ts`, control
+  asks on every run, naming the collection it writes (`mongo_pipeline_write_target`). Long arguments are clipped one
+  by one with a length marker so no target is hidden. The prompt text is shared with SQL (`src/lib/production.ts`, control
   characters in names replaced). Agent writes keep their red approval card.
