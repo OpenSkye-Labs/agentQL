@@ -87,8 +87,15 @@ function runStatement(sql: string, limit: number) {
 }
 
 const handlers: Record<string, Handler> = {
-  list_connections: () => connections,
-  save_connection: (a) => ({ ...(a.config as ConnectionConfig), id: (a.config as ConnectionConfig).id || "new" }),
+  list_connections: () => [...connections],
+  save_connection: (a) => {
+    // Kept in memory like the scope, so an edit (e.g. tagging a connection production) shows until reload.
+    const c = { ...(a.config as ConnectionConfig), id: (a.config as ConnectionConfig).id || "new" };
+    const i = connections.findIndex((x) => x.id === c.id);
+    if (i >= 0) connections[i] = c;
+    else connections.push(c);
+    return c;
+  },
   get_connection_secrets: () => ({ password: "secret" }),
   secret_storage: () => "file",
   test_connection: () => "PostgreSQL 16.4",

@@ -209,7 +209,7 @@ export function ConnectionDialog({
               placeholder="optional, e.g. Team A"
             />
           </Field>
-          <Field label="Environment" hint={sql ? "Production asks before every write" : "Badge only for this driver"}>
+          <Field label="Environment" hint="Production asks before every write">
             <Select
               value={cfg.environment ?? ""}
               onChange={(e) => set("environment", (e.target.value || null) as Environment | null)}
