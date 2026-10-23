@@ -5,6 +5,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { Bot, Download, FileText, History, Keyboard, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
 import { snippetCompletion } from "@codemirror/autocomplete";
 import { api, errMsg } from "../lib/api";
+import { productionPrompt } from "../lib/production";
 import { useStore, useConnection, type Tab } from "../lib/store";
 import type { QueryResult, SavedQuery, WriteInfo } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
@@ -18,9 +19,6 @@ import { Button, Dialog, Field, Input, Menu, Spinner, Tooltip, Kbd, Empty } from
 const basename = (p: string) => p.split(/[\\/]/).pop() || p;
 
 type QTab = Extract<Tab, { kind: "query" }>;
-
-/** Identifiers can carry newlines/control chars; keep the native prompt on one line per write. */
-const plain = (s: string) => Array.from(s, (c) => (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 ? " " : c)).join("");
 
 export function QueryTab({ tab }: { tab: QTab }) {
   const conn = useConnection(tab.connectionId);
@@ -164,11 +162,11 @@ export function QueryTab({ tab }: { tab: QTab }) {
           toast("Editor changed while checking the statements; run again.", "error");
           return;
         }
-        if (writes.length)
-          lines.push(
-            `"${conn.name}" is tagged PRODUCTION. This will run:`,
-            ...writes.map((w) => `  • ${plain(w.kind)}${w.table ? ` on ${plain(w.table)}` : ""}`),
-          );
+        const prompt = productionPrompt(
+          conn,
+          writes.map((w) => `${w.kind}${w.table ? ` on ${w.table}` : ""}`),
+        );
+        if (prompt) lines.push(prompt);
       }
       // ponytail: native confirm(), same as the delete prompts elsewhere; swap for <Dialog> if it needs styling.
       if (lines.length && !confirm(lines.join("\n"))) return;

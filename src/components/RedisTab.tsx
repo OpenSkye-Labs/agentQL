@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { ChevronDown, RefreshCw, Search, Terminal, Trash2, Clock } from "lucide-react";
 import { api, errMsg, type RedisValue } from "../lib/api";
@@ -6,6 +6,7 @@ import { useStore, useConnection, type Tab } from "../lib/store";
 import type { RedisKey } from "../lib/types";
 import { Button, Input, Spinner, Empty, Tooltip } from "./ui";
 import { fmtBytes } from "../lib/format";
+import { clipArgs, confirmProduction } from "../lib/production";
 
 type RTab = Extract<Tab, { kind: "redis" }>;
 
@@ -29,6 +30,31 @@ export function RedisTab({ tab }: { tab: RTab }) {
   const [cmd, setCmd] = useState("");
   const [log, setLog] = useState<{ cmd: string; out: string; err?: boolean }[]>([]);
   const [info, setInfo] = useState<Record<string, string> | null>(null);
+  // Held across classification + confirmation (not the command itself) so a second click or Enter cannot open a
+  // second prompt for the same write.
+  const guarding = useRef(false);
+
+  /** On production, ask before a write; false when cancelled or busy. Classification errors fail closed.
+   * `cmd` is the console line or the structured args. */
+  const allowWrite = async (cmd: string | string[]) => {
+    if (!conn || conn.environment !== "production") return true;
+    if (guarding.current) return false;
+    guarding.current = true;
+    try {
+      let writes: boolean;
+      try {
+        writes = await api.redisIsWrite(cmd);
+      } catch (e) {
+        toast(`Could not classify the command, not running on production: ${errMsg(e)}`, "error");
+        return false;
+      }
+      // Display only: the backend runs the line with its own quoting rules.
+      const shown = clipArgs(typeof cmd === "string" ? cmd.trim().split(/\s+/) : cmd);
+      return !writes || confirmProduction(conn, [shown]);
+    } finally {
+      guarding.current = false;
+    }
+  };
 
   const scan = useCallback(
     async (reset: boolean) => {
@@ -75,6 +101,8 @@ export function RedisTab({ tab }: { tab: RTab }) {
 
   const runCmd = async (line: string) => {
     if (!conn || !line.trim()) return;
+    // Cancelled: the command stays in the input.
+    if (!(await allowWrite(line))) return;
     try {
       const out = await api.redisCommand(conn.id, line);
       setLog((l) => [...l, { cmd: line, out: typeof out === "string" ? out : JSON.stringify(out, null, 2) }]);
@@ -85,16 +113,20 @@ export function RedisTab({ tab }: { tab: RTab }) {
     setCmd("");
   };
 
-  /** Structured commands: keys/values travel as separate arguments, so no quoting is involved. */
+  /** Structured commands: keys/values travel as separate arguments, so no quoting is involved. Resolves to
+   * whether the command ran successfully. */
   const exec = async (args: string[]) => {
-    if (!conn) return;
+    if (!conn) return false;
     const shown = args.map((a) => (/\s|"/.test(a) ? JSON.stringify(a) : a)).join(" ");
+    if (!(await allowWrite(args))) return false;
     try {
       const out = await api.redisExec(conn.id, args);
       setLog((l) => [...l, { cmd: shown, out: typeof out === "string" ? out : JSON.stringify(out, null, 2) }]);
       afterWrite(args[0]);
+      return true;
     } catch (e) {
       toast(errMsg(e), "error");
+      return false;
     }
   };
 
@@ -206,10 +238,9 @@ export function RedisTab({ tab }: { tab: RTab }) {
                     variant="ghost"
                     className="text-danger"
                     onClick={() => {
-                      if (confirm(`Delete key "${selected.key}"?`)) {
-                        void exec(["DEL", selected.key]);
-                        setSelected(null);
-                      }
+                      // On production exec asks with the production prompt; one prompt, not two.
+                      if (conn.environment === "production" || confirm(`Delete key "${selected.key}"?`))
+                        void exec(["DEL", selected.key]).then((sent) => sent && setSelected(null));
                     }}
                     aria-label="Delete key"
                   >

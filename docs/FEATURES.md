@@ -155,3 +155,10 @@ Append-only record of shipped behaviour. Newest at the bottom.
   database). Notes are stored as one line of at most 2000 characters; metric names are one line of at most 64. A `notes.json` that does not parse is reported, never overwritten;
   deleting a connection deletes its notes; the remote-consent card now lists notes. Limit: a metric shows whenever its
   anchor table is in scope, even if its definition joins an out-of-scope table.
+- Production prompt for Redis and Mongo (M1 follow-up): on a `production` connection, Redis console commands that
+  write, Save value, TTL changes and Delete key ask first with the command shown; the write check is the backend's
+  read-only allow-list (`redis_is_write`, unknown commands count as writes, a failed check runs nothing). Mongo document
+  insert / replace / delete ask with the document id and collection, and an aggregation with `$out` / `$merge`
+  asks on every run, naming the collection it writes (`mongo_pipeline_write_target`). Long arguments are clipped one
+  by one with a length marker so no target is hidden. The prompt text is shared with SQL (`src/lib/production.ts`, control
+  characters in names replaced). Agent writes keep their red approval card.

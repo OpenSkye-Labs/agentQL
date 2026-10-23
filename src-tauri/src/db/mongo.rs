@@ -290,6 +290,37 @@ pub fn pipeline_writes(p: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// What an aggregation pipeline writes, for the production prompt: `$out replaces db.coll` or
+/// `$merge into db.coll` (no db = the pipeline's own database). None when it writes nothing.
+pub fn pipeline_write_target(p: &Value) -> Option<String> {
+    let name = |v: &Value| match v {
+        Value::String(c) => Some(c.clone()),
+        Value::Object(o) => {
+            let coll = o.get("coll").and_then(Value::as_str)?;
+            Some(match o.get("db").and_then(Value::as_str) {
+                Some(db) => format!("{db}.{coll}"),
+                None => coll.to_string(),
+            })
+        }
+        _ => None,
+    };
+    p.as_array()?.iter().find_map(|s| {
+        if let Some(v) = s.get("$out") {
+            Some(format!(
+                "$out replaces {}",
+                name(v).unwrap_or_else(|| "?".into())
+            ))
+        } else {
+            let m = s.get("$merge")?;
+            let into = m.get("into").unwrap_or(m);
+            Some(format!(
+                "$merge into {}",
+                name(into).unwrap_or_else(|| "?".into())
+            ))
+        }
+    })
+}
+
 /// Commands that never modify data; everything else is treated as a write.
 pub fn is_read_only_command(command: &Value) -> bool {
     let Some(name) = command.as_object().and_then(|o| o.keys().next()) else {

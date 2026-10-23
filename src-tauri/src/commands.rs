@@ -585,6 +585,24 @@ pub async fn redis_exec(st: State<'_, AppState>, id: String, args: Vec<String>) 
     redis(&s)?.exec(&args).await
 }
 
+/// A Redis command as typed in the console, or as structured args.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum RedisCmd {
+    Line(String),
+    Args(Vec<String>),
+}
+
+/// Whether a Redis command writes, by the read-only allow-list (unknown = write), so the production prompt and
+/// read-only enforcement never disagree.
+#[tauri::command]
+pub fn redis_is_write(cmd: RedisCmd) -> Result<bool> {
+    Ok(match cmd {
+        RedisCmd::Line(line) => !crate::db::redis::is_read_only_command(&line),
+        RedisCmd::Args(args) => !crate::db::redis::is_read_only_args(&args),
+    })
+}
+
 #[tauri::command]
 pub async fn redis_info(st: State<'_, AppState>, id: String) -> Result<Value> {
     let s = st.manager.get(&id).await?;
@@ -592,6 +610,12 @@ pub async fn redis_info(st: State<'_, AppState>, id: String) -> Result<Value> {
 }
 
 // ----------------------------------------------------------------- mongo
+
+/// What an aggregation pipeline writes (`$out` / `$merge` and the target collection), or null when it is read-only.
+#[tauri::command]
+pub fn mongo_pipeline_write_target(pipeline: Value) -> Result<Option<String>> {
+    Ok(crate::db::mongo::pipeline_write_target(&pipeline))
+}
 
 #[tauri::command]
 pub async fn mongo_collections(
@@ -1012,4 +1036,61 @@ pub async fn schema_catalog(
 ) -> Result<SchemaCatalog> {
     let s = st.manager.get(&id).await?;
     sql(&s).await?.schema_catalog(&schema).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The production prompt must agree with read-only enforcement: same classifiers, unknown = write.
+    #[test]
+    fn write_classifiers_match_read_only_mode() {
+        let line = |s: &str| RedisCmd::Line(s.into());
+        let args = |a: &[&str]| RedisCmd::Args(a.iter().map(|s| s.to_string()).collect());
+        assert!(!redis_is_write(line(r#"GET "my key""#)).unwrap());
+        assert!(redis_is_write(line(r#"SET "my key" v"#)).unwrap());
+        assert!(redis_is_write(line("FROBNICATE x")).unwrap());
+        // PFCOUNT may rewrite the HyperLogLog's cached cardinality, so Redis itself calls it a write.
+        assert!(redis_is_write(line("PFCOUNT visitors")).unwrap());
+        assert!(redis_is_write(args(&["DEL", "k"])).unwrap());
+        assert!(!redis_is_write(args(&["HGETALL", "k"])).unwrap());
+        // The UI sends a string or an array; both deserialise.
+        assert!(matches!(
+            serde_json::from_value(json!("GET k")).unwrap(),
+            RedisCmd::Line(_)
+        ));
+        assert!(matches!(
+            serde_json::from_value(json!(["GET", "k"])).unwrap(),
+            RedisCmd::Args(_)
+        ));
+        let target = |p: Value| mongo_pipeline_write_target(p).unwrap();
+        assert_eq!(
+            target(json!([{"$match": {}}, {"$out": "users"}])).as_deref(),
+            Some("$out replaces users")
+        );
+        assert_eq!(
+            target(json!([{"$out": {"db": "auth", "coll": "users"}}])).as_deref(),
+            Some("$out replaces auth.users")
+        );
+        assert_eq!(
+            target(json!([{"$merge": "t"}])).as_deref(),
+            Some("$merge into t")
+        );
+        assert_eq!(
+            target(json!([{"$merge": {"into": {"db": "a", "coll": "t"}, "on": "_id"}}])).as_deref(),
+            Some("$merge into a.t")
+        );
+        assert_eq!(target(json!([{"$match": {}}, {"$limit": 5}])), None);
+        // Every pipeline the read-only check calls a write gets a target line, and vice versa.
+        for p in [
+            json!([{"$out": 5}]),
+            json!([{"$merge": {"into": 1}}]),
+            json!([{"$limit": 1}]),
+        ] {
+            assert_eq!(
+                target(p.clone()).is_some(),
+                crate::db::mongo::pipeline_writes(&p)
+            );
+        }
+    }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { ChevronLeft, ChevronRight, Info, Plus, RefreshCw, Bot } from "lucide-react";
 import { api, errMsg } from "../lib/api";
@@ -7,6 +7,7 @@ import type { Cell, QueryResult } from "../lib/types";
 import { ResultGrid } from "./ResultGrid";
 import { Button, Dialog, Input, Spinner, Empty, Tooltip, Textarea } from "./ui";
 import { fmtCount } from "../lib/format";
+import { clipArgs, confirmProduction } from "../lib/production";
 
 type MTab = Extract<Tab, { kind: "mongo" }>;
 
@@ -19,6 +20,11 @@ export function MongoTab({ tab }: { tab: MTab }) {
   const [filter, setFilter] = useState("{}");
   const [sort, setSort] = useState("");
   const [pipeline, setPipeline] = useState('[\n  { "$match": {} },\n  { "$limit": 50 }\n]');
+  // Latest editor text, read after the async write check so a pipeline edited meanwhile is never run unseen.
+  const pipelineNow = useRef(pipeline);
+  useEffect(() => {
+    pipelineNow.current = pipeline;
+  }, [pipeline]);
   const [limit, setLimit] = useState(50);
   const [skip, setSkip] = useState(0);
   const [docs, setDocs] = useState<Record<string, unknown>[]>([]);
@@ -28,6 +34,9 @@ export function MongoTab({ tab }: { tab: MTab }) {
   const [editing, setEditing] = useState<{ doc: Record<string, unknown> | null; text: string } | null>(null);
   const [info, setInfo] = useState<{ indexes: unknown[]; fields: Record<string, string>; stats: unknown } | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+
+  const where = `${tab.db}.${tab.collection}`;
+  const idText = (id: unknown) => clipArgs([JSON.stringify(id) ?? "?"]);
 
   const parse = (s: string, fallback: unknown) => {
     if (!s.trim()) return fallback;
@@ -51,7 +60,23 @@ export function MongoTab({ tab }: { tab: MTab }) {
         setDocs(r.docs);
         setTotal(r.total);
       } else {
-        const r = await api.mongoAggregate(conn.id, tab.db, tab.collection, parse(pipeline, []), 1000);
+        const p = parse(pipeline, []);
+        // $out / $merge write a collection, on every run (Run, reload after an edit). Name the collection written.
+        if (conn.environment === "production") {
+          let target: string | null;
+          try {
+            target = await api.mongoPipelineWriteTarget(p);
+          } catch (e) {
+            toast(`Could not check the pipeline, not running on production: ${errMsg(e)}`, "error");
+            return;
+          }
+          if (pipelineNow.current !== pipeline) {
+            toast("The pipeline changed while it was being checked; run it again.", "error");
+            return;
+          }
+          if (target && !confirmProduction(conn, [`aggregate on ${where}: ${target}`])) return;
+        }
+        const r = await api.mongoAggregate(conn.id, tab.db, tab.collection, p, 1000);
         setDocs(r);
         setTotal(null);
       }
@@ -60,7 +85,7 @@ export function MongoTab({ tab }: { tab: MTab }) {
     } finally {
       setLoading(false);
     }
-  }, [conn, tab.db, tab.collection, mode, filter, sort, pipeline, limit, skip]);
+  }, [conn, tab.db, tab.collection, mode, filter, sort, pipeline, limit, skip, toast, where]);
 
   useEffect(() => {
     void load();
@@ -92,6 +117,13 @@ export function MongoTab({ tab }: { tab: MTab }) {
     if (!conn || !editing) return;
     try {
       const parsed = JSON.parse(editing.text);
+      // Cancelled: the editor stays open with the text.
+      if (
+        !confirmProduction(conn, [
+          editing.doc ? `replace document ${idText(editing.doc._id)} in ${where}` : `insert into ${where}`,
+        ])
+      )
+        return;
       if (editing.doc) await api.mongoReplace(conn.id, tab.db, tab.collection, editing.doc._id, parsed);
       else await api.mongoInsert(conn.id, tab.db, tab.collection, parsed);
       toast(editing.doc ? "Document updated" : "Document inserted", "success");
@@ -103,7 +135,8 @@ export function MongoTab({ tab }: { tab: MTab }) {
   };
 
   const deleteDoc = async (d: Record<string, unknown>) => {
-    if (!conn || !confirm("Delete this document?")) return;
+    if (!conn) return;
+    if (!confirmProduction(conn, [`delete document ${idText(d._id)} from ${where}`], "Delete this document?")) return;
     try {
       await api.mongoDelete(conn.id, tab.db, tab.collection, d._id);
       await load();

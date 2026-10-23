@@ -51,6 +51,13 @@ function emit(event: string, payload: unknown) {
 
 const agent = createAgent(emit, () => settings.agent_allow_writes);
 
+/** Mirror of `is_read_only_args` in src-tauri/src/db/redis.rs; keep the two in sync. */
+const REDIS_READS = new Set(
+  "GET|MGET|HGET|HGETALL|HMGET|HKEYS|HVALS|HLEN|HEXISTS|LRANGE|LLEN|LINDEX|SMEMBERS|SCARD|SISMEMBER|ZRANGE|ZRANGEBYSCORE|ZREVRANGE|ZCARD|ZSCORE|ZRANK|SCAN|SSCAN|HSCAN|ZSCAN|KEYS|TYPE|TTL|PTTL|EXISTS|STRLEN|DBSIZE|INFO|PING|ECHO|TIME|XRANGE|XREVRANGE|XLEN|XINFO|OBJECT|MEMORY|RANDOMKEY|GETRANGE|BITCOUNT|GEOPOS|GEODIST|JSON.GET|FT.SEARCH|DUMP".split(
+    "|",
+  ),
+);
+
 /** Data-dictionary notes per connection, in memory, seeded so the structure and notes tabs have content. */
 const notes: Record<string, Note[]> = {
   pg: [
@@ -106,8 +113,15 @@ function runStatement(sql: string, limit: number) {
 }
 
 const handlers: Record<string, Handler> = {
-  list_connections: () => connections,
-  save_connection: (a) => ({ ...(a.config as ConnectionConfig), id: (a.config as ConnectionConfig).id || "new" }),
+  list_connections: () => [...connections],
+  save_connection: (a) => {
+    // Kept in memory like the scope, so an edit (e.g. tagging a connection production) shows until reload.
+    const c = { ...(a.config as ConnectionConfig), id: (a.config as ConnectionConfig).id || crypto.randomUUID() };
+    const i = connections.findIndex((x) => x.id === c.id);
+    if (i >= 0) connections[i] = c;
+    else connections.push(c);
+    return c;
+  },
   get_connection_secrets: () => ({ password: "secret" }),
   secret_storage: () => "file",
   test_connection: () => "PostgreSQL 16.4",
@@ -166,6 +180,24 @@ const handlers: Record<string, Handler> = {
   redis_get: (a) => redisValue(String(a.key)),
   redis_command: () => ({ redis_version: "7.4.1", used_memory_human: "38.20M" }),
   redis_exec: () => "OK",
+  redis_is_write: (a) => {
+    const first = (Array.isArray(a.cmd) ? a.cmd[0] : String(a.cmd).trim().split(/\s+/)[0]) ?? "";
+    return !REDIS_READS.has(String(first).toUpperCase());
+  },
+  // Mirror of `pipeline_write_target` in src-tauri/src/db/mongo.rs.
+  mongo_pipeline_write_target: (a) => {
+    const name = (v: unknown) =>
+      typeof v === "string"
+        ? v
+        : v && typeof v === "object" && "coll" in v
+          ? [(v as { db?: string }).db, (v as { coll: string }).coll].filter(Boolean).join(".")
+          : "?";
+    const stage = (Array.isArray(a.pipeline) ? a.pipeline : []).find((s) => s && ("$out" in s || "$merge" in s));
+    if (!stage) return null;
+    if ("$out" in stage) return `$out replaces ${name(stage.$out)}`;
+    const m = stage.$merge;
+    return `$merge into ${name(m && typeof m === "object" && "into" in m ? m.into : m)}`;
+  },
   redis_info: () => ({ redis_version: "7.4.1", dbsize: "21482", used_memory_human: "38.20M" }),
   mongo_collections: () => mongoCollections,
   mongo_find: (a) => {
