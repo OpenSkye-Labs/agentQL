@@ -83,6 +83,9 @@ export const api = {
   redisGet: (id: string, key: string) => invoke<RedisValue>("redis_get", { id, key }),
   redisCommand: (id: string, command: string) => invoke<unknown>("redis_command", { id, command }),
   redisExec: (id: string, args: string[]) => invoke<unknown>("redis_exec", { id, args }),
+  /** Same allow-list as read-only mode: unknown commands count as writes. Pass a raw line or structured args. */
+  redisIsWrite: (cmd: { command: string } | { args: string[] }) =>
+    invoke<boolean>("redis_is_write", { command: null, args: null, ...cmd }),
   redisInfo: (id: string) => invoke<Record<string, string>>("redis_info", { id }),
 
   // mongo
@@ -91,6 +94,7 @@ export const api = {
   mongoFind: (id: string, query: MongoFind) => invoke<MongoPage>("mongo_find", { id, query }),
   mongoAggregate: (id: string, db: string, collection: string, pipeline: unknown, limit?: number) =>
     invoke<Record<string, unknown>[]>("mongo_aggregate", { id, db, collection, pipeline, limit }),
+  mongoPipelineWrites: (pipeline: unknown) => invoke<boolean>("mongo_pipeline_writes", { pipeline }),
   mongoInsert: (id: string, db: string, collection: string, document: unknown) =>
     invoke<unknown>("mongo_insert", { id, db, collection, document }),
   mongoReplace: (id: string, db: string, collection: string, docId: unknown, document: unknown) =>

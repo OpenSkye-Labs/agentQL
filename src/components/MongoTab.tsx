@@ -7,6 +7,7 @@ import type { Cell, QueryResult } from "../lib/types";
 import { ResultGrid } from "./ResultGrid";
 import { Button, Dialog, Input, Spinner, Empty, Tooltip, Textarea } from "./ui";
 import { fmtCount } from "../lib/format";
+import { confirmProduction, plain } from "../lib/production";
 
 type MTab = Extract<Tab, { kind: "mongo" }>;
 
@@ -28,6 +29,9 @@ export function MongoTab({ tab }: { tab: MTab }) {
   const [editing, setEditing] = useState<{ doc: Record<string, unknown> | null; text: string } | null>(null);
   const [info, setInfo] = useState<{ indexes: unknown[]; fields: Record<string, string>; stats: unknown } | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+
+  const where = plain(`${tab.db}.${tab.collection}`);
+  const idText = (id: unknown) => plain(JSON.stringify(id) ?? "?").slice(0, 120);
 
   const parse = (s: string, fallback: unknown) => {
     if (!s.trim()) return fallback;
@@ -51,7 +55,15 @@ export function MongoTab({ tab }: { tab: MTab }) {
         setDocs(r.docs);
         setTotal(r.total);
       } else {
-        const r = await api.mongoAggregate(conn.id, tab.db, tab.collection, parse(pipeline, []), 1000);
+        const p = parse(pipeline, []);
+        // $out / $merge write a collection, on every run (Run, paging, reload after an edit).
+        if (
+          conn.environment === "production" &&
+          (await api.mongoPipelineWrites(p)) &&
+          !confirmProduction(conn, [`aggregate on ${where} that writes a collection ($out / $merge)`])
+        )
+          return;
+        const r = await api.mongoAggregate(conn.id, tab.db, tab.collection, p, 1000);
         setDocs(r);
         setTotal(null);
       }
@@ -92,6 +104,13 @@ export function MongoTab({ tab }: { tab: MTab }) {
     if (!conn || !editing) return;
     try {
       const parsed = JSON.parse(editing.text);
+      // Cancelled: the editor stays open with the text.
+      if (
+        !confirmProduction(conn, [
+          editing.doc ? `replace document ${idText(editing.doc._id)} in ${where}` : `insert into ${where}`,
+        ])
+      )
+        return;
       if (editing.doc) await api.mongoReplace(conn.id, tab.db, tab.collection, editing.doc._id, parsed);
       else await api.mongoInsert(conn.id, tab.db, tab.collection, parsed);
       toast(editing.doc ? "Document updated" : "Document inserted", "success");
@@ -103,7 +122,12 @@ export function MongoTab({ tab }: { tab: MTab }) {
   };
 
   const deleteDoc = async (d: Record<string, unknown>) => {
-    if (!conn || !confirm("Delete this document?")) return;
+    if (!conn) return;
+    const ok =
+      conn.environment === "production"
+        ? confirmProduction(conn, [`delete document ${idText(d._id)} from ${where}`])
+        : confirm("Delete this document?");
+    if (!ok) return;
     try {
       await api.mongoDelete(conn.id, tab.db, tab.collection, d._id);
       await load();

@@ -579,6 +579,17 @@ pub async fn redis_exec(st: State<'_, AppState>, id: String, args: Vec<String>) 
     redis(&s)?.exec(&args).await
 }
 
+/// Whether a Redis command (raw line or structured args) writes, by the read-only allow-list (unknown = write),
+/// so the production prompt and read-only enforcement never disagree.
+#[tauri::command]
+pub fn redis_is_write(command: Option<String>, args: Option<Vec<String>>) -> bool {
+    match (command, args) {
+        (Some(line), _) => !crate::db::redis::is_read_only_command(&line),
+        (None, Some(args)) => !crate::db::redis::is_read_only_args(&args),
+        (None, None) => true,
+    }
+}
+
 #[tauri::command]
 pub async fn redis_info(st: State<'_, AppState>, id: String) -> Result<Value> {
     let s = st.manager.get(&id).await?;
@@ -586,6 +597,12 @@ pub async fn redis_info(st: State<'_, AppState>, id: String) -> Result<Value> {
 }
 
 // ----------------------------------------------------------------- mongo
+
+/// Whether an aggregation pipeline writes (`$out` / `$merge`), same check as read-only mode.
+#[tauri::command]
+pub fn mongo_pipeline_writes(pipeline: Value) -> bool {
+    crate::db::mongo::pipeline_writes(&pipeline)
+}
 
 #[tauri::command]
 pub async fn mongo_collections(
@@ -984,4 +1001,30 @@ pub async fn schema_catalog(
 ) -> Result<SchemaCatalog> {
     let s = st.manager.get(&id).await?;
     sql(&s).await?.schema_catalog(&schema).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The production prompt must agree with read-only enforcement: same classifiers, unknown = write.
+    #[test]
+    fn write_classifiers_match_read_only_mode() {
+        assert!(!redis_is_write(Some(r#"GET "my key""#.into()), None));
+        assert!(redis_is_write(Some(r#"SET "my key" v"#.into()), None));
+        assert!(redis_is_write(Some("FROBNICATE x".into()), None));
+        assert!(redis_is_write(None, Some(vec!["DEL".into(), "k".into()])));
+        assert!(!redis_is_write(
+            None,
+            Some(vec!["HGETALL".into(), "k".into()])
+        ));
+        assert!(redis_is_write(None, None));
+        assert!(mongo_pipeline_writes(
+            json!([{"$match": {}}, {"$out": "copy"}])
+        ));
+        assert!(mongo_pipeline_writes(json!([{"$merge": {"into": "t"}}])));
+        assert!(!mongo_pipeline_writes(
+            json!([{"$match": {}}, {"$limit": 5}])
+        ));
+    }
 }

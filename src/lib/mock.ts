@@ -147,6 +147,16 @@ const handlers: Record<string, Handler> = {
   redis_get: (a) => redisValue(String(a.key)),
   redis_command: () => ({ redis_version: "7.4.1", used_memory_human: "38.20M" }),
   redis_exec: () => "OK",
+  // ponytail: mock approximation of the backend allow-list.
+  redis_is_write: (a) => {
+    const first =
+      (a.command ? String(a.command).trim().split(/\s+/)[0] : ((a.args as string[] | null)?.[0] ?? "")) || "";
+    return !/^(get|mget|hget|hgetall|hkeys|lrange|llen|smembers|scard|zrange|zcard|scan|info|ttl|type|exists|dbsize)$/i.test(
+      first,
+    );
+  },
+  mongo_pipeline_writes: (a) =>
+    Array.isArray(a.pipeline) && a.pipeline.some((s) => s && typeof s === "object" && ("$out" in s || "$merge" in s)),
   redis_info: () => ({ redis_version: "7.4.1", dbsize: "21482", used_memory_human: "38.20M" }),
   mongo_collections: () => mongoCollections,
   mongo_find: (a) => {
