@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { Cell, Column, ForeignKeyInfo, QueryResult } from "../lib/types";
 import { cellFull, cellPreview, cellText, isBytes, parseCell } from "../lib/format";
+import { sortOrder } from "../lib/gridSort";
 import { errMsg } from "../lib/api";
 import { useStore } from "../lib/store";
 import { ValueEditor, type ValueEditorHandle } from "./ValueEditor";
@@ -45,6 +46,9 @@ interface Props {
 
 const ROW_H = 26;
 const MIN_W = 60;
+const ROW_HEADER_W = 48;
+/** The sticky header row (`h-7`). */
+const HEADER_H = 28;
 
 export function ResultGrid({
   result,
@@ -96,21 +100,8 @@ export function ResultGrid({
   }, [foreignKeys]);
   // Client-side sort only when the parent does not handle sorting.
   const order = useMemo(() => {
-    const idx = result.rows.map((_, i) => i);
-    if (!clientSort || onSort) return idx;
-    const { column, desc } = clientSort;
-    idx.sort((a, b) => {
-      const va = result.rows[a][column];
-      const vb = result.rows[b][column];
-      if (va === null) return 1;
-      if (vb === null) return -1;
-      const r =
-        typeof va === "number" && typeof vb === "number"
-          ? va - vb
-          : String(cellText(va)).localeCompare(String(cellText(vb)), undefined, { numeric: true });
-      return desc ? -r : r;
-    });
-    return idx;
+    if (!clientSort || onSort) return result.rows.map((_, i) => i);
+    return sortOrder(result.rows, clientSort.column, clientSort.desc, (v) => String(cellText(v as Cell)));
   }, [result.rows, clientSort, onSort]);
 
   useEffect(() => {
@@ -131,14 +122,40 @@ export function ResultGrid({
     setEditing(null);
   }, [cols, result.rows]);
 
+  // The virtualizers measure the viewport with offsetWidth/Height, scrollbars included, and do not know about the
+  // sticky header row and row-number column: tell them, so scrolling a cell into view lands it fully visible.
+  const el = parentRef.current;
+  const scrollbarH = el ? el.offsetHeight - el.clientHeight : 0;
+  const scrollbarW = el ? el.offsetWidth - el.clientWidth : 0;
   const rowVirtualizer = useVirtualizer({
     count: order.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_H,
-    overscan: 12,
+    // Rows start below the header: item offsets include it, rendering subtracts it again.
+    scrollMargin: HEADER_H,
+    scrollPaddingStart: HEADER_H,
+    scrollPaddingEnd: scrollbarH,
+    overscan: 6,
   });
 
-  const totalW = widths.reduce((a, b) => a + b, 0) + 48;
+  // Columns are virtualised too: every visible row re-renders while scrolling, so a wide result must not mount
+  // every one of its cells. Offsets start after the 48 px sticky row-number column.
+  const colVirtualizer = useVirtualizer({
+    horizontal: true,
+    count: cols.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (i) => widths[i] ?? MIN_W,
+    paddingStart: ROW_HEADER_W,
+    scrollPaddingStart: ROW_HEADER_W,
+    scrollPaddingEnd: scrollbarW,
+    overscan: 2,
+  });
+  useEffect(() => colVirtualizer.measure(), [widths, colVirtualizer]);
+  const vcols = colVirtualizer.getVirtualItems();
+  // Width of the columns scrolled out on the left, kept as a spacer so the rendered ones sit at their offsets.
+  const lead = vcols.length ? vcols[0].start - ROW_HEADER_W : 0;
+
+  const totalW = widths.reduce((a, b) => a + b, 0) + ROW_HEADER_W;
 
   const startEdit = useCallback(
     (r: number, c: number) => {
@@ -227,6 +244,7 @@ export function ResultGrid({
       setSel({ r, c });
       if (!e.shiftKey) setAnchor({ r, c });
       rowVirtualizer.scrollToIndex(r);
+      colVirtualizer.scrollToIndex(c);
     };
     if (e.key === "ArrowDown") move(1, 0);
     else if (e.key === "ArrowUp") move(-1, 0);
@@ -272,8 +290,10 @@ export function ResultGrid({
     resizing.current = { c, x: e.clientX, w: widths[c] };
     const onMove = (ev: MouseEvent) => {
       if (!resizing.current) return;
-      const w = Math.max(MIN_W, resizing.current.w + ev.clientX - resizing.current.x);
-      setWidths((ws) => ws.map((x, i) => (i === resizing.current!.c ? w : x)));
+      // Read the ref now: the updater can run after mouseup has cleared it (fast drag-and-release crashed the tab).
+      const { c: col, w: start, x } = resizing.current;
+      const w = Math.max(MIN_W, start + ev.clientX - x);
+      setWidths((ws) => ws.map((cw, i) => (i === col ? w : cw)));
     };
     const onUp = () => {
       resizing.current = null;
@@ -410,12 +430,15 @@ export function ResultGrid({
                 role="columnheader"
                 aria-label="Row number"
               />
-              {cols.map((c, ci) => {
+              {lead > 0 && <div className="shrink-0" style={{ width: lead }} aria-hidden />}
+              {vcols.map(({ index: ci }) => {
+                const c = cols[ci];
                 const s = sortState(ci);
                 return (
                   <div
                     key={ci}
                     role="columnheader"
+                    aria-colindex={ci + 1}
                     aria-sort={s === "asc" ? "ascending" : s === "desc" ? "descending" : "none"}
                     style={{ width: widths[ci] }}
                     className="relative flex shrink-0 items-center gap-1 border-r border-border select-none hover:bg-hover"
@@ -465,7 +488,7 @@ export function ResultGrid({
                       vi.index % 2 ? "bg-elev" : "bg-bg/40",
                       deleted && "line-through opacity-50",
                     )}
-                    style={{ top: vi.start, height: ROW_H, width: totalW }}
+                    style={{ top: vi.start - HEADER_H, height: ROW_H, width: totalW }}
                   >
                     <div
                       className="sticky left-0 z-[5] flex w-12 shrink-0 items-center justify-end border-b border-r border-border bg-sunken px-1.5 text-[10px] text-faint tabular-nums"
@@ -473,7 +496,9 @@ export function ResultGrid({
                     >
                       {rowIdx + 1}
                     </div>
-                    {cols.map((c, ci) => {
+                    {lead > 0 && <div className="shrink-0" style={{ width: lead }} aria-hidden />}
+                    {vcols.map(({ index: ci }) => {
+                      const c = cols[ci];
                       const key = `${rowIdx}:${c.name}`;
                       const edited = edits?.has(key);
                       const v = edited ? edits!.get(key)! : row[ci];
@@ -485,6 +510,7 @@ export function ResultGrid({
                         <div
                           key={ci}
                           role="gridcell"
+                          aria-colindex={ci + 1}
                           id={`${gridId}-${vi.index}-${ci}`}
                           aria-selected={selected}
                           onContextMenu={() => {

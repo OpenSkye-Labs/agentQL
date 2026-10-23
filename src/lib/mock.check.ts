@@ -1,7 +1,7 @@
 // Runnable self-check: node --experimental-strip-types src/lib/mock.check.ts
 import assert from "node:assert/strict";
 import { pickRun } from "./mockAgent.ts";
-import { SPECS, catalog, chartDataFor, dashboards, tablePage } from "./mockData.ts";
+import { SPECS, benchWide, catalog, chartDataFor, dashboards, tablePage } from "./mockData.ts";
 
 // The four demo prompts route to their scripted runs.
 assert.equal(pickRun("Chart revenue per day for the last two weeks"), "revenue");
@@ -38,4 +38,12 @@ for (const c of dashboards[0].charts) {
   const cols = chartDataFor(c.source.kind === "sql" ? c.source.sql : "").columns.map((x) => x.name);
   for (const y of [c.x!, ...c.y]) assert.ok(cols.includes(y), `${c.title}: ${y}`);
 }
+// Grid benchmark fixture: shape, NULLs present, deterministic (small size here; the mock serves 200k × 60).
+const bench = benchWide(1000, 60);
+assert.equal(bench.rows.length, 1000);
+assert.equal(bench.columns.length, 60);
+assert.ok(bench.rows.every((r) => r.length === 60));
+assert.ok(bench.rows.some((r) => r.includes(null)));
+assert.deepEqual(benchWide(1000, 60).rows[999], bench.rows[999]);
+
 console.log("mock.check ok");

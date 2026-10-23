@@ -1035,3 +1035,58 @@ export function markdownTable(r: QueryResult): string {
     ...r.rows.map((row) => `| ${row.map(fmt).join(" | ")} |`),
   ].join("\n");
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Grid benchmark fixture (M5): `SELECT * FROM bench_wide` in the mock. Not part of the demo schema.
+
+const BENCH_TYPES = [
+  "int4",
+  "numeric(12,2)",
+  "text",
+  "timestamptz",
+  "bool",
+  "jsonb",
+  "uuid",
+  "text",
+  "int8",
+  "varchar(80)",
+];
+let benchCache: QueryResult | null = null;
+
+/** 200,000 rows × 60 columns of mixed types with NULLs, generated once, deterministically. */
+export function benchWide(rows = 200_000, cols = 60): QueryResult {
+  if (benchCache && benchCache.rows.length === rows && benchCache.columns.length === cols) return benchCache;
+  const types = Array.from({ length: cols }, (_, c) => (c === 0 ? "int8" : BENCH_TYPES[c % BENCH_TYPES.length]));
+  const cell = (r: number, c: number): Cell => {
+    if (c === 0) return r + 1;
+    if ((r + c) % 17 === 0) return null;
+    switch (types[c]) {
+      case "int4":
+      case "int8":
+        return (r * 31 + c * 7) % 100_000;
+      case "numeric(12,2)":
+        return ((r * 13 + c) % 100_000) / 100;
+      case "timestamptz":
+        return new Date(Date.UTC(2026, 0, 1) + ((r * 977 + c * 61) % 31_536_000) * 1000).toISOString();
+      case "bool":
+        return (r + c) % 2 === 0;
+      case "jsonb":
+        return { id: r, tag: `t${c}`, n: (r * c) % 97 };
+      case "uuid":
+        return `${(r * 2654435761 + c).toString(16).padStart(8, "0").slice(-8)}-0000-4000-8000-${String(r).padStart(12, "0")}`;
+      default:
+        return `row ${r + 1} col ${c} ${"lorem ipsum ".repeat(1 + ((r + c) % 3))}`.trim();
+    }
+  };
+  const data: Cell[][] = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => cell(r, c)));
+  benchCache = qr(
+    types.map((t, c): [string, string] => [
+      c === 0 ? "id" : `c${String(c).padStart(2, "0")}_${t.replace(/\W.*$/, "")}`,
+      t,
+    ]),
+    data,
+    "SELECT * FROM bench_wide",
+    { duration_ms: 0 },
+  );
+  return benchCache;
+}

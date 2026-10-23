@@ -6,6 +6,7 @@
 import { createAgent } from "./mockAgent";
 import {
   SPECS,
+  benchWide,
   catalog,
   chartDataFor,
   connections,
@@ -123,6 +124,8 @@ function statements(text: string) {
 
 function runStatement(sql: string, limit: number) {
   if (!isRead(sql)) return qr([], [], sql, { affected: 1, duration_ms: 7 });
+  // Grid benchmark: the full fixture, ignoring the row limit (that is the point of the benchmark).
+  if (/\bbench_wide\b/i.test(sql)) return benchWide();
   if (/\b(sum|count|avg)\s*\(/i.test(sql) && /group\s+by/i.test(sql)) return { ...chartDataFor(sql), statement: sql };
   // ponytail: rows are capped at 200 so the mock stays fast; an explicit trailing LIMIT is honoured.
   const own = Number(/\blimit\s+(\d+)\s*$/i.exec(sql)?.[1] ?? Infinity);
