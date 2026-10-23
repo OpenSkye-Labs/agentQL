@@ -237,9 +237,9 @@ impl ExportWriter {
                         o => {
                             let text = cell(o);
                             // MySQL reads `\` as an escape unless NO_BACKSLASH_ESCAPES is on, so no quoting of a
-                            // backslash means the same in both modes: such strings go out as a hex literal with an
-                            // explicit charset, which every sql_mode reads byte for byte.
-                            if mysql && text.contains('\\') {
+                            // backslash means the same in both modes, and the client can cut a string at a raw NUL:
+                            // such strings go out as a hex literal with an explicit charset, read byte for byte.
+                            if mysql && text.contains(['\\', '\0']) {
                                 let hex: String =
                                     text.bytes().map(|b| format!("{b:02X}")).collect();
                                 format!("_utf8mb4 X'{hex}'")
@@ -388,12 +388,16 @@ mod tests {
             .sql_style(mysql);
         w.columns(&["a".into(), "b".into()]).unwrap();
         w.row(&[json!(evil), json!("it's")]).unwrap();
+        w.row(&[json!("a\0b"), Value::Null]).unwrap();
         w.finish().unwrap();
         let out = std::fs::read_to_string(&path).unwrap();
         let hex: String = evil.bytes().map(|b| format!("{b:02X}")).collect();
         assert_eq!(
             out,
-            format!("INSERT INTO `t` (`a`, `b`) VALUES (_utf8mb4 X'{hex}', 'it''s');\n")
+            format!(
+                "INSERT INTO `t` (`a`, `b`) VALUES (_utf8mb4 X'{hex}', 'it''s');\n\
+                 INSERT INTO `t` (`a`, `b`) VALUES (_utf8mb4 X'610062', NULL);\n"
+            )
         );
         let qualified = SqlStyle {
             mysql: false,

@@ -67,3 +67,8 @@ CodeRabbit round 2: 1 finding, applied.
   would land as `a\\b` — applied: a string containing a backslash is written as `_utf8mb4 X'<hex>'`, which every
   `sql_mode` reads byte for byte; other strings keep `'…'` with doubled quotes, which also means the same in both
   modes. This replaces the backslash doubling and still closes the `\'` break-out.
+
+CodeRabbit round 3: 1 finding, applied.
+
+- A MySQL/MariaDB string with an embedded NUL but no backslash went out quoted, and the client can cut it at the NUL
+  on import — applied: NUL also selects the `_utf8mb4 X'…'` form; tested with `"a\0b"`.
