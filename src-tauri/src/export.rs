@@ -30,8 +30,8 @@ pub enum Format {
 /// How SQL-format output is written for the source database.
 #[derive(Clone, Debug, Default)]
 pub struct SqlStyle {
-    /// MySQL/MariaDB: backtick identifiers (double quotes are string literals there by default) and doubled
-    /// backslashes in string literals (`\'` is an escaped quote there).
+    /// MySQL/MariaDB: backtick identifiers (double quotes are string literals there by default), and strings with a
+    /// backslash written as hex literals (a backslash means different things depending on NO_BACKSLASH_ESCAPES).
     pub mysql: bool,
     /// The already-quoted, schema-qualified table to insert into (table exports). None: the file name, quoted.
     pub table: Option<String>,
@@ -235,11 +235,17 @@ impl ExportWriter {
                         Value::Number(n) => n.to_string(),
                         Value::Bool(b) => b.to_string().to_uppercase(),
                         o => {
-                            let mut text = cell(o);
-                            if mysql {
-                                text = text.replace('\\', "\\\\");
+                            let text = cell(o);
+                            // MySQL reads `\` as an escape unless NO_BACKSLASH_ESCAPES is on, so no quoting of a
+                            // backslash means the same in both modes: such strings go out as a hex literal with an
+                            // explicit charset, which every sql_mode reads byte for byte.
+                            if mysql && text.contains('\\') {
+                                let hex: String =
+                                    text.bytes().map(|b| format!("{b:02X}")).collect();
+                                format!("_utf8mb4 X'{hex}'")
+                            } else {
+                                format!("'{}'", text.replace('\'', "''"))
                             }
-                            format!("'{}'", text.replace('\'', "''"))
                         }
                     })
                     .collect();
@@ -365,8 +371,9 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "a\n");
     }
 
-    /// MySQL/MariaDB: backtick identifiers, and backslashes doubled so a stored `\'); DROP …` value cannot close the
-    /// literal when the file is imported. A table export names its qualified source table.
+    /// MySQL/MariaDB: backtick identifiers, and a string with a backslash as a hex literal, so neither a stored
+    /// `\'); DROP …` value nor the import's NO_BACKSLASH_ESCAPES setting can change what is inserted. A table export
+    /// names its qualified source table.
     #[test]
     fn sql_style_follows_the_source_database() {
         let d = dir("mysql");
@@ -375,15 +382,18 @@ mod tests {
             mysql: true,
             table: None,
         };
+        let evil = "x\\'); DROP TABLE users; --";
         let mut w = ExportWriter::create(&path, Format::Sql)
             .unwrap()
             .sql_style(mysql);
-        w.columns(&["a".into()]).unwrap();
-        w.row(&[json!("x\\'); DROP TABLE users; --")]).unwrap();
+        w.columns(&["a".into(), "b".into()]).unwrap();
+        w.row(&[json!(evil), json!("it's")]).unwrap();
         w.finish().unwrap();
+        let out = std::fs::read_to_string(&path).unwrap();
+        let hex: String = evil.bytes().map(|b| format!("{b:02X}")).collect();
         assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "INSERT INTO `t` (`a`) VALUES ('x\\\\''); DROP TABLE users; --');\n"
+            out,
+            format!("INSERT INTO `t` (`a`, `b`) VALUES (_utf8mb4 X'{hex}', 'it''s');\n")
         );
         let qualified = SqlStyle {
             mysql: false,
