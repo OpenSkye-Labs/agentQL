@@ -27,6 +27,16 @@ pub enum Format {
     Sql,
 }
 
+/// How SQL-format output is written for the source database.
+#[derive(Clone, Debug, Default)]
+pub struct SqlStyle {
+    /// MySQL/MariaDB: backtick identifiers (double quotes are string literals there by default) and doubled
+    /// backslashes in string literals (`\'` is an escaped quote there).
+    pub mysql: bool,
+    /// The already-quoted, schema-qualified table to insert into (table exports). None: the file name, quoted.
+    pub table: Option<String>,
+}
+
 /// Running exports by id.
 static JOBS: LazyLock<Mutex<HashMap<String, Arc<Stop>>>> = LazyLock::new(Default::default);
 
@@ -66,7 +76,7 @@ pub fn cancel(id: &str) -> bool {
 
 /// Export every row of a read-only statement to `path`. Rows stream from the database through a bounded channel to
 /// a writer thread, which reports the rows written so far to `progress` (at most every 250 ms). The file only
-/// replaces `path` when the read finished without error or cancel. `backslash_escapes`: SQL output for MySQL/MariaDB.
+/// replaces `path` when the read finished without error or cancel. `sql_style`: SQL-format dialect and target table.
 /// ponytail: a re-run is a fresh session; volatile functions and session state (SET search_path) can differ from the
 /// grid's run, and a long export holds one read-only transaction open.
 pub async fn export_query(
@@ -75,12 +85,12 @@ pub async fn export_query(
     sql: &str,
     path: PathBuf,
     format: Format,
-    backslash_escapes: bool,
+    sql_style: SqlStyle,
     progress: impl Fn(usize) + Send + 'static,
 ) -> Result<usize> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Batch>(QUEUE);
     let writer = blocking(move || {
-        let mut w = ExportWriter::create(&path, format)?.backslash_escapes(backslash_escapes);
+        let mut w = ExportWriter::create(&path, format)?.sql_style(sql_style);
         let mut last = Instant::now();
         while let Some(batch) = rx.blocking_recv() {
             match batch {
@@ -130,8 +140,7 @@ pub struct ExportWriter {
     columns: Vec<String>,
     /// SQL format: the target table, taken from the file name.
     table: String,
-    /// SQL format: also double backslashes in string literals (MySQL/MariaDB read `\'` as an escaped quote).
-    backslash_escapes: bool,
+    style: SqlStyle,
     rows: usize,
 }
 
@@ -172,13 +181,13 @@ impl ExportWriter {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "export".into()),
-            backslash_escapes: false,
+            style: SqlStyle::default(),
             rows: 0,
         })
     }
 
-    pub fn backslash_escapes(mut self, on: bool) -> Self {
-        self.backslash_escapes = on;
+    pub fn sql_style(mut self, style: SqlStyle) -> Self {
+        self.style = style;
         self
     }
 
@@ -196,7 +205,14 @@ impl ExportWriter {
     }
 
     pub fn row(&mut self, row: &[Value]) -> Result<()> {
-        let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        let mysql = self.style.mysql;
+        let q = |s: &str| {
+            if mysql {
+                format!("`{}`", s.replace('`', "``"))
+            } else {
+                format!("\"{}\"", s.replace('"', "\"\""))
+            }
+        };
         match self.out.as_mut() {
             Some(Out::Csv(w)) => w.write_record(row.iter().map(cell))?,
             Some(Out::Plain(w)) if self.format == Format::Json => {
@@ -220,17 +236,18 @@ impl ExportWriter {
                         Value::Bool(b) => b.to_string().to_uppercase(),
                         o => {
                             let mut text = cell(o);
-                            if self.backslash_escapes {
+                            if mysql {
                                 text = text.replace('\\', "\\\\");
                             }
                             format!("'{}'", text.replace('\'', "''"))
                         }
                     })
                     .collect();
+                let table = self.style.table.clone().unwrap_or_else(|| q(&self.table));
                 writeln!(
                     w,
                     "INSERT INTO {} ({}) VALUES ({});",
-                    q(&self.table),
+                    table,
                     self.columns
                         .iter()
                         .map(|c| q(c))
@@ -348,21 +365,39 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "a\n");
     }
 
-    /// MySQL/MariaDB treat `\'` as an escaped quote: without doubling the backslash, a stored `\'); DROP …` value
-    /// would close the literal when the file is imported.
+    /// MySQL/MariaDB: backtick identifiers, and backslashes doubled so a stored `\'); DROP …` value cannot close the
+    /// literal when the file is imported. A table export names its qualified source table.
     #[test]
-    fn sql_backslashes_are_doubled_for_mysql() {
+    fn sql_style_follows_the_source_database() {
         let d = dir("mysql");
         let path = d.join("t.sql");
+        let mysql = SqlStyle {
+            mysql: true,
+            table: None,
+        };
         let mut w = ExportWriter::create(&path, Format::Sql)
             .unwrap()
-            .backslash_escapes(true);
+            .sql_style(mysql);
         w.columns(&["a".into()]).unwrap();
         w.row(&[json!("x\\'); DROP TABLE users; --")]).unwrap();
         w.finish().unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "INSERT INTO \"t\" (\"a\") VALUES ('x\\\\''); DROP TABLE users; --');\n"
+            "INSERT INTO `t` (`a`) VALUES ('x\\\\''); DROP TABLE users; --');\n"
+        );
+        let qualified = SqlStyle {
+            mysql: false,
+            table: Some("\"sales\".\"orders\"".into()),
+        };
+        let mut w = ExportWriter::create(&path, Format::Sql)
+            .unwrap()
+            .sql_style(qualified);
+        w.columns(&["id".into()]).unwrap();
+        w.row(&[json!(1)]).unwrap();
+        w.finish().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "INSERT INTO \"sales\".\"orders\" (\"id\") VALUES (1);\n"
         );
     }
 

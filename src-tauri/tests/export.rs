@@ -3,7 +3,7 @@
 
 use agentql_lib::config::{ConnectionConfig, ConnectionSecrets};
 use agentql_lib::db::sql::SqlConn;
-use agentql_lib::export::{Format, Job, cancel, export_query};
+use agentql_lib::export::{Format, Job, SqlStyle, cancel, export_query};
 use std::path::PathBuf;
 
 const ROWS: usize = 200_000;
@@ -49,7 +49,7 @@ async fn exports_every_row_and_cleans_up_on_cancel_or_failure() {
         "SELECT * FROM t ORDER BY id",
         out.clone(),
         Format::Csv,
-        false,
+        SqlStyle::default(),
         |_| {},
     )
     .await
@@ -74,7 +74,7 @@ async fn exports_every_row_and_cleans_up_on_cancel_or_failure() {
         "SELECT * FROM t",
         out.clone(),
         Format::Json,
-        false,
+        SqlStyle::default(),
         |_| {},
     )
     .await;
@@ -90,7 +90,7 @@ async fn exports_every_row_and_cleans_up_on_cancel_or_failure() {
         "DELETE FROM t RETURNING id",
         out.clone(),
         Format::Csv,
-        false,
+        SqlStyle::default(),
         |_| {},
     )
     .await;

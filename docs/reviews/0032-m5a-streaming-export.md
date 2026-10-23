@@ -51,3 +51,12 @@ applied: merging `stream_read_only`'s read-only setup with `run_one_opts` into o
 core query path is not refactored in this PR.
 
 `ExportWriter`'s unit tests and the 200k-row integration test were written after the code, so they never ran red.
+
+CodeRabbit round 1: 2 findings, both applied.
+
+- Table exports wrote `INSERT INTO "<file name>"`, so a table outside the default schema was re-imported into a
+  same-named table elsewhere or failed — applied: `SqlStyle.table` carries the schema-qualified source table
+  (`SqlConn::qualified`, already quoted for the driver) for table exports; query exports keep the file name.
+- SQL exports from MySQL/MariaDB double-quoted identifiers, which are string literals there unless `ANSI_QUOTES` is
+  set, so the file did not import — applied: `SqlStyle.mysql` switches identifiers to backticks along with the
+  backslash doubling. Both covered by `sql_style_follows_the_source_database`.

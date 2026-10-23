@@ -411,7 +411,16 @@ async fn export_cancel_is_prompt(
                 Instant::now()
             })
         };
-        let r = export_query(&conn, job, sql, out.clone(), Format::Csv, false, |_| {}).await;
+        let r = export_query(
+            &conn,
+            job,
+            sql,
+            out.clone(),
+            Format::Csv,
+            Default::default(),
+            |_| {},
+        )
+        .await;
         let ended = Instant::now();
         let cancelled_at = stopper.await.unwrap();
         let lag = ended.saturating_duration_since(cancelled_at);

@@ -412,8 +412,7 @@ pub fn ssh_forget_host(st: State<'_, AppState>, host: String, port: u16) -> Resu
     crate::ssh::forget_host(&st.manager.known_hosts_path, &host, port)
 }
 
-/// MySQL/MariaDB read `\'` inside a string literal as an escaped quote, so their SQL exports double backslashes.
-fn backslash_escapes(driver: Option<crate::config::Driver>) -> bool {
+fn is_mysql(driver: Option<crate::config::Driver>) -> bool {
     matches!(
         driver,
         Some(crate::config::Driver::Mysql | crate::config::Driver::Mariadb)
@@ -430,8 +429,12 @@ pub async fn export_rows(
     driver: Option<crate::config::Driver>,
 ) -> Result<usize> {
     blocking(move || {
-        let mut w = crate::export::ExportWriter::create(path.as_ref(), format)?
-            .backslash_escapes(backslash_escapes(driver));
+        let mut w = crate::export::ExportWriter::create(path.as_ref(), format)?.sql_style(
+            crate::export::SqlStyle {
+                mysql: is_mysql(driver),
+                table: None,
+            },
+        );
         w.columns(&columns)?;
         for r in &rows {
             w.row(r)?;
@@ -448,7 +451,7 @@ async fn run_export(
     sql_text: &str,
     path: String,
     format: crate::export::Format,
-    driver: crate::config::Driver,
+    sql_style: crate::export::SqlStyle,
 ) -> Result<usize> {
     let id = job.id().to_string();
     crate::export::export_query(
@@ -457,7 +460,7 @@ async fn run_export(
         sql_text,
         path.into(),
         format,
-        backslash_escapes(Some(driver)),
+        sql_style,
         move |rows| {
             let _ = app.emit("export:progress", json!({ "id": id, "rows": rows }));
         },
@@ -486,7 +489,11 @@ pub async fn export_query(
             "Only read-only statements can be re-run for a full export.".into(),
         ));
     }
-    run_export(app, c, job, &sql_text, path, format, s.config.driver).await
+    let style = crate::export::SqlStyle {
+        mysql: is_mysql(Some(s.config.driver)),
+        table: None,
+    };
+    run_export(app, c, job, &sql_text, path, format, style).await
 }
 
 /// Every row of a table, with the grid's filter and sort.
@@ -505,7 +512,12 @@ pub async fn export_table(
     let c = sql(&s).await?;
     c.validate_filter(query.filter.as_deref())?;
     let sql_text = c.select_all_sql(&query);
-    run_export(app, c, job, &sql_text, path, format, s.config.driver).await
+    // The SQL file inserts back into the same (schema-qualified) table it came from.
+    let style = crate::export::SqlStyle {
+        mysql: is_mysql(Some(s.config.driver)),
+        table: Some(c.qualified(query.schema.as_deref(), &query.table)),
+    };
+    run_export(app, c, job, &sql_text, path, format, style).await
 }
 
 #[tauri::command]
