@@ -63,3 +63,9 @@ CodeRabbit round 1: 5 findings, all applied.
   wrong table — applied: the value is the NUL-joined schema/table key.
 - `useNotes` loaded before its `notes:changed` listener was registered, so a save in between was missed — applied:
   the first load runs once registration settles.
+
+CodeRabbit round 2: 1 finding, applied.
+
+- A rejected `listen` registration was swallowed (`void un.finally`), so notes would load once and then go stale
+  silently — applied: the rejection toasts "Notes will not refresh automatically" and still loads once; the cleanup
+  handles the rejection too.

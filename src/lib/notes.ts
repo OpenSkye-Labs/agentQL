@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, errMsg } from "./api";
+import { useStore } from "./store";
 import type { Note } from "./types";
 
 /** The note kinds in display order: table note, column notes, metrics. */
@@ -33,14 +34,25 @@ export function useNotes(connectionId: string) {
     const un = listen<string>("notes:changed", ({ payload }) => {
       if (payload === connectionId) reload();
     });
-    // First load once the listener is registered, so a save in between cannot be missed.
-    void un.finally(() => {
-      if (active) reload();
-    });
+    // First load once the listener is registered, so a save in between cannot be missed. Without the listener the
+    // notes still load once, but would silently go stale: say so.
+    un.then(
+      () => {
+        if (active) reload();
+      },
+      (e) => {
+        if (!active) return;
+        useStore.getState().toast(`Notes will not refresh automatically: ${errMsg(e)}`, "error");
+        reload();
+      },
+    );
     return () => {
       active = false;
       seq.current++;
-      void un.then((f) => f());
+      void un.then(
+        (f) => f(),
+        () => undefined,
+      );
     };
   }, [connectionId, reload]);
   return { notes, error };
