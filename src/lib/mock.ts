@@ -131,7 +131,13 @@ function runStatement(sql: string, limit: number) {
   if (!isRead(sql)) return qr([], [], sql, { affected: 1, duration_ms: 7 });
   // Grid benchmark: the full fixture, ignoring the row limit (that is the point of the benchmark).
   // ponytail: handed over by reference; the app pays IPC + JSON parsing for 200k rows, which the benchmark leaves out.
-  if (fromTable(sql) === "bench_wide") return benchWide();
+  if (fromTable(sql) === "bench_wide") {
+    const code = codeOnly(sql);
+    const all = benchWide();
+    if (/\bcount\s*\(/i.test(code)) return qr([["count", "int8"]], [[all.rows.length]], sql);
+    const n = Number(/\blimit\s+(\d+)\s*$/i.exec(code.trim())?.[1] ?? NaN);
+    return Number.isFinite(n) ? { ...all, rows: all.rows.slice(0, n), statement: sql } : { ...all, statement: sql };
+  }
   if (/\b(sum|count|avg)\s*\(/i.test(sql) && /group\s+by/i.test(sql)) return { ...chartDataFor(sql), statement: sql };
   // ponytail: rows are capped at 200 so the mock stays fast; an explicit trailing LIMIT is honoured.
   const own = Number(/\blimit\s+(\d+)\s*$/i.exec(sql)?.[1] ?? Infinity);
@@ -188,7 +194,8 @@ const handlers: Record<string, Handler> = {
       .filter((s) => !isRead(s))
       .map((s) => ({
         kind: s.split(/\s+/)[0].toUpperCase(),
-        table: tableIn(s) ?? /\b(?:update|into)\s+"?(\w+)/i.exec(s)?.[1] ?? null,
+        // The write target first: `UPDATE orders … FROM customers` writes orders.
+        table: /\b(?:update|into)\s+"?(\w+)/i.exec(codeOnly(s))?.[1] ?? tableIn(s) ?? null,
       })),
   explain_query: (a) =>
     qr(

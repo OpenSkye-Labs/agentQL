@@ -42,3 +42,11 @@ CodeRabbit round 1: 4 findings, all applied.
   text in either direction; `gridSort.check` asserts it (it failed first).
 - The mock routed any statement containing the word `bench_wide`, including `SELECT 'bench_wide'` — applied: string
   literals and comments are blanked first and only a `FROM` reference counts; the demo-table routing uses the same.
+
+CodeRabbit round 2: 2 findings (mock only), both applied.
+
+- The mock's write classifier used the `FROM` table before the write target, so `UPDATE orders … FROM CUSTOMERS`
+  reported `customers` — applied: the `UPDATE`/`INTO` target is matched first (on `codeOnly`).
+- Every `bench_wide` query returned the full 200k × 60 fixture, `count(*)` and `LIMIT n` included — applied:
+  `count(*)` returns one count row, a trailing `LIMIT n` returns the first `n` rows, and the bare query keeps the full
+  fixture.
