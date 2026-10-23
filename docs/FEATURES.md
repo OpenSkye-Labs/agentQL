@@ -141,3 +141,9 @@ Append-only record of shipped behaviour. Newest at the bottom.
   dot instead of a repeated badge, the status bar tints red on production, and an agent write to a production
   connection gets a red approval card with "Run on production" and Deny focused, so Enter cannot approve it. New
   `--danger-fg` token per theme, contrast-checked, fixes white-on-red danger buttons in dark themes.
+- Production prompt for Redis and Mongo (M1 follow-up): on a `production` connection, Redis console commands that
+  write, Save value, TTL changes and Delete key ask first with the command shown; the write check is the backend's
+  read-only allow-list (`redis_is_write`, unknown commands count as writes, a failed check runs nothing). Mongo document
+  insert / replace / delete ask with the document id and collection, and an aggregation with `$out` / `$merge`
+  (`mongo_pipeline_writes`) asks on every run. The prompt text is shared with SQL (`src/lib/production.ts`, control
+  characters in names replaced). Agent writes keep their red approval card.
