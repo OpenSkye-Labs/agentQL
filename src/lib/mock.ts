@@ -5,6 +5,7 @@
  */
 import { createAgent } from "./mockAgent";
 import {
+  BENCH_ROWS,
   SPECS,
   benchWide,
   catalog,
@@ -132,11 +133,11 @@ function runStatement(sql: string, limit: number) {
   // Grid benchmark: the full fixture, ignoring the row limit (that is the point of the benchmark).
   // ponytail: handed over by reference; the app pays IPC + JSON parsing for 200k rows, which the benchmark leaves out.
   if (fromTable(sql) === "bench_wide") {
+    // count(*) and LIMIT n answer without building the full 200k-row fixture.
     const code = codeOnly(sql);
-    const all = benchWide();
-    if (/\bcount\s*\(/i.test(code)) return qr([["count", "int8"]], [[all.rows.length]], sql);
+    if (/\bcount\s*\(/i.test(code)) return qr([["count", "int8"]], [[BENCH_ROWS]], sql);
     const n = Number(/\blimit\s+(\d+)\s*$/i.exec(code.trim())?.[1] ?? NaN);
-    return Number.isFinite(n) ? { ...all, rows: all.rows.slice(0, n), statement: sql } : { ...all, statement: sql };
+    return { ...benchWide(Number.isFinite(n) ? Math.min(n, BENCH_ROWS) : BENCH_ROWS), statement: sql };
   }
   if (/\b(sum|count|avg)\s*\(/i.test(sql) && /group\s+by/i.test(sql)) return { ...chartDataFor(sql), statement: sql };
   // ponytail: rows are capped at 200 so the mock stays fast; an explicit trailing LIMIT is honoured.

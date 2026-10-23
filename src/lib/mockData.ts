@@ -1051,11 +1051,15 @@ const BENCH_TYPES = [
   "int8",
   "varchar(80)",
 ];
+/** Rows in the full benchmark fixture. */
+export const BENCH_ROWS = 200_000;
+/** Only the full fixture is cached; smaller ones (LIMIT, checks) are built on demand and do not evict it. */
 let benchCache: QueryResult | null = null;
 
 /** 200,000 rows × 60 columns of mixed types with NULLs, generated once, deterministically. */
-export function benchWide(rows = 200_000, cols = 60): QueryResult {
-  if (benchCache && benchCache.rows.length === rows && benchCache.columns.length === cols) return benchCache;
+export function benchWide(rows = BENCH_ROWS, cols = 60): QueryResult {
+  const full = rows === BENCH_ROWS && cols === 60;
+  if (full && benchCache) return benchCache;
   const types = Array.from({ length: cols }, (_, c) => (c === 0 ? "int8" : BENCH_TYPES[c % BENCH_TYPES.length]));
   const cell = (r: number, c: number): Cell => {
     if (c === 0) return r + 1;
@@ -1079,7 +1083,7 @@ export function benchWide(rows = 200_000, cols = 60): QueryResult {
     }
   };
   const data: Cell[][] = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => cell(r, c)));
-  benchCache = qr(
+  const result = qr(
     types.map((t, c): [string, string] => [
       c === 0 ? "id" : `c${String(c).padStart(2, "0")}_${t.replace(/\W.*$/, "")}`,
       t,
@@ -1088,5 +1092,6 @@ export function benchWide(rows = 200_000, cols = 60): QueryResult {
     "SELECT * FROM bench_wide",
     { duration_ms: 0 },
   );
-  return benchCache;
+  if (full) benchCache = result;
+  return result;
 }

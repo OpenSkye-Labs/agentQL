@@ -50,3 +50,8 @@ CodeRabbit round 2: 2 findings (mock only), both applied.
 - Every `bench_wide` query returned the full 200k × 60 fixture, `count(*)` and `LIMIT n` included — applied:
   `count(*)` returns one count row, a trailing `LIMIT n` returns the first `n` rows, and the bare query keeps the full
   fixture.
+
+CodeRabbit round 3: 1 finding (mock only), applied.
+
+- `count(*)` and `LIMIT n` over `bench_wide` still built the full 200k-row fixture first — applied: `count(*)` answers
+  from `BENCH_ROWS`, `LIMIT n` builds only `n` rows, and only the full fixture is cached (smaller ones do not evict it).
