@@ -1,4 +1,4 @@
-# Grid at 200k × 60, M5 part B
+# Grid at 200k × 60, M5 part B (PR #33)
 
 Reviewed with the alleo-loop panel (correctness, requirements, maintainability, skeptic) plus a Codex cross-check on
 `git diff dev...HEAD`. 0 blockers; findings applied unless noted.
