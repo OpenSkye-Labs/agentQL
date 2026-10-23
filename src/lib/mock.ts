@@ -315,6 +315,9 @@ if (
         return null;
       }
       if (cmd.startsWith("plugin:event|")) return null;
+      // Save dialogs "pick" a path so export / save flows can be walked through; open dialogs are cancelled.
+      if (cmd === "plugin:dialog|save")
+        return `/home/you/Downloads/${(args.options as { defaultPath?: string } | undefined)?.defaultPath ?? "file"}`;
       if (cmd.startsWith("plugin:dialog|")) return null;
       if (cmd.startsWith("plugin:opener|")) return null;
       const h = handlers[cmd];

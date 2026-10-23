@@ -87,7 +87,7 @@ M4 Schema tools (M)
 M5 Scale (M)
 
 - [ ] 200k×60 benchmark fixture + grid fixes (horizontal virtualisation if needed)
-- [ ] Streaming CSV/JSON/SQL export via server-side cursor with progress + cancel
+- [x] Streaming CSV/JSON/SQL export via server-side cursor with progress + cancel
 - [ ] Streaming SQL dump import; CSV import with column mapping
 
 M6 Connectivity (M)
