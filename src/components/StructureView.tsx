@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { clsx } from "clsx";
 import { Copy, KeyRound, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { api } from "../lib/api";
+import { useNotes } from "../lib/notes";
 import { useStore } from "../lib/store";
 import type { ColumnInfo, ConnectionConfig, TableDetails } from "../lib/types";
 import {
@@ -15,6 +17,7 @@ import {
   renameTableSql,
   type ColumnDraft,
 } from "../lib/ddl";
+import { NoteText } from "./NoteText";
 import { Button, ContextMenu, Dialog, Field, Input, Menu, Spinner, Switch } from "./ui";
 
 type ColumnDialog = { mode: "add" } | { mode: "edit"; col: ColumnInfo };
@@ -22,6 +25,7 @@ type ColumnDialog = { mode: "add" } | { mode: "edit"; col: ColumnInfo };
 /**
  * Structure tab. Every edit generates DDL and opens it in a query tab: the user reviews and runs it there,
  * the same "edit becomes SQL" path the data grid uses, so nothing here touches the database.
+ * Descriptions are data-dictionary notes stored in AgentQL, editable on read-only connections and views too.
  */
 export function StructureView({
   details,
@@ -42,6 +46,12 @@ export function StructureView({
   const [colDialog, setColDialog] = useState<ColumnDialog | null>(null);
   const [indexDialog, setIndexDialog] = useState(false);
   const [rename, setRename] = useState<string | null>(null);
+  const { notes, error: notesError } = useNotes(conn.id);
+  const mine = (notes ?? []).filter((n) => n.schema === schema && n.table === table);
+  const tableNote = mine.find((n) => !n.column && !n.metric)?.text ?? "";
+  const columnNote = (col: string) => mine.find((n) => n.column === col)?.text ?? "";
+  const saveNote = (column: string | null, text: string) =>
+    api.noteSave(conn.id, { schema, table, column, metric: null, text });
 
   const driver = conn.driver;
   const qualified = qualifiedName(driver, schema, table);
@@ -102,6 +112,18 @@ export function StructureView({
           </div>
         )}
       </div>
+      <div className="mb-3 -ml-1 max-w-2xl">
+        {notesError ? (
+          <p className="ml-1 text-danger">Notes unavailable: {notesError}</p>
+        ) : (
+          <NoteText
+            value={tableNote}
+            label={`Description of ${table}`}
+            placeholder="Add a table description the assistant reads"
+            onSave={(text) => saveNote(null, text)}
+          />
+        )}
+      </div>
       <table className="mb-6 w-full border-collapse">
         <thead>
           <tr className="text-left text-muted">
@@ -111,6 +133,7 @@ export function StructureView({
             <th className="border-b border-border py-1 pr-3 font-medium">Nullable</th>
             <th className="border-b border-border py-1 pr-3 font-medium">Default</th>
             <th className="border-b border-border py-1 pr-3 font-medium">Extra / comment</th>
+            <th className="border-b border-border py-1 pr-3 font-medium">Description</th>
             {editable && <th className="border-b border-border py-1 w-8" />}
           </tr>
         </thead>
@@ -128,6 +151,19 @@ export function StructureView({
                 <td className="border-b border-border py-1 pr-3 text-muted">{c.default ?? ""}</td>
                 <td className="border-b border-border py-1 pr-3 text-muted font-sans">
                   {[c.extra, c.comment].filter(Boolean).join(" · ")}
+                </td>
+                <td className="border-b border-border py-0.5 pr-3 min-w-48 font-sans">
+                  {!notesError && (
+                    <NoteText
+                      value={columnNote(c.name)}
+                      label={`Description of ${c.name}`}
+                      placeholder="Add"
+                      className={
+                        columnNote(c.name) ? undefined : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      }
+                      onSave={(text) => saveNote(c.name, text)}
+                    />
+                  )}
                 </td>
                 {editable && (
                   <td className="border-b border-border py-0.5 text-right">

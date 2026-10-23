@@ -24,7 +24,7 @@ import {
   tables,
 } from "./mockData";
 import { statementBounds } from "./sql";
-import type { ConnectionConfig, ScopeEntry, Settings, TableQuery } from "./types";
+import type { ConnectionConfig, Note, ScopeEntry, Settings, TableQuery } from "./types";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -57,6 +57,25 @@ const REDIS_READS = new Set(
     "|",
   ),
 );
+
+/** Data-dictionary notes per connection, in memory, seeded so the structure and notes tabs have content. */
+const notes: Record<string, Note[]> = {
+  pg: [
+    { schema: "public", table: "orders", text: "One row per checkout; refunds are new rows with a negative total." },
+    {
+      schema: "public",
+      table: "orders",
+      column: "status",
+      text: "processing → shipped → delivered; cancelled orders never ship.",
+    },
+    { schema: "public", table: "orders", metric: "revenue", text: "SUM(total) WHERE status <> 'cancelled'" },
+  ],
+};
+const sameTarget = (a: Note, b: Note) =>
+  a.schema === b.schema &&
+  a.table === b.table &&
+  (a.column ?? null) === (b.column ?? null) &&
+  (a.metric ?? null) === (b.metric ?? null);
 
 /** Persisted KV, in memory: what the app saves (a chart added to a dashboard) reads back until reload. */
 const kv: Record<string, unknown> = { dashboards, history, saved_queries: savedQueries };
@@ -215,6 +234,14 @@ const handlers: Record<string, Handler> = {
   set_agent_scope: (a) => {
     const c = connections.find((x) => x.id === a.id);
     if (c) c.agent_scope = (a.scope as ScopeEntry[] | null) ?? null;
+    return null;
+  },
+  notes_list: (a) => notes[String(a.connectionId)] ?? [],
+  note_save: (a) => {
+    const id = String(a.connectionId);
+    const note = { ...(a.note as Note), text: (a.note as Note).text.trim() };
+    notes[id] = [...(notes[id] ?? []).filter((n) => !sameTarget(n, note)), ...(note.text ? [note] : [])];
+    emit("notes:changed", id);
     return null;
   },
   ai_list_sessions: (a) => agent.list(a.connectionId as string | undefined),

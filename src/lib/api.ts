@@ -8,6 +8,7 @@ import type {
   HistoryEntry,
   MongoFind,
   MongoPage,
+  Note,
   QueryResult,
   RowChange,
   ScanResult,
@@ -123,6 +124,9 @@ export const api = {
   writeTextFile: (path: string, contents: string) => invoke<void>("write_text_file", { path, contents }),
   historyAdd: (entry: HistoryEntry) => invoke<void>("history_add", { entry }),
   setAgentScope: (id: string, scope: ScopeEntry[] | null) => invoke<void>("set_agent_scope", { id, scope }),
+  notesList: (connectionId: string) => invoke<Note[]>("notes_list", { connectionId }),
+  /** Insert or replace the note for the same target; blank text deletes it. */
+  noteSave: (connectionId: string, note: Note) => invoke<void>("note_save", { connectionId, note }),
 
   // ai
   aiListSessions: (connectionId?: string) => invoke<ChatSession[]>("ai_list_sessions", { connectionId }),

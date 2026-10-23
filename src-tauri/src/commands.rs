@@ -2,7 +2,7 @@
 
 use crate::AppState;
 use crate::ai::{self, AgentEvent, ChatSession, Ctx};
-use crate::config::{ConnectionConfig, ConnectionSecrets, Settings};
+use crate::config::{ConnectionConfig, ConnectionSecrets, Note, Settings};
 use crate::db::mongo::MongoFind;
 use crate::db::redis::ScanResult;
 use crate::db::{
@@ -11,7 +11,7 @@ use crate::db::{
 use crate::error::{AppError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 fn ctx(app: &AppHandle, st: &AppState) -> Ctx {
     Ctx {
@@ -98,7 +98,13 @@ pub async fn delete_connection(st: State<'_, AppState>, id: String) -> Result<()
         .filter(|c| c.id != id)
         .collect();
     st.store.save_connections(&list)?;
-    st.store.delete_connection_secrets(&id)
+    // Secrets first: an unreadable notes.json must not leave a deleted connection's password behind.
+    let store = st.store.clone();
+    blocking(move || {
+        store.delete_connection_secrets(&id)?;
+        store.delete_notes(&id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -805,6 +811,28 @@ pub fn set_agent_scope(
     conn.agent_scope = scope;
     conn.updated_at = Some(chrono::Utc::now().to_rfc3339());
     st.store.save_connections(&list)
+}
+
+/// The connection's data-dictionary notes (`notes.json`).
+#[tauri::command]
+pub async fn notes_list(st: State<'_, AppState>, connection_id: String) -> Result<Vec<Note>> {
+    let store = st.store.clone();
+    blocking(move || store.notes(&connection_id)).await
+}
+
+/// Insert or replace one note; blank text deletes it. Open tabs refresh on `notes:changed`.
+#[tauri::command]
+pub async fn note_save(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    connection_id: String,
+    note: Note,
+) -> Result<()> {
+    let store = st.store.clone();
+    let id = connection_id.clone();
+    blocking(move || store.save_note(&id, note)).await?;
+    let _ = app.emit("notes:changed", &connection_id);
+    Ok(())
 }
 
 /// Prepend one query-history entry (the UI's own runs); agent runs go through the same store call.

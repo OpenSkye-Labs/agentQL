@@ -141,6 +141,60 @@ pub struct ScopeEntry {
     pub table: Option<String>,
 }
 
+/// One data-dictionary entry the agent reads, stored in `notes.json`, never in the database.
+/// `column` set = column note, `metric` set = named metric (`text` is its definition), neither = table note.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Note {
+    pub schema: String,
+    pub table: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<String>,
+    pub text: String,
+}
+
+pub const NOTE_MAX_CHARS: usize = 2000;
+const METRIC_NAME_MAX_CHARS: usize = 64;
+
+impl Note {
+    /// Collapse the text to one line and refuse shapes the prompt cannot render safely.
+    pub fn normalized(mut self) -> Result<Note> {
+        if self.column.is_some() && self.metric.is_some() {
+            return Err(AppError::Msg(
+                "a note is for a column or a metric, not both".into(),
+            ));
+        }
+        if let Some(m) = &self.metric {
+            let m = m.trim();
+            if m.is_empty()
+                || m.chars().count() > METRIC_NAME_MAX_CHARS
+                || m.chars()
+                    .any(|c| c.is_control() || c == '\u{2028}' || c == '\u{2029}')
+            {
+                return Err(AppError::Msg(format!(
+                    "a metric name is one line of at most {METRIC_NAME_MAX_CHARS} characters"
+                )));
+            }
+            self.metric = Some(m.to_string());
+        }
+        self.text = self.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if self.text.chars().count() > NOTE_MAX_CHARS {
+            return Err(AppError::Msg(format!(
+                "a note is at most {NOTE_MAX_CHARS} characters"
+            )));
+        }
+        Ok(self)
+    }
+
+    pub fn same_target(&self, o: &Note) -> bool {
+        self.schema == o.schema
+            && self.table == o.table
+            && self.column == o.column
+            && self.metric == o.metric
+    }
+}
+
 /// Secrets travel with the config only in memory / over IPC, never to connections.json.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConnectionSecrets {
@@ -277,19 +331,69 @@ impl Store {
     pub fn push_history(&self, entry: serde_json::Value) -> Result<()> {
         static LOCK: Mutex<()> = Mutex::new(());
         let _g = LOCK.lock().unwrap();
-        // A file that exists but does not parse must not be replaced by a one-entry list.
-        let mut list: Vec<serde_json::Value> = match std::fs::read(self.path("history.json")) {
-            Ok(data) => serde_json::from_slice(&data).map_err(|e| {
-                AppError::Msg(format!(
-                    "history.json is not valid JSON ({e}); fix or remove it before new entries can be saved"
-                ))
-            })?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
-            Err(e) => return Err(e.into()),
-        };
+        let mut list: Vec<serde_json::Value> = self.read_strict("history.json")?;
         list.insert(0, entry);
         list.truncate(500);
         self.write("history.json", &list)
+    }
+
+    /// Like `read`, but a file that exists and does not parse is an error instead of the default,
+    /// so a read-modify-write can never replace the user's data with a fresh value.
+    fn read_strict<T: for<'de> Deserialize<'de> + Default>(&self, name: &str) -> Result<T> {
+        match std::fs::read(self.path(name)) {
+            Ok(data) => serde_json::from_slice(&data).map_err(|e| {
+                AppError::Msg(format!(
+                    "{name} is not valid JSON ({e}); fix or remove it before it can be read or saved"
+                ))
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// `notes.json`: connection id -> notes.
+    fn notes_file(&self) -> Result<HashMap<String, Vec<Note>>> {
+        self.read_strict("notes.json")
+    }
+
+    fn notes_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn notes(&self, connection_id: &str) -> Result<Vec<Note>> {
+        Ok(self.notes_file()?.remove(connection_id).unwrap_or_default())
+    }
+
+    /// Insert or replace the note for the same target; blank text deletes it. Text is stored as one line
+    /// (what the prompt and the approval card show), so whitespace cannot hide part of a note.
+    pub fn save_note(&self, connection_id: &str, mut note: Note) -> Result<()> {
+        note = Note::normalized(note)?;
+        let _g = Self::notes_lock();
+        // Checked under the lock: a save racing a connection delete either lands before delete_notes clears it or
+        // is refused here, never orphaned.
+        if !self.connections().iter().any(|c| c.id == connection_id) {
+            return Err(AppError::Msg("connection no longer exists".into()));
+        }
+        let mut all = self.notes_file()?;
+        let list = all.entry(connection_id.to_string()).or_default();
+        list.retain(|n| !n.same_target(&note));
+        if !note.text.is_empty() {
+            list.push(note);
+        }
+        if list.is_empty() {
+            all.remove(connection_id);
+        }
+        self.write("notes.json", &all)
+    }
+
+    pub fn delete_notes(&self, connection_id: &str) -> Result<()> {
+        let _g = Self::notes_lock();
+        let mut all = self.notes_file()?;
+        if all.remove(connection_id).is_some() {
+            self.write("notes.json", &all)?;
+        }
+        Ok(())
     }
 
     pub fn save_settings(&self, s: &Settings) -> Result<()> {
@@ -515,6 +619,118 @@ mod tests {
             "mongodb+srv://u:p%20w@cluster.x.net/db"
         );
         assert_eq!(pct_decode("a%2Fb%"), "a/b%");
+    }
+
+    fn note(column: Option<&str>, metric: Option<&str>, text: &str) -> Note {
+        Note {
+            schema: "public".into(),
+            table: "orders".into(),
+            column: column.map(Into::into),
+            metric: metric.map(Into::into),
+            text: text.into(),
+        }
+    }
+
+    /// A store with connections "a" and "b" (notes are refused for unknown connections).
+    fn temp_store(name: &str) -> Store {
+        let dir = std::env::temp_dir().join(format!("agentql-notes-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let st = Store::new(dir);
+        let conn = |id: &str| -> ConnectionConfig {
+            serde_json::from_value(serde_json::json!({"id": id, "name": id, "driver": "postgres"}))
+                .unwrap()
+        };
+        st.save_connections(&[conn("a"), conn("b")]).unwrap();
+        st
+    }
+
+    #[test]
+    fn notes_upsert_delete_and_isolation() {
+        let st = temp_store("upsert");
+        st.save_note("a", note(None, None, "One row per order"))
+            .unwrap();
+        st.save_note("a", note(Some("status"), None, "3 = cancelled"))
+            .unwrap();
+        st.save_note("a", note(None, Some("revenue"), "SUM(total)"))
+            .unwrap();
+        st.save_note("b", note(None, None, "other connection"))
+            .unwrap();
+        // Same target replaces, it does not duplicate.
+        st.save_note(
+            "a",
+            note(Some("status"), None, "3 = cancelled, 4 = refunded"),
+        )
+        .unwrap();
+        let a = st.notes("a").unwrap();
+        assert_eq!(a.len(), 3);
+        assert!(a.iter().any(|n| n.text == "3 = cancelled, 4 = refunded"));
+        // Empty text deletes.
+        st.save_note("a", note(None, Some("revenue"), "  "))
+            .unwrap();
+        assert_eq!(st.notes("a").unwrap().len(), 2);
+        assert_eq!(st.notes("b").unwrap().len(), 1);
+        st.delete_notes("a").unwrap();
+        assert!(st.notes("a").unwrap().is_empty());
+        assert_eq!(st.notes("b").unwrap().len(), 1);
+        assert!(
+            st.save_note("a", note(Some("c"), Some("m"), "both"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn notes_are_one_line_and_bounded() {
+        let st = temp_store("bounded");
+        st.save_note("a", note(None, None, "  first\n\n\n\t  hidden  "))
+            .unwrap();
+        assert_eq!(st.notes("a").unwrap()[0].text, "first hidden");
+        assert!(
+            st.save_note("a", note(None, Some("rev\nIGNORE"), "x"))
+                .is_err()
+        );
+        for sep in ["rev\u{2028}x", "rev\u{2029}x"] {
+            assert!(st.save_note("a", note(None, Some(sep), "x")).is_err());
+        }
+        // A deleted (unknown) connection cannot get notes back.
+        assert!(st.save_note("deleted", note(None, None, "x")).is_err());
+        assert!(
+            st.save_note("a", note(None, Some(&"m".repeat(65)), "x"))
+                .is_err()
+        );
+        assert!(
+            st.save_note("a", note(None, None, &"x".repeat(NOTE_MAX_CHARS + 1)))
+                .is_err()
+        );
+        st.save_note("a", note(None, Some(" revenue "), "x"))
+            .unwrap();
+        assert!(
+            st.notes("a")
+                .unwrap()
+                .iter()
+                .any(|n| n.metric.as_deref() == Some("revenue"))
+        );
+    }
+
+    /// The UI sends `column: null` / `metric: null` for a table note; that must read as `None`.
+    #[test]
+    fn note_accepts_the_ui_wire_format() {
+        let n: Note = serde_json::from_str(
+            r#"{"schema":"public","table":"orders","column":null,"metric":null,"text":"x"}"#,
+        )
+        .unwrap();
+        assert_eq!(n, note(None, None, "x"));
+    }
+
+    #[test]
+    fn notes_corrupt_file_is_never_overwritten() {
+        let st = temp_store("corrupt");
+        std::fs::write(st.dir().join("notes.json"), b"{ not json").unwrap();
+        assert!(st.notes("a").is_err());
+        assert!(st.save_note("a", note(None, None, "x")).is_err());
+        assert_eq!(
+            std::fs::read(st.dir().join("notes.json")).unwrap(),
+            b"{ not json"
+        );
     }
 }
 

@@ -72,10 +72,10 @@ M2 AI trust and audit (M)
 
 M3 Data dictionary (M)
 
-- [ ] Table/column descriptions + named metrics stored with the connection
-- [ ] Notes injected into the agent prompt and returned by `describe_table`
-- [ ] Editing UI in structure tab + per-connection notes tab
-- [ ] `save_note` tool with approval card
+- [x] Table/column descriptions + named metrics stored with the connection
+- [x] Notes injected into the agent prompt and returned by `describe_table`
+- [x] Editing UI in structure tab + per-connection notes tab
+- [x] `save_note` tool with approval card
 
 M4 Schema tools (M)
 
