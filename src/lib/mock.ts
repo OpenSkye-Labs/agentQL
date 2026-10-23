@@ -90,7 +90,7 @@ const handlers: Record<string, Handler> = {
   list_connections: () => [...connections],
   save_connection: (a) => {
     // Kept in memory like the scope, so an edit (e.g. tagging a connection production) shows until reload.
-    const c = { ...(a.config as ConnectionConfig), id: (a.config as ConnectionConfig).id || "new" };
+    const c = { ...(a.config as ConnectionConfig), id: (a.config as ConnectionConfig).id || crypto.randomUUID() };
     const i = connections.findIndex((x) => x.id === c.id);
     if (i >= 0) connections[i] = c;
     else connections.push(c);
@@ -156,14 +156,15 @@ const handlers: Record<string, Handler> = {
   redis_exec: () => "OK",
   // ponytail: mock approximation of the backend allow-list.
   redis_is_write: (a) => {
-    const first =
-      (a.command ? String(a.command).trim().split(/\s+/)[0] : ((a.args as string[] | null)?.[0] ?? "")) || "";
+    const first = (Array.isArray(a.cmd) ? a.cmd[0] : String(a.cmd).trim().split(/\s+/)[0]) ?? "";
     return !/^(get|mget|hget|hgetall|hkeys|lrange|llen|smembers|scard|zrange|zcard|scan|info|ttl|type|exists|dbsize)$/i.test(
       first,
     );
   },
-  mongo_pipeline_writes: (a) =>
-    Array.isArray(a.pipeline) && a.pipeline.some((s) => s && typeof s === "object" && ("$out" in s || "$merge" in s)),
+  mongo_pipeline_write_target: (a) => {
+    const stage = (Array.isArray(a.pipeline) ? a.pipeline : []).find((s) => s && ("$out" in s || "$merge" in s));
+    return stage ? ("$out" in stage ? `$out replaces ${JSON.stringify(stage.$out)}` : "$merge into …") : null;
+  },
   redis_info: () => ({ redis_version: "7.4.1", dbsize: "21482", used_memory_human: "38.20M" }),
   mongo_collections: () => mongoCollections,
   mongo_find: (a) => {

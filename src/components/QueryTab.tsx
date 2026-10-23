@@ -5,7 +5,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { Bot, Download, FileText, History, Keyboard, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
 import { snippetCompletion } from "@codemirror/autocomplete";
 import { api, errMsg } from "../lib/api";
-import { plain, productionPrompt } from "../lib/production";
+import { productionPrompt } from "../lib/production";
 import { useStore, useConnection, type Tab } from "../lib/store";
 import type { QueryResult, SavedQuery, WriteInfo } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
@@ -164,7 +164,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
         }
         const prompt = productionPrompt(
           conn,
-          writes.map((w) => `${plain(w.kind)}${w.table ? ` on ${plain(w.table)}` : ""}`),
+          writes.map((w) => `${w.kind}${w.table ? ` on ${w.table}` : ""}`),
         );
         if (prompt) lines.push(prompt);
       }

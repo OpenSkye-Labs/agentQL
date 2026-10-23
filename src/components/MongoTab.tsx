@@ -7,7 +7,7 @@ import type { Cell, QueryResult } from "../lib/types";
 import { ResultGrid } from "./ResultGrid";
 import { Button, Dialog, Input, Spinner, Empty, Tooltip, Textarea } from "./ui";
 import { fmtCount } from "../lib/format";
-import { confirmProduction, plain } from "../lib/production";
+import { clipArgs, confirmProduction } from "../lib/production";
 
 type MTab = Extract<Tab, { kind: "mongo" }>;
 
@@ -30,8 +30,8 @@ export function MongoTab({ tab }: { tab: MTab }) {
   const [info, setInfo] = useState<{ indexes: unknown[]; fields: Record<string, string>; stats: unknown } | null>(null);
   const [showInfo, setShowInfo] = useState(false);
 
-  const where = plain(`${tab.db}.${tab.collection}`);
-  const idText = (id: unknown) => plain(JSON.stringify(id) ?? "?").slice(0, 120);
+  const where = `${tab.db}.${tab.collection}`;
+  const idText = (id: unknown) => clipArgs([JSON.stringify(id) ?? "?"]);
 
   const parse = (s: string, fallback: unknown) => {
     if (!s.trim()) return fallback;
@@ -56,13 +56,17 @@ export function MongoTab({ tab }: { tab: MTab }) {
         setTotal(r.total);
       } else {
         const p = parse(pipeline, []);
-        // $out / $merge write a collection, on every run (Run, paging, reload after an edit).
-        if (
-          conn.environment === "production" &&
-          (await api.mongoPipelineWrites(p)) &&
-          !confirmProduction(conn, [`aggregate on ${where} that writes a collection ($out / $merge)`])
-        )
-          return;
+        // $out / $merge write a collection, on every run (Run, reload after an edit). Name the collection written.
+        if (conn.environment === "production") {
+          let target: string | null;
+          try {
+            target = await api.mongoPipelineWriteTarget(p);
+          } catch (e) {
+            toast(`Could not check the pipeline, not running on production: ${errMsg(e)}`, "error");
+            return;
+          }
+          if (target && !confirmProduction(conn, [`aggregate on ${where}: ${target}`])) return;
+        }
         const r = await api.mongoAggregate(conn.id, tab.db, tab.collection, p, 1000);
         setDocs(r);
         setTotal(null);
@@ -72,7 +76,7 @@ export function MongoTab({ tab }: { tab: MTab }) {
     } finally {
       setLoading(false);
     }
-  }, [conn, tab.db, tab.collection, mode, filter, sort, pipeline, limit, skip]);
+  }, [conn, tab.db, tab.collection, mode, filter, sort, pipeline, limit, skip, toast, where]);
 
   useEffect(() => {
     void load();
@@ -123,11 +127,7 @@ export function MongoTab({ tab }: { tab: MTab }) {
 
   const deleteDoc = async (d: Record<string, unknown>) => {
     if (!conn) return;
-    const ok =
-      conn.environment === "production"
-        ? confirmProduction(conn, [`delete document ${idText(d._id)} from ${where}`])
-        : confirm("Delete this document?");
-    if (!ok) return;
+    if (!confirmProduction(conn, [`delete document ${idText(d._id)} from ${where}`], "Delete this document?")) return;
     try {
       await api.mongoDelete(conn.id, tab.db, tab.collection, d._id);
       await load();

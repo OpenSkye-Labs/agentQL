@@ -75,7 +75,7 @@ pub fn run() {
             commands::redis_command,
             commands::redis_exec,
             commands::redis_is_write,
-            commands::mongo_pipeline_writes,
+            commands::mongo_pipeline_write_target,
             commands::redis_info,
             commands::mongo_collections,
             commands::mongo_find,

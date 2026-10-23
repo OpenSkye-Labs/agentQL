@@ -6,7 +6,7 @@ import { useStore, useConnection, type Tab } from "../lib/store";
 import type { RedisKey } from "../lib/types";
 import { Button, Input, Spinner, Empty, Tooltip } from "./ui";
 import { fmtBytes } from "../lib/format";
-import { confirmProduction, plain } from "../lib/production";
+import { clipArgs, confirmProduction } from "../lib/production";
 
 type RTab = Extract<Tab, { kind: "redis" }>;
 
@@ -30,20 +30,30 @@ export function RedisTab({ tab }: { tab: RTab }) {
   const [cmd, setCmd] = useState("");
   const [log, setLog] = useState<{ cmd: string; out: string; err?: boolean }[]>([]);
   const [info, setInfo] = useState<Record<string, string> | null>(null);
-  // Held across classification + confirmation so a second Enter cannot queue a duplicate command.
+  // Held across classification + confirmation (not the command itself) so a second click or Enter cannot open a
+  // second prompt for the same write.
   const guarding = useRef(false);
 
-  /** On production, ask before a write. Classification errors fail closed. */
-  const allowWrite = async (cmd: { command: string } | { args: string[] }, shown: string) => {
+  /** On production, ask before a write; false when cancelled or busy. Classification errors fail closed.
+   * `cmd` is the console line or the structured args. */
+  const allowWrite = async (cmd: string | string[]) => {
     if (!conn || conn.environment !== "production") return true;
-    let writes: boolean;
+    if (guarding.current) return false;
+    guarding.current = true;
     try {
-      writes = await api.redisIsWrite(cmd);
-    } catch (e) {
-      toast(`Could not classify the command, not running on production: ${errMsg(e)}`, "error");
-      return false;
+      let writes: boolean;
+      try {
+        writes = await api.redisIsWrite(cmd);
+      } catch (e) {
+        toast(`Could not classify the command, not running on production: ${errMsg(e)}`, "error");
+        return false;
+      }
+      // Display only: the backend runs the line with its own quoting rules.
+      const shown = clipArgs(typeof cmd === "string" ? cmd.trim().split(/\s+/) : cmd);
+      return !writes || confirmProduction(conn, [shown]);
+    } finally {
+      guarding.current = false;
     }
-    return !writes || confirmProduction(conn, [plain(shown).slice(0, 200)]);
   };
 
   const scan = useCallback(
@@ -90,22 +100,17 @@ export function RedisTab({ tab }: { tab: RTab }) {
   };
 
   const runCmd = async (line: string) => {
-    if (!conn || !line.trim() || guarding.current) return;
-    guarding.current = true;
+    if (!conn || !line.trim()) return;
+    // Cancelled: the command stays in the input.
+    if (!(await allowWrite(line))) return;
     try {
-      // Cancelled: the command stays in the input.
-      if (!(await allowWrite({ command: line }, line))) return;
-      try {
-        const out = await api.redisCommand(conn.id, line);
-        setLog((l) => [...l, { cmd: line, out: typeof out === "string" ? out : JSON.stringify(out, null, 2) }]);
-        afterWrite(line.trim().split(/\s+/)[0]);
-      } catch (e) {
-        setLog((l) => [...l, { cmd: line, out: errMsg(e), err: true }]);
-      }
-      setCmd("");
-    } finally {
-      guarding.current = false;
+      const out = await api.redisCommand(conn.id, line);
+      setLog((l) => [...l, { cmd: line, out: typeof out === "string" ? out : JSON.stringify(out, null, 2) }]);
+      afterWrite(line.trim().split(/\s+/)[0]);
+    } catch (e) {
+      setLog((l) => [...l, { cmd: line, out: errMsg(e), err: true }]);
     }
+    setCmd("");
   };
 
   /** Structured commands: keys/values travel as separate arguments, so no quoting is involved. Resolves to
@@ -113,7 +118,7 @@ export function RedisTab({ tab }: { tab: RTab }) {
   const exec = async (args: string[]) => {
     if (!conn) return false;
     const shown = args.map((a) => (/\s|"/.test(a) ? JSON.stringify(a) : a)).join(" ");
-    if (!(await allowWrite({ args }, shown))) return false;
+    if (!(await allowWrite(args))) return false;
     try {
       const out = await api.redisExec(conn.id, args);
       setLog((l) => [...l, { cmd: shown, out: typeof out === "string" ? out : JSON.stringify(out, null, 2) }]);

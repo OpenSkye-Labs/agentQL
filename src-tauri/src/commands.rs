@@ -579,14 +579,21 @@ pub async fn redis_exec(st: State<'_, AppState>, id: String, args: Vec<String>) 
     redis(&s)?.exec(&args).await
 }
 
-/// Whether a Redis command (raw line or structured args) writes, by the read-only allow-list (unknown = write),
-/// so the production prompt and read-only enforcement never disagree.
+/// A Redis command as typed in the console, or as structured args.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum RedisCmd {
+    Line(String),
+    Args(Vec<String>),
+}
+
+/// Whether a Redis command writes, by the read-only allow-list (unknown = write), so the production prompt and
+/// read-only enforcement never disagree.
 #[tauri::command]
-pub fn redis_is_write(command: Option<String>, args: Option<Vec<String>>) -> bool {
-    match (command, args) {
-        (Some(line), _) => !crate::db::redis::is_read_only_command(&line),
-        (None, Some(args)) => !crate::db::redis::is_read_only_args(&args),
-        (None, None) => true,
+pub fn redis_is_write(cmd: RedisCmd) -> bool {
+    match cmd {
+        RedisCmd::Line(line) => !crate::db::redis::is_read_only_command(&line),
+        RedisCmd::Args(args) => !crate::db::redis::is_read_only_args(&args),
     }
 }
 
@@ -598,10 +605,10 @@ pub async fn redis_info(st: State<'_, AppState>, id: String) -> Result<Value> {
 
 // ----------------------------------------------------------------- mongo
 
-/// Whether an aggregation pipeline writes (`$out` / `$merge`), same check as read-only mode.
+/// What an aggregation pipeline writes (`$out` / `$merge` and the target collection), or null when it is read-only.
 #[tauri::command]
-pub fn mongo_pipeline_writes(pipeline: Value) -> bool {
-    crate::db::mongo::pipeline_writes(&pipeline)
+pub fn mongo_pipeline_write_target(pipeline: Value) -> Option<String> {
+    crate::db::mongo::pipeline_write_target(&pipeline)
 }
 
 #[tauri::command]
@@ -1010,21 +1017,50 @@ mod tests {
     /// The production prompt must agree with read-only enforcement: same classifiers, unknown = write.
     #[test]
     fn write_classifiers_match_read_only_mode() {
-        assert!(!redis_is_write(Some(r#"GET "my key""#.into()), None));
-        assert!(redis_is_write(Some(r#"SET "my key" v"#.into()), None));
-        assert!(redis_is_write(Some("FROBNICATE x".into()), None));
-        assert!(redis_is_write(None, Some(vec!["DEL".into(), "k".into()])));
-        assert!(!redis_is_write(
-            None,
-            Some(vec!["HGETALL".into(), "k".into()])
+        let line = |s: &str| RedisCmd::Line(s.into());
+        let args = |a: &[&str]| RedisCmd::Args(a.iter().map(|s| s.to_string()).collect());
+        assert!(!redis_is_write(line(r#"GET "my key""#)));
+        assert!(redis_is_write(line(r#"SET "my key" v"#)));
+        assert!(redis_is_write(line("FROBNICATE x")));
+        assert!(redis_is_write(args(&["DEL", "k"])));
+        assert!(!redis_is_write(args(&["HGETALL", "k"])));
+        // The UI sends a string or an array; both deserialise.
+        assert!(matches!(
+            serde_json::from_value(json!("GET k")).unwrap(),
+            RedisCmd::Line(_)
         ));
-        assert!(redis_is_write(None, None));
-        assert!(mongo_pipeline_writes(
-            json!([{"$match": {}}, {"$out": "copy"}])
+        assert!(matches!(
+            serde_json::from_value(json!(["GET", "k"])).unwrap(),
+            RedisCmd::Args(_)
         ));
-        assert!(mongo_pipeline_writes(json!([{"$merge": {"into": "t"}}])));
-        assert!(!mongo_pipeline_writes(
-            json!([{"$match": {}}, {"$limit": 5}])
-        ));
+        let target = |p: Value| mongo_pipeline_write_target(p);
+        assert_eq!(
+            target(json!([{"$match": {}}, {"$out": "users"}])).as_deref(),
+            Some("$out replaces users")
+        );
+        assert_eq!(
+            target(json!([{"$out": {"db": "auth", "coll": "users"}}])).as_deref(),
+            Some("$out replaces auth.users")
+        );
+        assert_eq!(
+            target(json!([{"$merge": "t"}])).as_deref(),
+            Some("$merge into t")
+        );
+        assert_eq!(
+            target(json!([{"$merge": {"into": {"db": "a", "coll": "t"}, "on": "_id"}}])).as_deref(),
+            Some("$merge into a.t")
+        );
+        assert_eq!(target(json!([{"$match": {}}, {"$limit": 5}])), None);
+        // Every pipeline the read-only check calls a write gets a target line, and vice versa.
+        for p in [
+            json!([{"$out": 5}]),
+            json!([{"$merge": {"into": 1}}]),
+            json!([{"$limit": 1}]),
+        ] {
+            assert_eq!(
+                target(p.clone()).is_some(),
+                crate::db::mongo::pipeline_writes(&p)
+            );
+        }
     }
 }
