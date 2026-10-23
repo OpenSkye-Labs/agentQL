@@ -438,7 +438,12 @@ export function ResultGrid({
           role="grid"
           aria-rowcount={order.length}
           aria-colcount={cols.length + 1}
-          aria-activedescendant={sel ? `${gridId}-${sel.r}-${sel.c}` : undefined}
+          // Only while the selected cell is rendered: scrolled out, it has no element to point at.
+          aria-activedescendant={
+            sel && vrows.some((v) => v.index === sel.r) && vcols.some((v) => v.index === sel.c)
+              ? `${gridId}-${sel.r}-${sel.c}`
+              : undefined
+          }
           onFocus={() => {
             if (!sel && order.length && cols.length) {
               setSel({ r: 0, c: 0 });

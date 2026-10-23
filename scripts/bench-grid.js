@@ -18,11 +18,20 @@
     if (cmd === "run_query") arrived = performance.now();
     return r;
   };
-  button("Run").click();
-  while (!arrived || !document.body.textContent.includes("200,000 rows")) await frame();
-  await frame();
-  const firstPaint = performance.now() - arrived;
-  ipc.invoke = invoke;
+  let firstPaint;
+  try {
+    button("Run").click();
+    // Bounded: a failed query or a missing fixture reports an error instead of waiting forever.
+    const deadline = performance.now() + 60_000;
+    while (!arrived || !document.body.textContent.includes("200,000 rows")) {
+      if (performance.now() > deadline) return JSON.stringify({ error: "no 200,000-row result within 60 s" });
+      await frame();
+    }
+    await frame();
+    firstPaint = performance.now() - arrived;
+  } finally {
+    ipc.invoke = invoke;
+  }
 
   const grid = document.querySelector("[role=grid]");
   /** Scroll back and forth for `ms`; count frames and the ones that took longer than 50 ms. */

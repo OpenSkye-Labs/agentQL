@@ -31,3 +31,14 @@ ref that `mouseup` had already cleared).
 PR #32 follow-up: the live Cancel tests that could not run then (Docker) passed on 2026-10-24. Postgres returned 0.3 ms
 after Cancel mid-result and during `pg_sleep(30)`, MySQL 4.5 ms mid-result, with no file left and the pool usable.
 `gridSort.check` was written before `gridSort.ts` and ran red first; the fixture check after the fixture.
+
+CodeRabbit round 1: 4 findings, all applied.
+
+- The benchmark script waited forever on a failed query and left its `invoke` wrapper installed — applied: a 60 s
+  deadline that reports an error, and the wrapper is restored in `finally`.
+- `aria-activedescendant` pointed at a cell scrolled out with the mouse (no element) — applied: set only while the
+  selected cell is rendered (this also covers the earlier "not changed" note).
+- A mixed column (`10` and `"2"`) did not put numbers before text, contrary to the check — applied: numbers sort before
+  text in either direction; `gridSort.check` asserts it (it failed first).
+- The mock routed any statement containing the word `bench_wide`, including `SELECT 'bench_wide'` — applied: string
+  literals and comments are blanked first and only a `FROM` reference counts; the demo-table routing uses the same.
