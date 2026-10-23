@@ -3,12 +3,13 @@ import { clsx } from "clsx";
 import { ChevronLeft, ChevronRight, Filter, Plus, RefreshCw, Save, Trash2, Undo2, Copy, Bot } from "lucide-react";
 import { api, errMsg } from "../lib/api";
 import { useStore, useConnection, type Tab } from "../lib/store";
-import type { Cell, ForeignKeyInfo, QueryResult, RowChange, TableDetails } from "../lib/types";
+import type { Cell, ExportFormat, ForeignKeyInfo, QueryResult, RowChange, TableDetails } from "../lib/types";
 import { fmtCount, fmtDuration } from "../lib/format";
 import { keyFilter } from "../lib/sql";
 import { ResultGrid, type GridEdit } from "./ResultGrid";
 import { StructureView } from "./StructureView";
 import { Button, Dialog, Input, Select, Spinner, Tooltip, Empty } from "./ui";
+import { ExportMenu, useExport } from "./ExportMenu";
 
 type TTab = Extract<Tab, { kind: "table" }>;
 const PAGE_SIZES = [100, 250, 500, 1000];
@@ -42,6 +43,24 @@ export function TableTab({ tab }: { tab: TTab }) {
   const pks = useMemo(() => details?.columns.filter((c) => c.is_primary).map((c) => c.name) ?? [], [details]);
   const types = useMemo(() => Object.fromEntries(details?.columns.map((c) => [c.name, c.data_type]) ?? []), [details]);
   const editable = !!conn && !conn.read_only && pks.length > 0 && tab.tableKind === "table";
+
+  const exporter = useExport();
+  // The whole table with the filter and sort the grid shows (limit/offset are ignored by the export).
+  const exportTable = (format: ExportFormat) => {
+    if (!conn) return;
+    const query = {
+      schema: tab.schema,
+      table: tab.table,
+      filter: filter || null,
+      order_by: sort?.column ?? null,
+      order_desc: sort?.desc ?? false,
+      limit: 0,
+      offset: 0,
+    };
+    void exporter.run(tab.table, format, async (id, path) => ({
+      rows: await api.exportTable(id, conn.id, query, path, format),
+    }));
+  };
 
   const load = useCallback(async () => {
     if (!conn) return;
@@ -304,6 +323,7 @@ export function TableTab({ tab }: { tab: TTab }) {
                 {loading ? <Spinner /> : <RefreshCw size={13} />}
               </Button>
             </Tooltip>
+            <ExportMenu exporter={exporter} disabled={!page} onPick={exportTable} />
             {editable && (
               <Tooltip label="Add row">
                 <Button size="sm" variant="ghost" onClick={() => setInserts((n) => n + 1)} aria-label="Add row">

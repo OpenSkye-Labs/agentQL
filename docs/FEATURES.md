@@ -162,3 +162,10 @@ Append-only record of shipped behaviour. Newest at the bottom.
   asks on every run, naming the collection it writes (`mongo_pipeline_write_target`). Long arguments are clipped one
   by one with a length marker so no target is hidden. The prompt text is shared with SQL (`src/lib/production.ts`, control
   characters in names replaced). Agent writes keep their red approval card.
+- Streaming export (M5): Export in a table tab writes the whole table with its filter and sort; in a query tab, a
+  result cut at the row limit is re-run and every row written. Rows stream from the database through a bounded
+  channel (500-row batches, 4 in flight) to a writer thread, so memory stays flat; the toolbar shows "Exporting… N
+  rows" with Cancel. The statement runs in the driver's read-only mode (read-only transaction, SQLite `query_only`), a
+  statement that is not read-only is never re-run (its loaded rows are written and the toast says so), and output
+  goes to a temp file renamed into place only on success, so Cancel or an error leaves no partial file and never
+  replaces an existing one. CSV / JSON / SQL output is unchanged (`src-tauri/src/export.rs`).

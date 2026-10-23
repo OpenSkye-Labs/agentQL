@@ -7,6 +7,11 @@ cd src-tauri && cargo test
 pnpm typecheck && pnpm build
 ```
 
+`cargo test --test export` exports a 200k-row SQLite table through the streaming path (every row on disk, cancel and
+a refused write leave no file or temp file). With the Postgres and MySQL containers below up,
+`cargo test --test live export_cancel -- --ignored --nocapture` checks that Cancel returns within two seconds
+mid-result and, on Postgres, while the server has not produced a first row (`pg_sleep`).
+
 ## Live driver smoke tests
 
 Throwaway containers on non-default ports (safe to run next to your own databases):
@@ -95,5 +100,6 @@ Things worth timing in the app, cold then warm:
 - Sort that tab by `nconst`, then filter `category = 'director'`.
 - ERD of the `imdb` schema and of `public`; schema diff `imdb` → `public`.
 - Completion after `p.` in `SELECT p. FROM imdb.title_principals p JOIN imdb.name_basics n ON n.nconst = p.nconst`.
-- Export 1 M rows of `pgbench_accounts` to CSV (memory stays flat?).
+- Export 1 M rows of `pgbench_accounts` to CSV from the table tab: the row count climbs, the app's RSS stays flat
+  (about 3,000 rows in flight at most), Cancel returns within a second and removes the partial file.
 - Ask the agent: "Which directors have the most titles rated above 8 with at least 10k votes?"

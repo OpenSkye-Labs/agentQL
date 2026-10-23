@@ -412,64 +412,117 @@ pub fn ssh_forget_host(st: State<'_, AppState>, host: String, port: u16) -> Resu
     crate::ssh::forget_host(&st.manager.known_hosts_path, &host, port)
 }
 
+fn is_mysql(driver: Option<crate::config::Driver>) -> bool {
+    matches!(
+        driver,
+        Some(crate::config::Driver::Mysql | crate::config::Driver::Mariadb)
+    )
+}
+
+/// Write rows the UI already holds (a result whose statement must not be re-run).
 #[tauri::command]
 pub async fn export_rows(
     path: String,
-    format: String,
+    format: crate::export::Format,
     columns: Vec<String>,
     rows: Vec<Vec<Value>>,
+    driver: Option<crate::config::Driver>,
 ) -> Result<usize> {
-    let cell = |v: &Value| match v {
-        Value::Null => String::new(),
-        Value::String(s) => s.clone(),
-        o => o.to_string(),
-    };
-    match format.as_str() {
-        "json" => {
-            let objs: Vec<Value> = rows
-                .iter()
-                .map(|r| Value::Object(columns.iter().cloned().zip(r.iter().cloned()).collect()))
-                .collect();
-            std::fs::write(&path, serde_json::to_vec_pretty(&objs)?)?;
+    blocking(move || {
+        let mut w = crate::export::ExportWriter::create(path.as_ref(), format)?.sql_style(
+            crate::export::SqlStyle {
+                mysql: is_mysql(driver),
+                table: None,
+            },
+        );
+        w.columns(&columns)?;
+        for r in &rows {
+            w.row(r)?;
         }
-        "sql" => {
-            let table = std::path::Path::new(&path)
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or("export".into());
-            let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
-            let mut out = String::new();
-            for r in &rows {
-                let vals: Vec<String> = r
-                    .iter()
-                    .map(|v| match v {
-                        Value::Null => "NULL".into(),
-                        Value::Number(n) => n.to_string(),
-                        Value::Bool(b) => b.to_string().to_uppercase(),
-                        o => format!("'{}'", cell(o).replace('\'', "''")),
-                    })
-                    .collect();
-                out.push_str(&format!(
-                    "INSERT INTO {} ({}) VALUES ({});\n",
-                    q(&table),
-                    columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", "),
-                    vals.join(", ")
-                ));
-            }
-            std::fs::write(&path, out)?;
-        }
-        _ => {
-            let mut w = csv::Writer::from_path(&path).map_err(|e| AppError::Msg(e.to_string()))?;
-            w.write_record(&columns)
-                .map_err(|e| AppError::Msg(e.to_string()))?;
-            for r in &rows {
-                w.write_record(r.iter().map(cell))
-                    .map_err(|e| AppError::Msg(e.to_string()))?;
-            }
-            w.flush()?;
-        }
+        w.finish()
+    })
+    .await
+}
+
+async fn run_export(
+    app: AppHandle,
+    c: &crate::db::sql::SqlConn,
+    job: crate::export::Job,
+    sql_text: &str,
+    path: String,
+    format: crate::export::Format,
+    sql_style: crate::export::SqlStyle,
+) -> Result<usize> {
+    let id = job.id().to_string();
+    crate::export::export_query(
+        c,
+        job,
+        sql_text,
+        path.into(),
+        format,
+        sql_style,
+        move |rows| {
+            let _ = app.emit("export:progress", json!({ "id": id, "rows": rows }));
+        },
+    )
+    .await
+}
+
+/// Re-run a read-only statement and stream every row to `path` (progress on `export:progress`, stop with
+/// `export_cancel`). Anything that is not read-only is refused: re-running it would repeat its side effects.
+#[tauri::command]
+pub async fn export_query(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    id: String,
+    connection_id: String,
+    sql_text: String,
+    path: String,
+    format: crate::export::Format,
+) -> Result<usize> {
+    // Registered first, so a Cancel during the lookups below is not lost.
+    let job = crate::export::Job::start(id);
+    let s = st.manager.get(&connection_id).await?;
+    let c = sql(&s).await?;
+    if !crate::db::sql::is_read_only(s.config.driver, &sql_text) {
+        return Err(AppError::Msg(
+            "Only read-only statements can be re-run for a full export.".into(),
+        ));
     }
-    Ok(rows.len())
+    let style = crate::export::SqlStyle {
+        mysql: is_mysql(Some(s.config.driver)),
+        table: None,
+    };
+    run_export(app, c, job, &sql_text, path, format, style).await
+}
+
+/// Every row of a table, with the grid's filter and sort.
+#[tauri::command]
+pub async fn export_table(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    id: String,
+    connection_id: String,
+    query: TableQuery,
+    path: String,
+    format: crate::export::Format,
+) -> Result<usize> {
+    let job = crate::export::Job::start(id);
+    let s = st.manager.get(&connection_id).await?;
+    let c = sql(&s).await?;
+    c.validate_filter(query.filter.as_deref())?;
+    let sql_text = c.select_all_sql(&query);
+    // The SQL file inserts back into the same (schema-qualified) table it came from.
+    let style = crate::export::SqlStyle {
+        mysql: is_mysql(Some(s.config.driver)),
+        table: Some(c.qualified(query.schema.as_deref(), &query.table)),
+    };
+    run_export(app, c, job, &sql_text, path, format, style).await
+}
+
+#[tauri::command]
+pub fn export_cancel(id: String) -> Result<bool> {
+    Ok(crate::export::cancel(&id))
 }
 
 /// Read a text file the user picked in a dialog (.sql, profile JSON). Capped so a stray
@@ -539,7 +592,9 @@ pub async fn write_text_file(path: String, contents: String) -> Result<()> {
     .await
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+pub(crate) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
     tauri::async_runtime::spawn_blocking(f)
         .await
         .map_err(|e| AppError::Msg(e.to_string()))?
