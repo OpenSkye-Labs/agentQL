@@ -55,3 +55,6 @@ CodeRabbit round 3: 1 finding (mock only), applied.
 
 - `count(*)` and `LIMIT n` over `bench_wide` still built the full 200k-row fixture first — applied: `count(*)` answers
   from `BENCH_ROWS`, `LIMIT n` builds only `n` rows, and only the full fixture is cached (smaller ones do not evict it).
+
+CodeRabbit round 4: `count(*) … LIMIT 0` returned the count row — applied: the limit is read first and `LIMIT 0`
+returns no rows.

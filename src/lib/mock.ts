@@ -135,8 +135,8 @@ function runStatement(sql: string, limit: number) {
   if (fromTable(sql) === "bench_wide") {
     // count(*) and LIMIT n answer without building the full 200k-row fixture.
     const code = codeOnly(sql);
-    if (/\bcount\s*\(/i.test(code)) return qr([["count", "int8"]], [[BENCH_ROWS]], sql);
     const n = Number(/\blimit\s+(\d+)\s*$/i.exec(code.trim())?.[1] ?? NaN);
+    if (/\bcount\s*\(/i.test(code)) return qr([["count", "int8"]], n === 0 ? [] : [[BENCH_ROWS]], sql);
     return { ...benchWide(Number.isFinite(n) ? Math.min(n, BENCH_ROWS) : BENCH_ROWS), statement: sql };
   }
   if (/\b(sum|count|avg)\s*\(/i.test(sql) && /group\s+by/i.test(sql)) return { ...chartDataFor(sql), statement: sql };
