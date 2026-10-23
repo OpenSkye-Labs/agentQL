@@ -1,4 +1,4 @@
-# Data dictionary the agent reads (M3)
+# Data dictionary the agent reads (PR #30)
 
 Reviewed with the alleo-loop panel (correctness, requirements, maintainability, skeptic, security) plus a Codex
 cross-check (`codex exec --sandbox read-only` on the branch diff). 0 blockers; every finding below was applied.
