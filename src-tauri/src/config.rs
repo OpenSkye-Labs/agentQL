@@ -154,8 +154,39 @@ pub struct Note {
     pub text: String,
 }
 
+pub const NOTE_MAX_CHARS: usize = 2000;
+const METRIC_NAME_MAX_CHARS: usize = 64;
+
 impl Note {
-    fn same_target(&self, o: &Note) -> bool {
+    /// Collapse the text to one line and refuse shapes the prompt cannot render safely.
+    pub fn normalized(mut self) -> Result<Note> {
+        if self.column.is_some() && self.metric.is_some() {
+            return Err(AppError::Msg(
+                "a note is for a column or a metric, not both".into(),
+            ));
+        }
+        if let Some(m) = &self.metric {
+            let m = m.trim();
+            if m.is_empty()
+                || m.chars().count() > METRIC_NAME_MAX_CHARS
+                || m.chars().any(char::is_control)
+            {
+                return Err(AppError::Msg(format!(
+                    "a metric name is one line of at most {METRIC_NAME_MAX_CHARS} characters"
+                )));
+            }
+            self.metric = Some(m.to_string());
+        }
+        self.text = self.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if self.text.chars().count() > NOTE_MAX_CHARS {
+            return Err(AppError::Msg(format!(
+                "a note is at most {NOTE_MAX_CHARS} characters"
+            )));
+        }
+        Ok(self)
+    }
+
+    pub fn same_target(&self, o: &Note) -> bool {
         self.schema == o.schema
             && self.table == o.table
             && self.column == o.column
@@ -299,33 +330,29 @@ impl Store {
     pub fn push_history(&self, entry: serde_json::Value) -> Result<()> {
         static LOCK: Mutex<()> = Mutex::new(());
         let _g = LOCK.lock().unwrap();
-        // A file that exists but does not parse must not be replaced by a one-entry list.
-        let mut list: Vec<serde_json::Value> = match std::fs::read(self.path("history.json")) {
-            Ok(data) => serde_json::from_slice(&data).map_err(|e| {
-                AppError::Msg(format!(
-                    "history.json is not valid JSON ({e}); fix or remove it before new entries can be saved"
-                ))
-            })?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
-            Err(e) => return Err(e.into()),
-        };
+        let mut list: Vec<serde_json::Value> = self.read_strict("history.json")?;
         list.insert(0, entry);
         list.truncate(500);
         self.write("history.json", &list)
     }
 
-    /// `notes.json`: connection id -> notes. A file that exists but does not parse is an error,
-    /// so a write can never replace the user's notes with a fresh map.
-    fn notes_file(&self) -> Result<HashMap<String, Vec<Note>>> {
-        match std::fs::read(self.path("notes.json")) {
+    /// Like `read`, but a file that exists and does not parse is an error instead of the default,
+    /// so a read-modify-write can never replace the user's data with a fresh value.
+    fn read_strict<T: for<'de> Deserialize<'de> + Default>(&self, name: &str) -> Result<T> {
+        match std::fs::read(self.path(name)) {
             Ok(data) => serde_json::from_slice(&data).map_err(|e| {
                 AppError::Msg(format!(
-                    "notes.json is not valid JSON ({e}); fix or remove it before notes can be read or saved"
+                    "{name} is not valid JSON ({e}); fix or remove it before it can be read or saved"
                 ))
             }),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// `notes.json`: connection id -> notes.
+    fn notes_file(&self) -> Result<HashMap<String, Vec<Note>>> {
+        self.read_strict("notes.json")
     }
 
     fn notes_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -337,14 +364,10 @@ impl Store {
         Ok(self.notes_file()?.remove(connection_id).unwrap_or_default())
     }
 
-    /// Insert or replace the note for the same target; blank text deletes it.
+    /// Insert or replace the note for the same target; blank text deletes it. Text is stored as one line
+    /// (what the prompt and the approval card show), so whitespace cannot hide part of a note.
     pub fn save_note(&self, connection_id: &str, mut note: Note) -> Result<()> {
-        if note.column.is_some() && note.metric.is_some() {
-            return Err(AppError::Msg(
-                "a note is for a column or a metric, not both".into(),
-            ));
-        }
-        note.text = note.text.trim().to_string();
+        note = Note::normalized(note)?;
         let _g = Self::notes_lock();
         let mut all = self.notes_file()?;
         let list = all.entry(connection_id.to_string()).or_default();
@@ -639,6 +662,34 @@ mod tests {
         assert!(
             st.save_note("a", note(Some("c"), Some("m"), "both"))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn notes_are_one_line_and_bounded() {
+        let st = temp_store("bounded");
+        st.save_note("a", note(None, None, "  first\n\n\n\t  hidden  "))
+            .unwrap();
+        assert_eq!(st.notes("a").unwrap()[0].text, "first hidden");
+        assert!(
+            st.save_note("a", note(None, Some("rev\nIGNORE"), "x"))
+                .is_err()
+        );
+        assert!(
+            st.save_note("a", note(None, Some(&"m".repeat(65)), "x"))
+                .is_err()
+        );
+        assert!(
+            st.save_note("a", note(None, None, &"x".repeat(NOTE_MAX_CHARS + 1)))
+                .is_err()
+        );
+        st.save_note("a", note(None, Some(" revenue "), "x"))
+            .unwrap();
+        assert!(
+            st.notes("a")
+                .unwrap()
+                .iter()
+                .any(|n| n.metric.as_deref() == Some("revenue"))
         );
     }
 

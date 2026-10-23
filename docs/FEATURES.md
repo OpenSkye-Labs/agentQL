@@ -150,7 +150,8 @@ Append-only record of shipped behaviour. Newest at the bottom.
   read-only connections and views) and in a "Data dictionary" tab from the connection menu, which lists every note by
   table and adds metrics. The agent gets the in-scope notes in its system prompt (capped at ~6000 characters with a
   truncation line), column notes next to each column and table notes/metrics in `describe_table`, and a `save_note`
-  tool that checks the table/column exists and the agent scope, then waits for a "Save note" approval card (not gated
-  by "allow writes": nothing touches the database). A `notes.json` that does not parse is reported, never overwritten;
+  tool that resolves table/column to the catalog's spelling, checks the agent scope, then waits for a "Save note"
+  approval card showing exactly what is stored and what it replaces (not gated by "allow writes": nothing touches the
+  database). Notes are stored as one line of at most 2000 characters; metric names are one line of at most 64. A `notes.json` that does not parse is reported, never overwritten;
   deleting a connection deletes its notes; the remote-consent card now lists notes. Limit: a metric shows whenever its
   anchor table is in scope, even if its definition joins an out-of-scope table.

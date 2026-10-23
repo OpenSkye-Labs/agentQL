@@ -261,7 +261,7 @@ function ConnectionNode({
       disabled: !connected,
       onSelect: () => openTab({ kind: "diff", connectionId: conn.id, title: "Schema diff" }),
     },
-    ...(["postgres", "mysql", "mariadb", "sqlite"].includes(conn.driver)
+    ...(isSql(conn.driver)
       ? [
           {
             label: "Data dictionary",

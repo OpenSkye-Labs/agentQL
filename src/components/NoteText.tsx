@@ -72,7 +72,9 @@ export function NoteText({
       autoFocus
       aria-label={label}
       value={draft}
-      disabled={saving}
+      maxLength={2000}
+      // readOnly, not disabled: a disabled input drops focus, so after a failed save Escape would do nothing.
+      readOnly={saving}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => void commit()}
       onKeyDown={(e) => {

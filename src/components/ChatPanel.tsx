@@ -706,7 +706,8 @@ function stepLabel(t: ToolRun): { title: string; detail?: string } {
       return { title: `Inspected ${name("schema") ? `${name("schema")}.` : ""}${name("table")}` };
     case "save_note": {
       const target = [name("schema"), name("table"), name("column") || name("metric")].filter(Boolean).join(".");
-      return { title: err ? "Note not saved" : `Saved note on ${target}` };
+      // No result yet = the approval card is still waiting; do not claim it saved.
+      return { title: !t.result ? `Proposed note on ${target}` : err ? "Note not saved" : `Saved note on ${target}` };
     }
     case "run_sql": {
       const r = disp?.type === "query_results" ? disp.results?.[disp.results.length - 1] : undefined;

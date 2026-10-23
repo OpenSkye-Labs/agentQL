@@ -59,6 +59,14 @@ impl<'a> Scope<'a> {
 /// Characters of notes in the system prompt; describe_table returns a table's notes in full.
 const NOTES_BUDGET: usize = 6000;
 
+/// The connection's notes, read off the async runtime (file I/O).
+async fn load_notes(ctx: &Ctx, connection_id: &str) -> crate::error::Result<Vec<Note>> {
+    let (store, id) = (ctx.store.clone(), connection_id.to_string());
+    tauri::async_runtime::spawn_blocking(move || store.notes(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -488,7 +496,7 @@ pub async fn system_prompt(ctx: &Ctx, session: &ChatSession) -> String {
                     }
                 }
             }
-            match ctx.store.notes(&session.connection_id) {
+            match load_notes(ctx, &session.connection_id).await {
                 Ok(notes) => s.push_str(&render_notes(&notes, &scope, NOTES_BUDGET)),
                 Err(e) => s.push_str(&format!(
                     "\nThe user's data dictionary could not be read: {e}\n"
@@ -594,7 +602,9 @@ async fn execute_inner(
                 return Ok(err(format!("'{schema}.{table}' {OUT_OF_SCOPE}")));
             }
             let d = c.table_details(&schema, table).await?;
-            let (notes, notes_err): (Vec<Note>, _) = match ctx.store.notes(&session.connection_id) {
+            let (notes, notes_err): (Vec<Note>, _) = match load_notes(ctx, &session.connection_id)
+                .await
+            {
                 Ok(all) => (
                     all.into_iter()
                         .filter(|n| scope.same(&n.schema, &schema) && scope.same(&n.table, table))
@@ -696,57 +706,88 @@ async fn execute_inner(
             ))
         }
         (Live::Sql(c), "save_note") => {
-            let table = str_arg(input, "table").ok_or("table is required")?;
-            let schema = match str_arg(input, "schema") {
+            let table_arg = str_arg(input, "table").ok_or("table is required")?;
+            let schema_arg = match str_arg(input, "schema") {
                 Some(s) => s.to_string(),
                 None => default_schema(c, &scope).await?,
             };
-            if !scope.table_allowed(&schema, table) {
-                return Ok(err(format!("'{schema}.{table}' {OUT_OF_SCOPE}")));
+            if !scope.table_allowed(&schema_arg, table_arg) {
+                return Ok(err(format!("'{schema_arg}.{table_arg}' {OUT_OF_SCOPE}")));
             }
-            let note = Note {
-                schema: schema.clone(),
-                table: table.to_string(),
-                column: str_arg(input, "column").map(str::to_string),
-                metric: str_arg(input, "metric").map(str::to_string),
-                text: input
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .trim()
-                    .to_string(),
-            };
-            if note.column.is_some() && note.metric.is_some() {
-                return Ok(err("Set either column or metric, not both."));
-            }
-            // Notes on tables or columns that do not exist would only mislead later turns.
-            let d = c.table_details(&schema, table).await?;
-            if d.columns.is_empty() {
+            // Store the catalog's spelling: SQLite matches names case-insensitively, but notes are keyed (and shown
+            // in the structure tab) by exact name, so `Orders` must become `orders`. Unknown names are refused too.
+            let Some(schema) = c
+                .schemas()
+                .await?
+                .into_iter()
+                .find(|s| scope.same(s, &schema_arg))
+            else {
                 return Ok(err(format!(
-                    "'{schema}.{table}' does not exist; check list_tables."
+                    "Schema '{schema_arg}' does not exist; check list_schemas."
                 )));
-            }
-            if let Some(col) = &note.column
-                && !d.columns.iter().any(|x| scope.same(&x.name, col))
+            };
+            let Some(table) = c
+                .tables(&schema)
+                .await?
+                .into_iter()
+                .map(|t| t.name)
+                .find(|t| scope.same(t, table_arg))
+            else {
+                return Ok(err(format!(
+                    "'{schema}.{table_arg}' does not exist; check list_tables."
+                )));
+            };
+            let column = match str_arg(input, "column") {
+                None => None,
+                Some(col) => {
+                    let d = c.table_details(&schema, &table).await?;
+                    match d.columns.into_iter().find(|x| scope.same(&x.name, col)) {
+                        Some(x) => Some(x.name),
+                        None => {
+                            return Ok(err(format!("'{schema}.{table}' has no column '{col}'.")));
+                        }
+                    }
+                }
+            };
+            let note = match (Note {
+                schema: schema.clone(),
+                table: table.clone(),
+                column,
+                metric: str_arg(input, "metric").map(str::to_string),
+                text: str_arg(input, "text").unwrap_or("").to_string(),
+            })
+            .normalized()
             {
-                return Ok(err(format!("'{schema}.{table}' has no column '{col}'.")));
-            }
+                Ok(n) => n,
+                Err(e) => return Ok(err(e)),
+            };
             let target = match (&note.column, &note.metric) {
                 (Some(col), _) => format!("Column {schema}.{table}.{col}"),
                 (None, Some(m)) => format!("Metric '{m}' on {schema}.{table}"),
                 (None, None) => format!("Table {schema}.{table}"),
             };
-            let shown = if note.text.is_empty() {
-                "(delete this note)"
-            } else {
-                note.text.as_str()
-            };
+            // The card shows exactly what is stored (one line), plus what it would replace.
+            let mut card = format!(
+                "{target}\n\n{}",
+                if note.text.is_empty() {
+                    "(delete this note)"
+                } else {
+                    note.text.as_str()
+                }
+            );
+            if let Some(old) = load_notes(ctx, &session.connection_id)
+                .await?
+                .into_iter()
+                .find(|n| n.same_target(&note))
+            {
+                card.push_str(&format!("\n\nReplaces: {}", old.text));
+            }
             if !ctx
                 .request_decision(
                     &session.id,
                     "note",
                     "The agent wants to save a data-dictionary note",
-                    &format!("{target}\n\n{shown}"),
+                    &card,
                 )
                 .await
             {
@@ -754,10 +795,13 @@ async fn execute_inner(
             }
             // The scope may have been narrowed while the card was waiting.
             let fresh = stored_scope(ctx, &session.connection_id);
-            if !Scope::new(fresh.as_deref(), conn.config.driver).table_allowed(&schema, table) {
+            if !Scope::new(fresh.as_deref(), conn.config.driver).table_allowed(&schema, &table) {
                 return Ok(err(format!("'{schema}.{table}' {OUT_OF_SCOPE}")));
             }
-            ctx.store.save_note(&session.connection_id, note)?;
+            let (store, id) = (ctx.store.clone(), session.connection_id.clone());
+            tauri::async_runtime::spawn_blocking(move || store.save_note(&id, note))
+                .await
+                .map_err(|e| e.to_string())??;
             let _ = ctx.app.emit("notes:changed", &session.connection_id);
             Ok(ok(format!("Saved the note for {target}."), None))
         }
