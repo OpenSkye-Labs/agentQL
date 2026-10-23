@@ -434,6 +434,31 @@ pub async fn export_rows(
     .await
 }
 
+async fn run_export(
+    app: AppHandle,
+    c: &crate::db::sql::SqlConn,
+    id: String,
+    sql_text: &str,
+    path: String,
+    format: &str,
+) -> Result<usize> {
+    let progress_id = id.clone();
+    crate::export::export_query(
+        c,
+        id,
+        sql_text,
+        path.into(),
+        crate::export::Format::parse(format),
+        move |rows| {
+            let _ = app.emit(
+                "export:progress",
+                json!({ "id": progress_id, "rows": rows }),
+            );
+        },
+    )
+    .await
+}
+
 /// Re-run a read-only statement and stream every row to `path` (progress on `export:progress`, stop with
 /// `export_cancel`). Anything that is not read-only is refused: re-running it would repeat its side effects.
 #[tauri::command]
@@ -453,21 +478,24 @@ pub async fn export_query(
             "Only read-only statements can be re-run for a full export.".into(),
         ));
     }
-    let progress_id = id.clone();
-    crate::export::export_query(
-        c,
-        id,
-        &sql_text,
-        path.into(),
-        crate::export::Format::parse(&format),
-        move |rows| {
-            let _ = app.emit(
-                "export:progress",
-                json!({ "id": progress_id, "rows": rows }),
-            );
-        },
-    )
-    .await
+    run_export(app, c, id, &sql_text, path, &format).await
+}
+
+/// Every row of a table, with the grid's filter and sort.
+#[tauri::command]
+pub async fn export_table(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    id: String,
+    connection_id: String,
+    query: TableQuery,
+    path: String,
+    format: String,
+) -> Result<usize> {
+    let s = st.manager.get(&connection_id).await?;
+    let c = sql(&s).await?;
+    c.validate_filter(query.filter.as_deref())?;
+    run_export(app, c, id, &c.select_all_sql(&query), path, &format).await
 }
 
 #[tauri::command]

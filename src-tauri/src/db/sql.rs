@@ -628,7 +628,18 @@ impl SqlConn {
         Ok(())
     }
 
+    /// The browse query for one page.
     pub fn select_sql(&self, q: &TableQuery) -> String {
+        format!(
+            "{} LIMIT {} OFFSET {}",
+            self.select_all_sql(q),
+            q.limit.max(1),
+            q.offset
+        )
+    }
+
+    /// The table with its filter and sort, every row (export).
+    pub fn select_all_sql(&self, q: &TableQuery) -> String {
         let mut sql = format!(
             "SELECT * FROM {}",
             self.qualified(q.schema.as_deref(), &q.table)
@@ -643,7 +654,6 @@ impl SqlConn {
                 if q.order_desc { "DESC" } else { "ASC" }
             ));
         }
-        sql.push_str(&format!(" LIMIT {} OFFSET {}", q.limit.max(1), q.offset));
         sql
     }
 

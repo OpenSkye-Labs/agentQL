@@ -2,10 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { clsx } from "clsx";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Bot, Download, FileText, History, Keyboard, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
+import { Bot, FileText, History, Keyboard, Play, Save, Sparkles, StopCircle, Wand2 } from "lucide-react";
 import { snippetCompletion } from "@codemirror/autocomplete";
 import { api, errMsg } from "../lib/api";
 import { productionPrompt } from "../lib/production";
+import { ExportMenu, useExport, type ExportFormat } from "./ExportMenu";
 import { useStore, useConnection, type Tab } from "../lib/store";
 import type { QueryResult, SavedQuery, WriteInfo } from "../lib/types";
 import { fmtDuration, mod } from "../lib/format";
@@ -204,25 +205,17 @@ export function QueryTab({ tab }: { tab: QTab }) {
     return () => window.removeEventListener("agentql:insert-sql", onInsert);
   }, [activeTab, tab.id, updateTab]);
 
-  const exportResult = async (format: "csv" | "json" | "sql") => {
+  const exporter = useExport();
+  const exportResult = (format: ExportFormat) => {
     const r = results?.[active];
-    if (!r) return;
-    const path = await saveDialog({
-      defaultPath: `query.${format}`,
-      filters: [{ name: format.toUpperCase(), extensions: [format] }],
+    if (!r || !conn) return;
+    void exporter.run("query", format, async (id, path) => {
+      const columns = r.columns.map((c) => c.name);
+      // Everything is already loaded: write it as shown. A write statement is never re-run (it would run again).
+      const rerun = r.truncated && !!r.statement && (await api.classifySql(conn.driver, r.statement)).length === 0;
+      if (!rerun) return { rows: await api.exportRows(path, format, columns, r.rows), loadedOnly: r.truncated };
+      return { rows: await api.exportQuery(id, conn.id, r.statement, path, format) };
     });
-    if (!path) return;
-    try {
-      const n = await api.exportRows(
-        path,
-        format,
-        r.columns.map((c) => c.name),
-        r.rows,
-      );
-      toast(`Exported ${n} rows`, "success");
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
   };
 
   const askAgent = (prompt: string) => askAssistant(prompt);
@@ -493,18 +486,7 @@ export function QueryTab({ tab }: { tab: QTab }) {
             <Empty title="No earlier versions yet" hint="Versions are recorded each time you save this query." />
           )}
         </Dialog>
-        <Menu
-          trigger={
-            <Button size="sm" variant="ghost" disabled={!current || current.rows.length === 0}>
-              <Download size={13} /> Export
-            </Button>
-          }
-          items={[
-            { label: "CSV…", onSelect: () => exportResult("csv") },
-            { label: "JSON…", onSelect: () => exportResult("json") },
-            { label: "SQL inserts…", onSelect: () => exportResult("sql") },
-          ]}
-        />
+        <ExportMenu exporter={exporter} disabled={!current || current.rows.length === 0} onPick={exportResult} />
       </div>
 
       <PanelGroup direction="vertical" autoSaveId={`query-${tab.connectionId}`}>

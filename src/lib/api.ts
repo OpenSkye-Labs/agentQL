@@ -74,6 +74,13 @@ export const api = {
   sshForgetHost: (host: string, port: number) => invoke<void>("ssh_forget_host", { host, port }),
   exportRows: (path: string, format: "csv" | "json" | "sql", columns: string[], rows: Cell[][]) =>
     invoke<number>("export_rows", { path, format, columns, rows }),
+  /** Re-run a read-only statement and stream every row to `path`; progress on `export:progress` for `id`. */
+  exportQuery: (id: string, connectionId: string, sqlText: string, path: string, format: "csv" | "json" | "sql") =>
+    invoke<number>("export_query", { id, connectionId, sqlText, path, format }),
+  /** Every row of a table with the grid's filter and sort. */
+  exportTable: (id: string, connectionId: string, query: TableQuery, path: string, format: "csv" | "json" | "sql") =>
+    invoke<number>("export_table", { id, connectionId, query, path, format }),
+  exportCancel: (id: string) => invoke<boolean>("export_cancel", { id }),
   schemaObjects: (id: string, schema: string) => invoke<SchemaObject[]>("schema_objects", { id, schema }),
   /** `data` is base64. */
   saveFile: (path: string, data: string) => invoke<void>("save_file", { path, data }),

@@ -77,6 +77,24 @@ const sameTarget = (a: Note, b: Note) =>
   (a.column ?? null) === (b.column ?? null) &&
   (a.metric ?? null) === (b.metric ?? null);
 
+/** Running mock exports, and `cancel:<id>` markers set by export_cancel. */
+const exports = new Set<string>();
+/** A slow export: progress every 200 ms for ~3 s, then the row count, or "Export cancelled" if asked to stop. */
+async function mockExport(id: string, total: number) {
+  exports.add(id);
+  try {
+    for (let step = 1; step <= 15; step++) {
+      await new Promise((r) => setTimeout(r, 200));
+      if (exports.has(`cancel:${id}`)) throw "Export cancelled";
+      emit("export:progress", { id, rows: Math.round((total * step) / 15) });
+    }
+    return total;
+  } finally {
+    exports.delete(id);
+    exports.delete(`cancel:${id}`);
+  }
+}
+
 /** Persisted KV, in memory: what the app saves (a chart added to a dashboard) reads back until reload. */
 const kv: Record<string, unknown> = { dashboards, history, saved_queries: savedQueries };
 
@@ -175,7 +193,14 @@ const handlers: Record<string, Handler> = {
     ),
   preview_changes: (a) => [`UPDATE "public"."${String(a.table)}" SET "status" = 'shipped' WHERE "id" = 1042`],
   apply_changes: () => 1,
-  export_rows: () => 120,
+  export_rows: (a) => (a.rows as unknown[]).length,
+  export_query: (a) => mockExport(String(a.id), 182_400),
+  export_table: (a) => mockExport(String(a.id), SPECS[(a.query as TableQuery).table]?.rows ?? 1000),
+  export_cancel: (a) => {
+    const known = exports.has(String(a.id));
+    exports.add(`cancel:${String(a.id)}`);
+    return known;
+  },
   redis_scan: () => ({ cursor: "0", keys: redisKeys }),
   redis_get: (a) => redisValue(String(a.key)),
   redis_command: () => ({ redis_version: "7.4.1", used_memory_human: "38.20M" }),

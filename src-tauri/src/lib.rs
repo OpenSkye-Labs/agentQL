@@ -72,6 +72,7 @@ pub fn run() {
             commands::ssh_forget_host,
             commands::export_rows,
             commands::export_query,
+            commands::export_table,
             commands::export_cancel,
             commands::redis_scan,
             commands::redis_get,
