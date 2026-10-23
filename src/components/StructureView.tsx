@@ -152,7 +152,7 @@ export function StructureView({
                 <td className="border-b border-border py-1 pr-3 text-muted font-sans">
                   {[c.extra, c.comment].filter(Boolean).join(" · ")}
                 </td>
-                <td className="border-b border-border py-0.5 pr-3 min-w-48">
+                <td className="border-b border-border py-0.5 pr-3 min-w-48 font-sans">
                   {!notesError && (
                     <NoteText
                       value={columnNote(c.name)}

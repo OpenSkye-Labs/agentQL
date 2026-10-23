@@ -57,9 +57,9 @@ export function NoteText({
       <button
         type="button"
         onClick={start}
-        aria-label={value ? `${label}: ${value}. Edit` : `${label}: none. Add`}
+        aria-label={`${label}: ${value || "none"}`}
         className={clsx(
-          "w-full rounded px-1 text-left font-sans hover:bg-hover focus-visible:bg-hover",
+          "w-full rounded px-1 text-left hover:bg-hover focus-visible:bg-hover",
           value ? "text-fg" : "text-faint",
           className,
         )}
@@ -86,7 +86,7 @@ export function NoteText({
           setDraft(null);
         }
       }}
-      className="h-6 font-sans"
+      className="h-6"
     />
   );
 }

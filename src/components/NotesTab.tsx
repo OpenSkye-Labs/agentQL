@@ -91,8 +91,8 @@ export function NotesTab({ tab }: { tab: Extract<Tab, { kind: "notes" }> }) {
                 {list.map((n) => {
                   const what = n.column ? n.column : n.metric ? `metric ${n.metric}` : "table";
                   return (
-                    <li key={`${n.column ?? ""}|${n.metric ?? ""}`} className="group flex items-start gap-2 px-2 py-1">
-                      <span className="w-40 shrink-0 truncate pt-0.5 font-mono text-muted" title={what}>
+                    <li key={`${n.column ?? ""}|${n.metric ?? ""}`} className="group flex items-center gap-2 px-2 py-1">
+                      <span className="w-48 shrink-0 truncate font-mono text-muted" title={what}>
                         {what}
                       </span>
                       <div className="min-w-0 flex-1">
