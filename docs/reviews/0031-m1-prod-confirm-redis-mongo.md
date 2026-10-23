@@ -59,3 +59,10 @@ CodeRabbit round 2: 1 finding, applied.
 
 - `pipelineNow.current` was written during render — applied: updated from an effect after commit, which is when the
   async check reads it.
+
+CodeRabbit round 3: 1 finding, applied.
+
+- `PFCOUNT` was on the read-only allow-list, but Redis documents that it may rewrite the HyperLogLog's cached
+  cardinality, so it is technically a write — applied: removed from `is_read_only_args` (so read-only connections
+  refuse it too and production prompts for it), with a test. The mock's mirror was also missing the dotted names
+  (`JSON.GET`, `FT.SEARCH`) and is resynced from the backend list.

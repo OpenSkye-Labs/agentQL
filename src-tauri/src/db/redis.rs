@@ -301,7 +301,6 @@ pub fn is_read_only_args(args: &[String]) -> bool {
             | "RANDOMKEY"
             | "GETRANGE"
             | "BITCOUNT"
-            | "PFCOUNT"
             | "GEOPOS"
             | "GEODIST"
             | "JSON.GET"

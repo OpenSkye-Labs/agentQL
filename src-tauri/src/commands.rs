@@ -1050,6 +1050,8 @@ mod tests {
         assert!(!redis_is_write(line(r#"GET "my key""#)).unwrap());
         assert!(redis_is_write(line(r#"SET "my key" v"#)).unwrap());
         assert!(redis_is_write(line("FROBNICATE x")).unwrap());
+        // PFCOUNT may rewrite the HyperLogLog's cached cardinality, so Redis itself calls it a write.
+        assert!(redis_is_write(line("PFCOUNT visitors")).unwrap());
         assert!(redis_is_write(args(&["DEL", "k"])).unwrap());
         assert!(!redis_is_write(args(&["HGETALL", "k"])).unwrap());
         // The UI sends a string or an array; both deserialise.
