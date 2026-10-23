@@ -1,4 +1,4 @@
-# Streaming export (M5 part A)
+# Streaming export, M5 part A (PR #32)
 
 Reviewed with the alleo-loop panel (correctness, requirements, maintainability, skeptic, security) plus a Codex
 cross-check on `git diff dev...HEAD`. 0 blockers; findings applied unless noted.
