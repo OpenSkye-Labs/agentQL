@@ -44,7 +44,7 @@ import { fmtDuration } from "../lib/format";
 
 interface Approval {
   id: string;
-  kind: "write" | "consent";
+  kind: "write" | "consent" | "note";
   description: string;
   statement: string;
 }
@@ -445,7 +445,13 @@ export function ChatPanel({ onClose, onOpenSettings }: { onClose: () => void; on
                     }}
                   >
                     <Check size={12} />{" "}
-                    {approval.kind === "consent" ? "Allow" : prodWrite ? "Run on production" : "Run it"}
+                    {approval.kind === "consent"
+                      ? "Allow"
+                      : approval.kind === "note"
+                        ? "Save note"
+                        : prodWrite
+                          ? "Run on production"
+                          : "Run it"}
                   </Button>
                   {/* On production, Enter lands on Deny: a stray keypress must not write. */}
                   <Button

@@ -46,6 +46,7 @@ export type Tab =
   | { id: string; kind: "mongo"; connectionId: string; title: string; db: string; collection: string }
   | { id: string; kind: "erd"; connectionId: string; title: string; schema: string }
   | { id: string; kind: "diff"; connectionId: string; title: string; schema?: string }
+  | { id: string; kind: "notes"; connectionId: string; title: string }
   | { id: string; kind: "welcome"; connectionId: null; title: string };
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -290,6 +291,7 @@ export const useStore = create<State>((set, get) => ({
         case "erd":
           return t.kind === "erd" && t.schema === tab.schema;
         case "redis":
+        case "notes":
           return true;
         default:
           return false;
