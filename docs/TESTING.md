@@ -86,16 +86,16 @@ agent-browser eval "$(cat scripts/bench-grid.js)"
 ```
 
 Measured 2026-10-24 in headless Chromium 149 under WSL2 (a proxy for the app's WebKitGTK / WebView2; per-platform
-numbers are M9), three fresh loads each, before and after the M5 grid changes:
+numbers are M9), fresh loads each, before (three runs) and after (six runs) the M5 grid changes:
 
-| | before | after |
-|---|---|---|
-| first paint after the result arrives | 185–210 ms | 85–95 ms |
-| vertical scroll (400 px per frame) | 12–14 fps, ~40 frames > 50 ms, worst 184–434 ms | 56–57 fps median, 0–3 frames > 50 ms, worst 34–151 ms |
-| horizontal scroll | 60 fps | 60 fps |
-| client sort, text column | 4.0–5.7 s | 0.38–0.44 s |
-| client sort, numeric column | ~0.35 s | 0.25–0.37 s |
-| cells mounted | 1,380 | 112 |
+|                                      | before                                          | after                                                 |
+| ------------------------------------ | ----------------------------------------------- | ----------------------------------------------------- |
+| first paint after the result arrives | 185–210 ms                                      | 85–95 ms                                              |
+| vertical scroll (400 px per frame)   | 12–14 fps, ~40 frames > 50 ms, worst 184–434 ms | 56–57 fps median, 0–3 frames > 50 ms, worst 34–151 ms |
+| horizontal scroll                    | 60 fps                                          | 60 fps                                                |
+| client sort, text column             | 4.0–5.7 s                                       | 0.38–0.44 s                                           |
+| client sort, numeric column          | ~0.35 s                                         | 0.25–0.37 s                                           |
+| cells mounted                        | 1,380                                           | 112                                                   |
 
 What changed: columns are virtualised as well as rows (only cells in view are mounted), row overscan 12 → 6, and the
 client sort uses one `Intl.Collator` with each cell's text computed once (`src/lib/gridSort.ts`). Not measured: moving

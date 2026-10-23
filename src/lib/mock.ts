@@ -125,6 +125,7 @@ function statements(text: string) {
 function runStatement(sql: string, limit: number) {
   if (!isRead(sql)) return qr([], [], sql, { affected: 1, duration_ms: 7 });
   // Grid benchmark: the full fixture, ignoring the row limit (that is the point of the benchmark).
+  // ponytail: handed over by reference; the app pays IPC + JSON parsing for 200k rows, which the benchmark leaves out.
   if (/\bbench_wide\b/i.test(sql)) return benchWide();
   if (/\b(sum|count|avg)\s*\(/i.test(sql) && /group\s+by/i.test(sql)) return { ...chartDataFor(sql), statement: sql };
   // ponytail: rows are capped at 200 so the mock stays fast; an explicit trailing LIMIT is honoured.

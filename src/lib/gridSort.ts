@@ -1,3 +1,5 @@
+import type { Cell } from "./types.ts";
+
 /** One collator for every comparison: building one per `localeCompare(…, { numeric })` call made a 200k-row text
  * sort take seconds. */
 const collator = new Intl.Collator(undefined, { numeric: true });
@@ -7,12 +9,7 @@ const collator = new Intl.Collator(undefined, { numeric: true });
  * (`b2` before `b10`), NULLs last in both directions, stable for equal keys. `text` renders a non-number cell
  * (the grid passes `cellText`); each cell's text is computed once, not per comparison.
  */
-export function sortOrder(
-  rows: unknown[][],
-  column: number,
-  desc: boolean,
-  text: (v: unknown) => string = (v) => String(v),
-): number[] {
+export function sortOrder(rows: Cell[][], column: number, desc: boolean, text: (v: Cell) => string): number[] {
   const vals = rows.map((r) => r[column]);
   const keys = vals.map((v) => (v === null ? "" : typeof v === "number" ? String(v) : text(v)));
   const idx = vals.map((_, i) => i);

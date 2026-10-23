@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { clsx } from "clsx";
 import {
@@ -101,7 +101,7 @@ export function ResultGrid({
   // Client-side sort only when the parent does not handle sorting.
   const order = useMemo(() => {
     if (!clientSort || onSort) return result.rows.map((_, i) => i);
-    return sortOrder(result.rows, clientSort.column, clientSort.desc, (v) => String(cellText(v as Cell)));
+    return sortOrder(result.rows, clientSort.column, clientSort.desc, cellText);
   }, [result.rows, clientSort, onSort]);
 
   useEffect(() => {
@@ -124,6 +124,8 @@ export function ResultGrid({
 
   // The virtualizers measure the viewport with offsetWidth/Height, scrollbars included, and do not know about the
   // sticky header row and row-number column: tell them, so scrolling a cell into view lands it fully visible.
+  // ponytail: read during render, so null on the first one and a frame stale after a resize that adds or removes a
+  // scrollbar without re-rendering; measure in a ResizeObserver if a cell ever lands under a scrollbar.
   const el = parentRef.current;
   const scrollbarH = el ? el.offsetHeight - el.clientHeight : 0;
   const scrollbarW = el ? el.offsetWidth - el.clientWidth : 0;
@@ -150,7 +152,8 @@ export function ResultGrid({
     scrollPaddingEnd: scrollbarW,
     overscan: 2,
   });
-  useEffect(() => colVirtualizer.measure(), [widths, colVirtualizer]);
+  // Before paint: cells already use the new widths, so the offsets must not lag a frame behind them.
+  useLayoutEffect(() => colVirtualizer.measure(), [widths, colVirtualizer]);
   const vcols = colVirtualizer.getVirtualItems();
   // Width of the columns scrolled out on the left, kept as a spacer so the rendered ones sit at their offsets.
   const lead = vcols.length ? vcols[0].start - ROW_HEADER_W : 0;
@@ -163,9 +166,12 @@ export function ResultGrid({
       const rowIdx = order[r];
       const key = `${rowIdx}:${cols[c].name}`;
       const cur = edits?.has(key) ? edits.get(key)! : result.rows[rowIdx][c];
+      // The cell may be scrolled out (and so not mounted): bring it in, or no input would appear to type into.
+      rowVirtualizer.scrollToIndex(r);
+      colVirtualizer.scrollToIndex(c);
       setEditing({ r, c, text: cellFull(cur) });
     },
-    [editable, order, cols, edits, result.rows],
+    [editable, order, cols, edits, result.rows, rowVirtualizer, colVirtualizer],
   );
 
   const commitEdit = useCallback(
@@ -181,6 +187,22 @@ export function ResultGrid({
     },
     [editing, order, cols, result.rows, onEdit],
   );
+
+  // A cell scrolled out of the rendered window is unmounted, and WebKit fires no blur for it: commit the edit then,
+  // as blur would, so the value reaches the pending changes and the grid keeps its keyboard. Only once the cell has
+  // been on screen, so an edit started on a cell that is still being scrolled in is not committed straight away.
+  const vrows = rowVirtualizer.getVirtualItems();
+  const editSeen = useRef<string | null>(null);
+  useEffect(() => {
+    if (!editing) {
+      editSeen.current = null;
+      return;
+    }
+    const id = `${editing.r}:${editing.c}`;
+    const inView = vrows.some((v) => v.index === editing.r) && vcols.some((v) => v.index === editing.c);
+    if (inView) editSeen.current = id;
+    else if (editSeen.current === id) commitEdit();
+  }, [editing, vrows, vcols, commitEdit]);
 
   const followFk = useCallback(
     (rowIdx: number, fk: ForeignKeyInfo) => {
@@ -271,6 +293,9 @@ export function ResultGrid({
         onDeleteRows?.(order.slice(r1, r2 + 1));
       } else onEdit?.({ rowIndex: order[sel.r], column: cols[sel.c].name, value: null });
     } else if (editable && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // Type-to-edit: same as startEdit, bring the cell in first so its input exists.
+      rowVirtualizer.scrollToIndex(sel.r);
+      colVirtualizer.scrollToIndex(sel.c);
       setEditing({ r: sel.r, c: sel.c, text: e.key });
       e.preventDefault();
     }
@@ -412,7 +437,7 @@ export function ResultGrid({
           tabIndex={0}
           role="grid"
           aria-rowcount={order.length}
-          aria-colcount={cols.length}
+          aria-colcount={cols.length + 1}
           aria-activedescendant={sel ? `${gridId}-${sel.r}-${sel.c}` : undefined}
           onFocus={() => {
             if (!sel && order.length && cols.length) {
@@ -429,6 +454,7 @@ export function ResultGrid({
                 className="sticky left-0 z-20 w-12 shrink-0 border-r border-border bg-sunken"
                 role="columnheader"
                 aria-label="Row number"
+                aria-colindex={1}
               />
               {lead > 0 && <div className="shrink-0" style={{ width: lead }} aria-hidden />}
               {vcols.map(({ index: ci }) => {
@@ -438,7 +464,7 @@ export function ResultGrid({
                   <div
                     key={ci}
                     role="columnheader"
-                    aria-colindex={ci + 1}
+                    aria-colindex={ci + 2}
                     aria-sort={s === "asc" ? "ascending" : s === "desc" ? "descending" : "none"}
                     style={{ width: widths[ci] }}
                     className="relative flex shrink-0 items-center gap-1 border-r border-border select-none hover:bg-hover"
@@ -493,6 +519,7 @@ export function ResultGrid({
                     <div
                       className="sticky left-0 z-[5] flex w-12 shrink-0 items-center justify-end border-b border-r border-border bg-sunken px-1.5 text-[10px] text-faint tabular-nums"
                       role="rowheader"
+                      aria-colindex={1}
                     >
                       {rowIdx + 1}
                     </div>
@@ -510,7 +537,7 @@ export function ResultGrid({
                         <div
                           key={ci}
                           role="gridcell"
-                          aria-colindex={ci + 1}
+                          aria-colindex={ci + 2}
                           id={`${gridId}-${vi.index}-${ci}`}
                           aria-selected={selected}
                           onContextMenu={() => {
@@ -551,6 +578,7 @@ export function ResultGrid({
                                   const c2 = Math.max(0, Math.min(cols.length - 1, ci + (e.shiftKey ? -1 : 1)));
                                   setSel({ r: vi.index, c: c2 });
                                   setAnchor({ r: vi.index, c: c2 });
+                                  colVirtualizer.scrollToIndex(c2);
                                 }
                                 e.stopPropagation();
                               }}
