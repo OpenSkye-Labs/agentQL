@@ -12,6 +12,10 @@
 [![Version](https://img.shields.io/github/v/release/OpenSkye-Labs/agentQL?label=version&color=blue)](https://github.com/OpenSkye-Labs/agentQL/releases/latest)
 
 <p align="center">
+  English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.de.md">Deutsch</a> · <a href="README.fr.md">Français</a>
+</p>
+
+<p align="center">
   <img src="assets/demo/showcase.gif" alt="AgentQL walkthrough: browse a table, ER diagram, run a query, ask the agent for a chart, approve or deny a write, dashboard" width="960">
   <br>
   <sub>Walkthrough on the built-in demo dataset: browse, ER diagram, query, ask the agent for a chart, a write that needs your approval, dashboard.</sub>

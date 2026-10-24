@@ -20,6 +20,8 @@ pnpm dev                # browser-only UI with sample data: open http://localhos
 - Keep PRs focused on one change. Squash-merge is the only merge method, so the PR title becomes the commit message. Write it as `type: short imperative summary` (`feat: redis TTL column`, `fix: grid scroll jump on sort`).
 - Fill in the PR template. Say what changed and how you verified it, and attach a screenshot for UI changes.
 - Record notable behaviour in `docs/FEATURES.md` as part of the same PR.
+- If you change `README.md`, apply the same change to the `README.<lang>.md` translations, or at least open an issue
+  tagged `translation` so a native speaker can catch up; English is the authoritative copy.
 
 ## Checks
 
