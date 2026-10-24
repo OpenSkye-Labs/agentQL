@@ -176,3 +176,8 @@ Append-only record of shipped behaviour. Newest at the bottom.
   Starting an edit (Enter, F2, typing) scrolls the cell in first, and an edit whose cell is scrolled out is
   committed as blur would. Fixed a tab crash when a column resize was released within the same frame as its last move. Benchmark fixture and
   script: `SELECT * FROM bench_wide` in the browser mock, `scripts/bench-grid.js`, numbers in docs/TESTING.md.
+
+## 2026-10-24
+
+- README translations: `README.<lang>.md` at the repo root for 简体中文, 日本語, 한국어, Español, Português (BR), Deutsch and
+  Français, with a language bar under the badges and a note that English is authoritative.
