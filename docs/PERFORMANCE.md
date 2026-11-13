@@ -46,12 +46,25 @@ Medians of 7 runs, v0.2.0, release build.
 | Platform                      | Cold start | RSS, 1 connection | RSS, 100k rows | 100k-row query: IPC only | 100k-row query: click → grid painted |
 | ----------------------------- | ---------- | ----------------- | -------------- | ------------------------ | ------------------------------------ |
 | macOS 27.0.1, Apple M6, 32 GB | 334 ms     | 230 MB            | 537 MB         | 275 ms                   | 311 ms                               |
-| Linux                         | pending    | pending           | pending        | pending                  | pending                              |
-| Windows                       | pending    | pending           | pending        | pending                  | pending                              |
 
 macOS was measured on a developer machine that was also running Docker CI runners; across the 7 runs cold start
-ranged 279–443 ms, the 100k-row RSS 527–541 MB and click → grid painted 269–380 ms. Linux and Windows come from the first Perf
-workflow run.
+ranged 279–443 ms, the 100k-row RSS 527–541 MB and click → grid painted 269–380 ms.
+
+### GitHub-hosted runners
+
+Medians of 5 runs from the Perf workflow (PR #35, run 43511253832). Shared VMs without a GPU, so these are for
+comparing releases with each other, not with the desktop numbers above.
+
+| Runner                    | Cold start | RSS, 1 connection | RSS, 100k rows | 100k-row query: IPC only | 100k-row query: click → grid painted |
+| ------------------------- | ---------- | ----------------- | -------------- | ------------------------ | ------------------------------------ |
+| ubuntu-22.04 (Xvfb)       | 30.4 s \*  | 405 MB            | 673 MB         | 1078 ms                  | 969 ms                               |
+| macos-latest              | 2228 ms    | 227 MB            | 483 MB         | 714 ms                   | 926 ms                               |
+| windows-latest (WebView2) | 685 ms     | 363 MB            | 460 MB         | 1011 ms                  | 1008 ms                              |
+
+\* Every Linux run took 30.4 ± 0.1 s to its first frame: a timeout, not rendering. The likely cause is `secret_storage`,
+a synchronous command (so it runs on the main thread) that probes the Secret Service over D-Bus, which has no
+responder on the runner; the window stays frozen until the call times out. Not yet confirmed; tracked as a
+follow-up. A Linux desktop without a running keyring would see the same freeze.
 
 ### Where the memory goes (macOS, one run)
 

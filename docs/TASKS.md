@@ -110,5 +110,6 @@ M8 Query versioning and portable profiles (S)
 M9 Linux tier-1 and performance proof (S)
 
 - [ ] Flatpak + AUR packaging in release workflow
-- [ ] docs/PERFORMANCE.md with measured cold start / RSS / 100k-row render per platform (bench mode + Perf workflow done;
-      macOS measured, Linux/Windows from the first Perf run, then quote in the README)
+- [x] docs/PERFORMANCE.md with measured cold start / RSS / 100k-row render per platform (bench mode + Perf workflow)
+- [ ] Linux: first frame waits ~30 s on a D-Bus timeout when no Secret Service answers (likely sync `secret_storage`)
+- [ ] Quote the numbers in the README once Linux cold start is fixed
