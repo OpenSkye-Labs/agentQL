@@ -28,4 +28,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.rp.outputs.tag_name }}
-        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+        run: |
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          gh workflow run perf.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"

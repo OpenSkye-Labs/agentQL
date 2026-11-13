@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod bench;
 pub mod commands;
 pub mod config;
 pub mod db;
@@ -19,12 +20,17 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let bench = bench::Bench::from_env(std::time::Instant::now());
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let dir = app.path().app_data_dir().expect("app data dir");
+            // Bench mode never touches the user's connections, settings or history.
+            let dir = match &bench {
+                Some(b) => b.dir.clone(),
+                None => app.path().app_data_dir().expect("app data dir"),
+            };
             let state = AppState {
                 manager: Arc::new(db::Manager::new(&dir)),
                 store: Arc::new(config::Store::new(dir)),
@@ -37,6 +43,19 @@ pub fn run() {
                 agent: state.agent.clone(),
             };
             app.manage(state);
+            // The window is created here ("create": false in tauri.conf.json) so bench mode can give it a
+            // non-persistent WebView profile: the user's localStorage is neither read nor written.
+            let window = app.config().app.windows[0].clone();
+            let mut window = tauri::WebviewWindowBuilder::from_config(app.handle(), &window)?
+                .incognito(bench.is_some());
+            if let Some(b) = &bench {
+                // Its own WebView2 profile, so it cannot join a running AgentQL's browser process (ignored on macOS).
+                window = window.data_directory(b.dir.join("webview"));
+            }
+            window.build()?;
+            if let Some(b) = bench {
+                app.manage(b);
+            }
             tauri::async_runtime::spawn(async move {
                 match mcp::start(ctx.clone()).await {
                     Ok(port) => {
@@ -117,6 +136,7 @@ pub fn run() {
             commands::schema_catalog,
             commands::schema_objects,
             commands::save_file,
+            bench::bench_mark,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

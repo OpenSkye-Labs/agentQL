@@ -110,4 +110,5 @@ M8 Query versioning and portable profiles (S)
 M9 Linux tier-1 and performance proof (S)
 
 - [ ] Flatpak + AUR packaging in release workflow
-- [ ] docs/PERFORMANCE.md with measured cold start / RSS / 100k-row render per platform
+- [ ] docs/PERFORMANCE.md with measured cold start / RSS / 100k-row render per platform (bench mode + Perf workflow done;
+      macOS measured, Linux/Windows from the first Perf run, then quote in the README)

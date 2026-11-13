@@ -126,6 +126,8 @@ const invalidateCatalog = (connId: string) => {
 };
 const uid = () => `${Date.now().toString(36)}-${(tabSeq++).toString(36)}`;
 
+let initOnce: Promise<void> | undefined;
+
 const DEFAULT_SETTINGS: Settings = { providers: [], row_limit: 1000, agent_allow_writes: false, theme: "system" };
 
 export const useStore = create<State>((set, get) => ({
@@ -144,35 +146,37 @@ export const useStore = create<State>((set, get) => ({
   chatPrefill: null,
   secretStorage: null,
 
-  init: async () => {
-    const [connections, settings, dashboards, savedQueries, history, secretStorage] = await Promise.all([
-      api.listConnections(),
-      api.getSettings().catch(() => DEFAULT_SETTINGS),
-      api.kvGet<Dashboard[]>("dashboards"),
-      api.kvGet<SavedQuery[]>("saved_queries"),
-      api.kvGet<HistoryEntry[]>("history"),
-      api.secretStorage().catch(() => null),
-    ]);
-    set({
-      connections,
-      settings: { ...DEFAULT_SETTINGS, ...settings },
-      dashboards: dashboards ?? [],
-      savedQueries: savedQueries ?? [],
-      history: history ?? [],
-      secretStorage,
-    });
-    applyTheme(settings.theme, settings.editor_font_size ?? null);
-    // "Follow system" re-reads the OS preference when the window regains focus.
-    // ponytail: focus polling, subscribe to the XDG portal's SettingChanged if live switching matters.
-    window.addEventListener("focus", () => {
-      const s = get().settings;
-      if (resolveTheme(s.theme) === "system") applyTheme(s.theme, s.editor_font_size ?? null);
-    });
-    // Statements the agent runs are appended by the backend; mirror them into the list.
-    void listen<HistoryEntry>("history:added", ({ payload }) =>
-      set((s) => ({ history: [payload, ...s.history].slice(0, 500) })),
-    );
-  },
+  // Runs once (StrictMode mounts App twice; bench mode awaits it too) so a late response cannot overwrite newer state.
+  init: () =>
+    (initOnce ??= (async () => {
+      const [connections, settings, dashboards, savedQueries, history, secretStorage] = await Promise.all([
+        api.listConnections(),
+        api.getSettings().catch(() => DEFAULT_SETTINGS),
+        api.kvGet<Dashboard[]>("dashboards"),
+        api.kvGet<SavedQuery[]>("saved_queries"),
+        api.kvGet<HistoryEntry[]>("history"),
+        api.secretStorage().catch(() => null),
+      ]);
+      set({
+        connections,
+        settings: { ...DEFAULT_SETTINGS, ...settings },
+        dashboards: dashboards ?? [],
+        savedQueries: savedQueries ?? [],
+        history: history ?? [],
+        secretStorage,
+      });
+      applyTheme(settings.theme, settings.editor_font_size ?? null);
+      // "Follow system" re-reads the OS preference when the window regains focus.
+      // ponytail: focus polling, subscribe to the XDG portal's SettingChanged if live switching matters.
+      window.addEventListener("focus", () => {
+        const s = get().settings;
+        if (resolveTheme(s.theme) === "system") applyTheme(s.theme, s.editor_font_size ?? null);
+      });
+      // Statements the agent runs are appended by the backend; mirror them into the list.
+      void listen<HistoryEntry>("history:added", ({ payload }) =>
+        set((s) => ({ history: [payload, ...s.history].slice(0, 500) })),
+      );
+    })()),
 
   refreshConnections: async () => set({ connections: await api.listConnections() }),
 
