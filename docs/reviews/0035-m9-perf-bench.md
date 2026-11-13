@@ -28,3 +28,13 @@ Found while testing: release builds freeze `window.__TAURI_INTERNALS__`, so the 
 cannot work in the real app. The bench times the query over IPC separately instead, and reports no render time:
 run-to-run IPC variance (254–391 ms) is larger than the grid's paint, so `total - ipc` came out negative in 4 of 7
 runs.
+
+CodeRabbit round 1: 2 findings, both applied.
+
+- The Perf job runs the PR's code with checkout credentials persisted. Applied: `persist-credentials: false`.
+- A failed `import("./lib/bench")` was detached by `void`, so the run hung until the runner's 180 s timeout. Applied:
+  the failure is reported as an `error` mark followed by `done`.
+
+Also from the first Perf run: `xvfb-run` folded the runner's stderr into `perf.json`, so the Linux runs never reached
+the log (now `tee`d), and WebView2 helpers outlive the app on Windows, so the temp dir removal failed every run
+(now retried for up to 5 s; still only a warning).

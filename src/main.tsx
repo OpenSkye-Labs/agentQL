@@ -16,8 +16,15 @@ ReactDOM.createRoot(root).render(
 // painted. The backend answers null unless started with AGENTQL_BENCH.
 const mark = () =>
   void invoke<string | null>("bench_mark", { name: "ready" })
-    .then((dir) => {
-      if (dir) void import("./lib/bench").then((b) => b.run(dir));
+    .then(async (dir) => {
+      if (!dir) return;
+      try {
+        await (await import("./lib/bench")).run(dir);
+      } catch (e) {
+        // run() reports its own failures; this is the bench chunk failing to load. End the run instead of a timeout.
+        await invoke("bench_mark", { name: `error: ${String(e)}` });
+        await invoke("bench_mark", { name: "done" });
+      }
     })
     .catch(() => {});
 const ready = () => requestAnimationFrame(root.childElementCount ? mark : ready);

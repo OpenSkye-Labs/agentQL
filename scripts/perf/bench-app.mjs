@@ -95,7 +95,7 @@ async function once() {
     if (!exited) child.kill();
     await exit; // Windows keeps the SQLite fixture locked until the process is gone
     try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     } catch (e) {
       console.error(`could not remove ${dir}: ${e.message}`); // a WebView2 helper still exiting; harmless temp files
     }
