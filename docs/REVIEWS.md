@@ -90,3 +90,4 @@ From PR #6 on, each PR's review rounds live in `docs/reviews/<pr>-<slug>.md`. Th
 - [M4 schema tools](reviews/0010-m4-schema-tools.md) — PR #10
 - [M7 editor ergonomics](reviews/0008-m7-editor-ergonomics.md) — PR #8
 - [M8 query versions / portable profiles](reviews/0006-m8-query-versions-profiles.md) — PR #6
+- [M9 bench mode and PERFORMANCE.md](reviews/0035-m9-perf-bench.md) — PR #35
