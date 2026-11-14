@@ -14,6 +14,7 @@ import {
   type Environment,
 } from "../lib/types";
 import { Button, Dialog, Field, Input, Select, Spinner, Switch } from "./ui";
+import { SshFields, type SshAuth } from "./ConnectionSsh";
 
 const COLORS = ["#3b6cf6", "#1f8f5a", "#b7791f", "#d23f3f", "#8b5cf6", "#0e9aa7", "#e05d9c", "#6b7280"];
 const COLOR_NAMES = ["Blue", "Green", "Amber", "Red", "Violet", "Teal", "Pink", "Gray"];
@@ -59,7 +60,7 @@ export function ConnectionDialog({
   const [secrets, setSecrets] = useState<ConnectionSecrets>({});
   const [mode, setMode] = useState<"fields" | "url">("fields");
   const [useSsh, setUseSsh] = useState(false);
-  const [sshAuth, setSshAuth] = useState<"agent" | "password" | "key">("agent");
+  const [sshAuth, setSshAuth] = useState<SshAuth>("agent");
   const [keyPath, setKeyPath] = useState("~/.ssh/id_ed25519");
   const [busy, setBusy] = useState<"test" | "save" | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -408,88 +409,17 @@ export function ConnectionDialog({
               description="The database host/port above is resolved from the SSH server."
             />
             {useSsh && (
-              <>
-                <div className="grid grid-cols-[1fr_90px_1fr] gap-3 items-start">
-                  <Field label="SSH host">
-                    <Input
-                      value={cfg.ssh?.host ?? ""}
-                      onChange={(e) =>
-                        set("ssh", {
-                          host: e.target.value,
-                          port: cfg.ssh?.port ?? 22,
-                          user: cfg.ssh?.user ?? "",
-                          auth: "agent",
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field label="Port">
-                    <Input
-                      type="number"
-                      value={cfg.ssh?.port ?? 22}
-                      onChange={(e) =>
-                        set("ssh", {
-                          host: cfg.ssh?.host ?? "",
-                          port: Number(e.target.value),
-                          user: cfg.ssh?.user ?? "",
-                          auth: "agent",
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field label="SSH user">
-                    <Input
-                      value={cfg.ssh?.user ?? ""}
-                      onChange={(e) =>
-                        set("ssh", {
-                          host: cfg.ssh?.host ?? "",
-                          port: cfg.ssh?.port ?? 22,
-                          user: e.target.value,
-                          auth: "agent",
-                        })
-                      }
-                    />
-                  </Field>
-                </div>
-                <div className="grid grid-cols-[150px_1fr_1fr] gap-3 items-start">
-                  <Field label="Authentication">
-                    <Select value={sshAuth} onChange={(e) => setSshAuth(e.target.value as typeof sshAuth)}>
-                      <option value="agent">SSH agent</option>
-                      <option value="key">Private key file</option>
-                      <option value="password">Password</option>
-                    </Select>
-                  </Field>
-                  {sshAuth === "key" && (
-                    <>
-                      <Field label="Key file">
-                        <div className="flex gap-1">
-                          <Input value={keyPath} onChange={(e) => setKeyPath(e.target.value)} />
-                          <Button onClick={() => pickFile(setKeyPath)} aria-label="Browse for key">
-                            <FolderOpen size={14} />
-                          </Button>
-                        </div>
-                      </Field>
-                      <Field label="Passphrase">
-                        <Input
-                          type="password"
-                          value={secrets.ssh_key_passphrase ?? ""}
-                          onChange={(e) => setSecrets((s) => ({ ...s, ssh_key_passphrase: e.target.value }))}
-                          placeholder="if encrypted"
-                        />
-                      </Field>
-                    </>
-                  )}
-                  {sshAuth === "password" && (
-                    <Field label="SSH password">
-                      <Input
-                        type="password"
-                        value={secrets.ssh_password ?? ""}
-                        onChange={(e) => setSecrets((s) => ({ ...s, ssh_password: e.target.value }))}
-                      />
-                    </Field>
-                  )}
-                </div>
-              </>
+              <SshFields
+                cfg={cfg}
+                set={set}
+                sshAuth={sshAuth}
+                setSshAuth={setSshAuth}
+                keyPath={keyPath}
+                setKeyPath={setKeyPath}
+                secrets={secrets}
+                setSecrets={setSecrets}
+                pickFile={pickFile}
+              />
             )}
           </div>
         )}
