@@ -102,7 +102,13 @@ async function once() {
   }
 }
 
-const pick = (m) => ({ query_total_ms: m.query_total_ms, query_ipc_ms: m.query_ipc_ms });
+// setup_ms: Rust setup done (window built). script_ms: the page's JS started. Both split cold_start_ms.
+const pick = (m) => ({
+  setup_ms: m.setup,
+  script_ms: m.script,
+  query_total_ms: m.query_total_ms,
+  query_ipc_ms: m.query_ipc_ms,
+});
 
 const results = [];
 for (let i = 0; i < +runsArg; i++) {

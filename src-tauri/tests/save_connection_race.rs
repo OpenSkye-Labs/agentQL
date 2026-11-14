@@ -21,10 +21,18 @@ fn concurrent_saves_and_deletes_keep_every_change() {
     let store = Arc::new(Store::new(dir.clone()));
     // No secrets, so the keychain is never touched.
     let old: Vec<String> = (0..10)
-        .map(|i| store_connection(&store, sqlite(&format!("old{i}")), None).unwrap().id)
+        .map(|i| {
+            store_connection(&store, sqlite(&format!("old{i}")), None)
+                .unwrap()
+                .id
+        })
         .collect();
     let kept: Vec<String> = (0..5)
-        .map(|i| store_connection(&store, sqlite(&format!("kept{i}")), None).unwrap().id)
+        .map(|i| {
+            store_connection(&store, sqlite(&format!("kept{i}")), None)
+                .unwrap()
+                .id
+        })
         .collect();
 
     let saves = (0..20).map(|i| {
@@ -55,10 +63,16 @@ fn concurrent_saves_and_deletes_keep_every_change() {
     let list = store.connections();
     let mut names: Vec<_> = list.iter().map(|c| c.name.clone()).collect();
     names.sort();
-    let mut want: Vec<_> = (0..20).map(|i| format!("new{i}")).chain((0..5).map(|i| format!("kept{i}"))).collect();
+    let mut want: Vec<_> = (0..20)
+        .map(|i| format!("new{i}"))
+        .chain((0..5).map(|i| format!("kept{i}")))
+        .collect();
     want.sort();
     assert_eq!(names, want);
-    let edited = list.iter().filter(|c| c.color.as_deref() == Some("edited")).count();
+    let edited = list
+        .iter()
+        .filter(|c| c.color.as_deref() == Some("edited"))
+        .count();
     assert_eq!(edited, 5, "every kept connection keeps its edit");
     let _ = std::fs::remove_dir_all(&dir);
 }

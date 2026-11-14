@@ -5,6 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import "./index.css";
 
+// Bench mode: the entry script ran (stamped when the backend's main thread handles it). A no-op otherwise.
+void invoke("bench_mark", { name: "script" }).catch(() => {});
+
 const root = document.getElementById("root") as HTMLElement;
 ReactDOM.createRoot(root).render(
   <React.StrictMode>

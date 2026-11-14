@@ -54,6 +54,7 @@ pub fn run() {
             }
             window.build()?;
             if let Some(b) = bench {
+                b.mark("setup".into(), None)?;
                 app.manage(b);
             }
             tauri::async_runtime::spawn(async move {
