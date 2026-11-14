@@ -45,4 +45,6 @@
 
 - `connections.json`, `settings.json`, `dashboards.json`, `saved_queries.json`, `history.json`
 - `chats/<session_id>.json`
-- `secrets.local.json` only when no keychain is available.
+- `secrets.local.json`: plaintext (0600 on macOS/Linux), written only when the keychain refuses a secret and
+  the user turned on `allow_plaintext_secrets` (off by default). Its entries move to the keychain at startup
+  once the keychain works; a file that doesn't parse is renamed to `.corrupt`.

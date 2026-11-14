@@ -42,6 +42,9 @@ pub fn run() {
                 store: state.store.clone(),
                 agent: state.agent.clone(),
             };
+            // Off the main thread: each keychain call can block (a locked Linux Secret Service).
+            let store = state.store.clone();
+            tauri::async_runtime::spawn_blocking(move || store.migrate_plaintext_secrets());
             app.manage(state);
             // The window is created here ("create": false in tauri.conf.json) so bench mode can give it a
             // non-persistent WebView profile: the user's localStorage is neither read nor written.

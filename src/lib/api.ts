@@ -38,7 +38,7 @@ export const api = {
     invoke<ConnectionConfig>("save_connection", { config, secrets }),
   deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
   getConnectionSecrets: (id: string) => invoke<ConnectionSecrets>("get_connection_secrets", { id }),
-  secretStorage: () => invoke<"keychain" | "file">("secret_storage"),
+  secretStorage: () => invoke<"keychain" | "file" | "none">("secret_storage"),
   testConnection: (config: ConnectionConfig, secrets?: ConnectionSecrets) =>
     invoke<string>("test_connection", { config, secrets }),
   connect: (id: string, database?: string) => invoke<ConnectResult>("connect", { id, database }),
@@ -150,7 +150,12 @@ export const api = {
   runChart: (connectionId: string, source: unknown) =>
     invoke<QueryResult>("run_chart", { req: { connection_id: connectionId, source } }),
   appInfo: () =>
-    invoke<{ version: string; data_dir: string; mcp_port: number | null; secret_storage: string }>("app_info"),
+    invoke<{
+      version: string;
+      data_dir: string;
+      mcp_port: number | null;
+      secret_storage: "keychain" | "file" | "none";
+    }>("app_info"),
 };
 
 export interface RedisValue {

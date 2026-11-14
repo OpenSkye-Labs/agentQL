@@ -136,3 +136,11 @@ Things worth timing in the app, cold then warm:
 - Export 1 M rows of `pgbench_accounts` to CSV from the table tab: the row count climbs, the app's RSS stays flat
   (about 3,000 rows in flight at most), Cancel returns within a second and removes the partial file.
 - Ask the agent: "Which directors have the most titles rated above 8 with at least 10k votes?"
+
+## Secret storage without a keychain
+
+`?mock=1&secrets=none` plays a machine with no OS keychain (`secrets=file` and `secrets=keychain` set the other
+states). With the plaintext setting off, saving an API key or a connection password must fail with a toast that
+names Settings > General > "Store secrets in a plaintext file when no keychain is available", keep the typed key,
+and show the "no keychain" badge. Turn the switch on and save again: the save succeeds and the badge reads
+"plaintext secrets". Rust side: `cargo test --test 'secret_store_*'`.
