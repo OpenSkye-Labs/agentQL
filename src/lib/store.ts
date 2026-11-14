@@ -85,7 +85,7 @@ interface State {
   chatSessionId: string | null;
   /** Text queued for the assistant input (consumed by ChatPanel on mount or change). */
   chatPrefill: string | null;
-  secretStorage: "keychain" | "file" | null;
+  secretStorage: "keychain" | "file" | "none" | null;
 
   init: () => Promise<void>;
   refreshConnections: () => Promise<void>;
@@ -335,6 +335,11 @@ export const useStore = create<State>((set, get) => ({
   saveSettings: async (settings) => {
     await api.saveSettings(settings);
     set({ settings });
+    // The plaintext opt-in changes what the status bar badge should say.
+    void api.secretStorage().then(
+      (secretStorage) => set({ secretStorage }),
+      () => {},
+    );
     applyTheme(settings.theme, settings.editor_font_size ?? null);
   },
 

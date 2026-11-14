@@ -107,6 +107,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   };
 
   const commit = async () => {
+    const typed = keys; // saving settings re-runs the effect that clears the key fields
     try {
       await save(draft);
       for (const [id, key] of Object.entries(keys)) {
@@ -115,6 +116,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       toast("Settings saved", "success");
       onOpenChange(false);
     } catch (e) {
+      setKeys(typed);
       toast(errMsg(e), "error");
     }
   };
@@ -192,6 +194,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 onChange={(v) => update({ editor_vim: v })}
                 label="Vim keymap in the SQL editor"
                 description={`Modal editing (hjkl, dd, ciw…). ${mod}+Enter still runs the statement.`}
+              />
+              <Switch
+                checked={!!draft.allow_plaintext_secrets}
+                onChange={(v) => update({ allow_plaintext_secrets: v })}
+                label="Store secrets in a plaintext file when no keychain is available"
+                description="Only for machines without an OS keychain (WSL, headless Linux). Passwords and API keys are then saved unencrypted in secrets.local.json in the data directory. Off: saving a secret fails instead."
               />
             </>
           )}
@@ -348,7 +356,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               <dt className="text-muted">Data directory</dt>
               <dd className="font-mono break-all">{info.data_dir}</dd>
               <dt className="text-muted">Secret storage</dt>
-              <dd>{info.secret_storage === "keychain" ? "OS keychain" : "Local file (no keychain found)"}</dd>
+              <dd>
+                {info.secret_storage === "keychain"
+                  ? "OS keychain"
+                  : info.secret_storage === "none"
+                    ? "None (no keychain found)"
+                    : "Plaintext file (secrets.local.json)"}
+              </dd>
               <dt className="text-muted">MCP endpoint</dt>
               <dd className="font-mono">
                 {info.mcp_port ? `http://127.0.0.1:${info.mcp_port}/mcp/<session>` : "not running"}

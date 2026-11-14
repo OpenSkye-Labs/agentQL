@@ -37,9 +37,16 @@ export function StatusBar({ onToggleChat }: { onToggleChat: () => void }) {
       <span className="flex-1" />
       <UpdateButton />
       {secretStorage === "file" && (
-        <Tooltip label="No OS keychain was found; passwords are stored in a local file in the app data directory.">
+        <Tooltip label="Secrets are stored unencrypted in secrets.local.json in the app data directory.">
           <span className="flex items-center gap-1 text-warning">
-            <KeyRound size={11} /> file secrets
+            <KeyRound size={11} /> plaintext secrets
+          </span>
+        </Tooltip>
+      )}
+      {secretStorage === "none" && (
+        <Tooltip label="No OS keychain was found, so saving a password or API key fails. To store them unencrypted instead, turn on Settings > General > Store secrets in a plaintext file.">
+          <span className="flex items-center gap-1 text-warning">
+            <KeyRound size={11} /> no keychain
           </span>
         </Tooltip>
       )}

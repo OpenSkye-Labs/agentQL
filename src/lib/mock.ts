@@ -149,6 +149,7 @@ function runStatement(sql: string, limit: number) {
 const handlers: Record<string, Handler> = {
   list_connections: () => [...connections],
   save_connection: (a) => {
+    if ((a.secrets as { password?: string } | null)?.password) refuseSecret();
     // Kept in memory like the scope, so an edit (e.g. tagging a connection production) shows until reload.
     const c = { ...(a.config as ConnectionConfig), id: (a.config as ConnectionConfig).id || crypto.randomUUID() };
     const i = connections.findIndex((x) => x.id === c.id);
@@ -157,7 +158,7 @@ const handlers: Record<string, Handler> = {
     return c;
   },
   get_connection_secrets: () => ({ password: "secret" }),
-  secret_storage: () => "file",
+  secret_storage: () => secretStorage(),
   test_connection: () => "PostgreSQL 16.4",
   connect: (a) => ({
     id: a.id,
@@ -265,7 +266,7 @@ const handlers: Record<string, Handler> = {
   get_settings: () => settings,
   save_settings: (a) => void Object.assign(settings, a.settings as Settings),
   system_theme: () => null,
-  set_provider_key: () => null,
+  set_provider_key: (a) => void (a.key && refuseSecret()),
   has_provider_key: () => false,
   detect_clis: () => ({ claude: "/home/you/.local/bin/claude", codex: "/home/you/.local/bin/codex" }),
   kv_get: (a) => kv[String(a.name)] ?? null,
@@ -302,9 +303,19 @@ const handlers: Record<string, Handler> = {
     version: "0.2.0",
     data_dir: "/home/you/.local/share/com.aindong.agentql",
     mcp_port: 41231,
-    secret_storage: "file",
+    secret_storage: secretStorage(),
   }),
 };
+
+// `&secrets=none` plays a machine with no OS keychain: saves fail until the plaintext opt-in is on.
+function secretStorage() {
+  const mode = new URLSearchParams(location.search).get("secrets") ?? "file";
+  return mode === "none" && settings.allow_plaintext_secrets ? "file" : mode;
+}
+function refuseSecret() {
+  if (secretStorage() === "none")
+    throw 'The OS keychain refused to store this secret. To keep it in a plaintext file instead, turn on Settings > General > "Store secrets in a plaintext file when no keychain is available".';
+}
 
 if (
   import.meta.env.DEV &&

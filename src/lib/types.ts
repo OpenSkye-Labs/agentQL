@@ -228,6 +228,8 @@ export interface Settings {
   theme?: ThemeId | null;
   editor_font_size?: number | null;
   editor_vim?: boolean;
+  /** Keep secrets in the plaintext secrets.local.json when the OS keychain refuses them. */
+  allow_plaintext_secrets?: boolean;
 }
 
 export type Block =
