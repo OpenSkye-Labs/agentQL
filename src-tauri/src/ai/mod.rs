@@ -318,13 +318,14 @@ async fn ensure_remote_consent(
                 .into(),
         ));
     }
-    // Reload: the user may have edited connections while the card was waiting.
-    let mut list = ctx.store.connections();
-    let Some(conn) = list.iter_mut().find(|c| c.id == session.connection_id) else {
-        return Err(AppError::Msg("connection not found".into()));
-    };
-    conn.agent_remote_consent_at = Some(chrono::Utc::now().to_rfc3339());
-    ctx.store.save_connections(&list)
+    // Reload under the lock: the user may have edited connections while the card was waiting.
+    crate::commands::update_connections(&ctx.store, |list| {
+        let Some(conn) = list.iter_mut().find(|c| c.id == session.connection_id) else {
+            return Err(AppError::Msg("connection not found".into()));
+        };
+        conn.agent_remote_consent_at = Some(chrono::Utc::now().to_rfc3339());
+        Ok(())
+    })
 }
 
 /// One user turn: append message, run the model with tools until it stops, persist.

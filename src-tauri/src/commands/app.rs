@@ -15,20 +15,27 @@ pub fn save_settings(st: State<'_, AppState>, settings: Settings) -> Result<()> 
 }
 
 #[tauri::command]
-pub fn set_provider_key(
+pub async fn set_provider_key(
     st: State<'_, AppState>,
     provider_id: String,
     key: Option<String>,
 ) -> Result<()> {
-    st.store
-        .set_provider_api_key(&provider_id, key.as_deref().filter(|k| !k.is_empty()))
+    let store = st.store.clone();
+    blocking(move || {
+        store.set_provider_api_key(&provider_id, key.as_deref().filter(|k| !k.is_empty()))
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn has_provider_key(st: State<'_, AppState>, provider_id: String) -> bool {
-    st.store
-        .provider_api_key(&provider_id)
-        .is_some_and(|k| !k.is_empty())
+pub async fn has_provider_key(st: State<'_, AppState>, provider_id: String) -> Result<bool> {
+    let store = st.store.clone();
+    blocking(move || {
+        Ok(store
+            .provider_api_key(&provider_id)
+            .is_some_and(|k| !k.is_empty()))
+    })
+    .await
 }
 
 /// "dark" / "light" when the OS preference is known natively, `None` to use the WebView's media query.
@@ -73,14 +80,15 @@ pub fn set_agent_scope(
     id: String,
     scope: Option<Vec<crate::config::ScopeEntry>>,
 ) -> Result<()> {
-    let mut list = st.store.connections();
-    let conn = list
-        .iter_mut()
-        .find(|c| c.id == id)
-        .ok_or_else(|| AppError::Msg("connection not found".into()))?;
-    conn.agent_scope = scope;
-    conn.updated_at = Some(chrono::Utc::now().to_rfc3339());
-    st.store.save_connections(&list)
+    update_connections(&st.store, |list| {
+        let conn = list
+            .iter_mut()
+            .find(|c| c.id == id)
+            .ok_or_else(|| AppError::Msg("connection not found".into()))?;
+        conn.agent_scope = scope;
+        conn.updated_at = Some(chrono::Utc::now().to_rfc3339());
+        Ok(())
+    })
 }
 
 /// The connection's data-dictionary notes (`notes.json`).
@@ -247,13 +255,15 @@ pub async fn run_chart(
 }
 
 #[tauri::command]
-pub fn app_info(st: State<'_, AppState>) -> Value {
-    json!({
+pub async fn app_info(st: State<'_, AppState>) -> Result<Value> {
+    let store = st.store.clone();
+    let secret_storage = blocking(move || Ok(store.secret_storage())).await?;
+    Ok(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "data_dir": st.store.dir().to_string_lossy(),
         "mcp_port": st.agent.mcp_port.get(),
-        "secret_storage": st.store.secret_storage(),
-    })
+        "secret_storage": secret_storage,
+    }))
 }
 
 // ----------------------------------------------------------------- Updater

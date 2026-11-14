@@ -9,7 +9,7 @@ pub use sql::*;
 
 use crate::AppState;
 use crate::ai::{self, AgentEvent, ChatSession, Ctx};
-use crate::config::{ConnectionConfig, ConnectionSecrets, Note, Settings};
+use crate::config::{ConnectionConfig, ConnectionSecrets, Note, Settings, Store};
 use crate::db::mongo::MongoFind;
 use crate::db::redis::ScanResult;
 use crate::db::{
@@ -63,13 +63,36 @@ pub fn list_connections(st: State<'_, AppState>) -> Vec<ConnectionConfig> {
     st.store.connections()
 }
 
+/// Reads, edits and rewrites `connections.json` under one lock. Every writer goes through here: the commands run
+/// concurrently, and two unlocked read-modify-writes drop each other's change (and share the `.tmp` file).
+pub fn update_connections<T>(
+    store: &Store,
+    f: impl FnOnce(&mut Vec<ConnectionConfig>) -> Result<T>,
+) -> Result<T> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut list = store.connections();
+    let out = f(&mut list)?;
+    store.save_connections(&list)?;
+    Ok(out)
+}
+
 #[tauri::command]
-pub fn save_connection(
+pub async fn save_connection(
     st: State<'_, AppState>,
+    config: ConnectionConfig,
+    secrets: Option<ConnectionSecrets>,
+) -> Result<ConnectionConfig> {
+    let store = st.store.clone();
+    blocking(move || store_connection(&store, config, secrets)).await
+}
+
+/// `save_connection` without Tauri state: the list under the lock, then the secrets.
+pub fn store_connection(
+    store: &Store,
     mut config: ConnectionConfig,
     secrets: Option<ConnectionSecrets>,
 ) -> Result<ConnectionConfig> {
-    let mut list = st.store.connections();
     let now = chrono::Utc::now().to_rfc3339();
     if config.id.is_empty() {
         config.id = uuid::Uuid::new_v4().to_string();
@@ -92,13 +115,15 @@ pub fn save_connection(
             secrets = Some(s);
         }
     }
-    match list.iter_mut().find(|c| c.id == config.id) {
-        Some(existing) => *existing = config.clone(),
-        None => list.push(config.clone()),
-    }
-    st.store.save_connections(&list)?;
+    update_connections(store, |list| {
+        match list.iter_mut().find(|c| c.id == config.id) {
+            Some(existing) => *existing = config.clone(),
+            None => list.push(config.clone()),
+        }
+        Ok(())
+    })?;
     if let Some(s) = secrets {
-        st.store.save_connection_secrets(&config.id, &s)?;
+        store.save_connection_secrets(&config.id, &s)?;
     }
     Ok(config)
 }
@@ -106,30 +131,40 @@ pub fn save_connection(
 #[tauri::command]
 pub async fn delete_connection(st: State<'_, AppState>, id: String) -> Result<()> {
     st.manager.disconnect(&id).await;
-    let list: Vec<_> = st
-        .store
-        .connections()
-        .into_iter()
-        .filter(|c| c.id != id)
-        .collect();
-    st.store.save_connections(&list)?;
     // Secrets first: an unreadable notes.json must not leave a deleted connection's password behind.
     let store = st.store.clone();
     blocking(move || {
+        remove_connection(&store, &id)?;
         store.delete_connection_secrets(&id)?;
         store.delete_notes(&id)
     })
     .await
 }
 
+/// The list half of `delete_connection`; secrets and notes are the command's.
+pub fn remove_connection(store: &Store, id: &str) -> Result<()> {
+    update_connections(store, |list| {
+        list.retain(|c| c.id != id);
+        Ok(())
+    })
+}
+
+// Keychain calls can block for seconds (a D-Bus timeout, an unlock prompt) and sync commands run on the main
+// thread, so every command that touches the keychain is async and does its work in `blocking`.
+
 #[tauri::command]
-pub fn get_connection_secrets(st: State<'_, AppState>, id: String) -> ConnectionSecrets {
-    st.store.connection_secrets(&id)
+pub async fn get_connection_secrets(
+    st: State<'_, AppState>,
+    id: String,
+) -> Result<ConnectionSecrets> {
+    let store = st.store.clone();
+    blocking(move || Ok(store.connection_secrets(&id))).await
 }
 
 #[tauri::command]
-pub fn secret_storage(st: State<'_, AppState>) -> &'static str {
-    st.store.secret_storage()
+pub async fn secret_storage(st: State<'_, AppState>) -> Result<&'static str> {
+    let store = st.store.clone();
+    blocking(move || Ok(store.secret_storage())).await
 }
 
 #[derive(Serialize)]
