@@ -1,6 +1,6 @@
 //! Connection definitions, app settings and their on-disk storage.
 //! Everything non-secret lives in JSON files under the app data dir;
-//! passwords go to the OS keychain with a plaintext-file fallback.
+//! passwords go to the OS keychain, and to a plaintext file only if the user allows it.
 
 use crate::error::{AppError, Result};
 use serde::{Deserialize, Serialize};
@@ -244,6 +244,9 @@ pub struct Settings {
     /// Vim keybindings in the SQL editor.
     #[serde(default)]
     pub editor_vim: bool,
+    /// Keep secrets in the plaintext `secrets.local.json` when the OS keychain refuses them.
+    #[serde(default)]
+    pub allow_plaintext_secrets: bool,
 }
 fn default_row_limit() -> u32 {
     1000
@@ -254,17 +257,18 @@ fn default_row_limit() -> u32 {
 pub struct Store {
     dir: PathBuf,
     secrets_fallback: Mutex<HashMap<String, String>>,
+    /// Held by every secret write, so a migration can't put back a value a save just replaced.
+    secrets_write: Mutex<()>,
 }
 
 impl Store {
     pub fn new(dir: PathBuf) -> Self {
         std::fs::create_dir_all(&dir).ok();
         std::fs::create_dir_all(dir.join("chats")).ok();
-        let fallback = read_json::<HashMap<String, String>>(&dir.join("secrets.local.json"))
-            .unwrap_or_default();
         Store {
+            secrets_fallback: Mutex::new(secrets::load_fallback(&dir)),
+            secrets_write: Mutex::new(()),
             dir,
-            secrets_fallback: Mutex::new(fallback),
         }
     }
 

@@ -66,10 +66,19 @@ pub fn list_connections(st: State<'_, AppState>) -> Vec<ConnectionConfig> {
 #[tauri::command]
 pub fn save_connection(
     st: State<'_, AppState>,
+    config: ConnectionConfig,
+    secrets: Option<ConnectionSecrets>,
+) -> Result<ConnectionConfig> {
+    store_connection(&st.store, config, secrets)
+}
+
+/// Secrets before the list: when the keychain refuses, no row is written, so a retry can't leave a
+/// duplicate connection without its password.
+pub fn store_connection(
+    store: &crate::config::Store,
     mut config: ConnectionConfig,
     secrets: Option<ConnectionSecrets>,
 ) -> Result<ConnectionConfig> {
-    let mut list = st.store.connections();
     let now = chrono::Utc::now().to_rfc3339();
     if config.id.is_empty() {
         config.id = uuid::Uuid::new_v4().to_string();
@@ -92,14 +101,15 @@ pub fn save_connection(
             secrets = Some(s);
         }
     }
+    if let Some(s) = secrets {
+        store.save_connection_secrets(&config.id, &s)?;
+    }
+    let mut list = store.connections();
     match list.iter_mut().find(|c| c.id == config.id) {
         Some(existing) => *existing = config.clone(),
         None => list.push(config.clone()),
     }
-    st.store.save_connections(&list)?;
-    if let Some(s) = secrets {
-        st.store.save_connection_secrets(&config.id, &s)?;
-    }
+    store.save_connections(&list)?;
     Ok(config)
 }
 

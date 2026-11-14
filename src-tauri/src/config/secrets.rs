@@ -3,7 +3,9 @@
 use super::{ConnectionSecrets, Store};
 use crate::error::{AppError, Result};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::Path;
+
 const KEYRING_SERVICE: &str = "com.aindong.agentql";
 
 /// The keyring backend blocks on its own async runtime, which panics when called from a tokio
@@ -37,6 +39,23 @@ fn keyring_set(key: &str, value: Option<&str>) -> bool {
     })
 }
 
+const FALLBACK: &str = "secrets.local.json";
+
+const REFUSED: &str = "The OS keychain refused to store this secret. To keep it in a plaintext file instead, \
+turn on Settings > General > \"Store secrets in a plaintext file when no keychain is available\".";
+
+/// A fallback file that doesn't parse is renamed to `.corrupt`, so the next write can't wipe what it holds.
+pub(super) fn load_fallback(dir: &Path) -> HashMap<String, String> {
+    let path = dir.join(FALLBACK);
+    let Ok(data) = std::fs::read(&path) else {
+        return HashMap::new();
+    };
+    serde_json::from_slice(&data).unwrap_or_else(|_| {
+        let _ = std::fs::rename(&path, dir.join("secrets.local.json.corrupt"));
+        HashMap::new()
+    })
+}
+
 impl Store {
     pub fn get_secret(&self, key: &str) -> Option<String> {
         // The fallback file only ever holds values the keychain refused, so it is the freshest source.
@@ -46,29 +65,74 @@ impl Store {
         keyring_get(key)
     }
 
+    /// The keychain, or the plaintext file only when `allow_plaintext_secrets` is on. Removing a secret
+    /// (`None`) always drops it from the file.
     pub fn set_secret(&self, key: &str, value: Option<&str>) -> Result<()> {
+        let _write = self.secrets_write.lock().unwrap();
         let keyring_ok = keyring_set(key, value);
-        // ponytail: plaintext local fallback when no OS keychain is reachable (e.g. WSL / headless);
-        // the UI surfaces `secret_storage` so the user knows.
         let mut fb = self.secrets_fallback.lock().unwrap();
-        if keyring_ok {
-            fb.remove(key);
-        } else if let Some(v) = value {
-            fb.insert(key.to_string(), v.to_string());
-        } else {
-            fb.remove(key);
+        match value {
+            Some(v) if !keyring_ok => {
+                if !self.settings().allow_plaintext_secrets {
+                    return Err(AppError::Msg(REFUSED.into()));
+                }
+                fb.insert(key.to_string(), v.to_string());
+            }
+            _ if fb.remove(key).is_none() => return Ok(()),
+            _ => {}
         }
-        write_secret_json(&self.path("secrets.local.json"), &*fb)
+        write_secret_json(&self.path(FALLBACK), &*fb)
     }
 
+    /// "file" while any secret sits in the plaintext file, else "keychain" if it works, else "file" or
+    /// "none" by the opt-in.
     pub fn secret_storage(&self) -> &'static str {
-        off_runtime(|| match keyring::Entry::new(KEYRING_SERVICE, "__probe__") {
+        if !self.secrets_fallback.lock().unwrap().is_empty() {
+            return "file";
+        }
+        let keychain = off_runtime(|| match keyring::Entry::new(KEYRING_SERVICE, "__probe__") {
             Ok(e) if e.set_password("1").is_ok() => {
                 let _ = e.delete_credential();
-                "keychain"
+                true
             }
-            _ => "file",
-        })
+            _ => false,
+        });
+        match (keychain, self.settings().allow_plaintext_secrets) {
+            (true, _) => "keychain",
+            (false, true) => "file",
+            (false, false) => "none",
+        }
+    }
+
+    /// Moves plaintext entries into the keychain, each removed from the file only after it reads back.
+    /// Stops at the first refusal: a locked Linux Secret Service can take ~30 s per call. Returns how
+    /// many moved.
+    pub fn migrate_plaintext_secrets(&self) -> usize {
+        let snapshot: Vec<(String, String)> = self
+            .secrets_fallback
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let mut moved = 0;
+        for (k, v) in snapshot {
+            let _write = self.secrets_write.lock().unwrap();
+            if self.secrets_fallback.lock().unwrap().get(&k) != Some(&v) {
+                continue; // a save changed or removed it since the snapshot
+            }
+            if !keyring_set(&k, Some(&v)) || keyring_get(&k).as_deref() != Some(v.as_str()) {
+                break;
+            }
+            let mut fb = self.secrets_fallback.lock().unwrap();
+            fb.remove(&k);
+            if write_secret_json(&self.path(FALLBACK), &*fb).is_err() {
+                fb.insert(k, v); // still in the file on disk; keep reading it from there
+                break;
+            }
+            moved += 1;
+        }
+        moved
     }
 
     pub fn connection_secrets(&self, id: &str) -> ConnectionSecrets {
