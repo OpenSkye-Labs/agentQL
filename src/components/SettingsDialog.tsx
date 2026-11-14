@@ -68,7 +68,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     version: string;
     data_dir: string;
     mcp_port: number | null;
-    secret_storage: string;
+    secret_storage: "keychain" | "file" | "none";
   } | null>(null);
 
   useEffect(() => {
@@ -113,6 +113,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       for (const [id, key] of Object.entries(keys)) {
         if (key) await api.setProviderKey(id, key);
       }
+      if (draft.allow_plaintext_secrets && Object.values(keys).some(Boolean))
+        useStore.getState().refreshSecretStorage();
       toast("Settings saved", "success");
       onOpenChange(false);
     } catch (e) {
@@ -199,7 +201,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 checked={!!draft.allow_plaintext_secrets}
                 onChange={(v) => update({ allow_plaintext_secrets: v })}
                 label="Store secrets in a plaintext file when no keychain is available"
-                description="Only for machines without an OS keychain (WSL, headless Linux). Passwords and API keys are then saved unencrypted in secrets.local.json in the data directory. Off: saving a secret fails instead."
+                description="Only for machines without an OS keychain (WSL, headless Linux). Passwords and API keys are then saved unencrypted in secrets.local.json in the data directory. Off: saving a secret fails instead. Turning it off doesn't remove secrets already in the file; they move to the keychain on the next start where one works."
               />
             </>
           )}

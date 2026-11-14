@@ -103,6 +103,8 @@ interface State {
   toast: (text: string, kind?: Toast["kind"]) => void;
   dismissToast: (id: number) => void;
   saveSettings: (s: Settings) => Promise<void>;
+  /** Re-reads where secrets live. The keychain probe can block, so only after something that may change it. */
+  refreshSecretStorage: () => void;
 
   saveDashboard: (d: Dashboard) => Promise<void>;
   deleteDashboard: (id: string) => Promise<void>;
@@ -127,6 +129,7 @@ const invalidateCatalog = (connId: string) => {
 const uid = () => `${Date.now().toString(36)}-${(tabSeq++).toString(36)}`;
 
 let initOnce: Promise<void> | undefined;
+let storageSeq = 0;
 
 const DEFAULT_SETTINGS: Settings = { providers: [], row_limit: 1000, agent_allow_writes: false, theme: "system" };
 
@@ -178,7 +181,11 @@ export const useStore = create<State>((set, get) => ({
       );
     })()),
 
-  refreshConnections: async () => set({ connections: await api.listConnections() }),
+  refreshConnections: async () => {
+    set({ connections: await api.listConnections() });
+    // Called after every connection save; with the opt-in on, a refused keychain save went to the plaintext file.
+    if (get().settings.allow_plaintext_secrets) get().refreshSecretStorage();
+  },
 
   connect: async (id, database) => {
     const cfg = get().connections.find((c) => c.id === id);
@@ -333,14 +340,19 @@ export const useStore = create<State>((set, get) => ({
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   saveSettings: async (settings) => {
+    const optInChanged = !!get().settings.allow_plaintext_secrets !== !!settings.allow_plaintext_secrets;
     await api.saveSettings(settings);
     set({ settings });
-    // The plaintext opt-in changes what the status bar badge should say.
+    if (optInChanged) get().refreshSecretStorage();
+    applyTheme(settings.theme, settings.editor_font_size ?? null);
+  },
+
+  refreshSecretStorage: () => {
+    const seq = ++storageSeq;
     void api.secretStorage().then(
-      (secretStorage) => set({ secretStorage }),
+      (secretStorage) => seq === storageSeq && set({ secretStorage }),
       () => {},
     );
-    applyTheme(settings.theme, settings.editor_font_size ?? null);
   },
 
   saveDashboard: async (d) => {

@@ -149,7 +149,7 @@ function runStatement(sql: string, limit: number) {
 const handlers: Record<string, Handler> = {
   list_connections: () => [...connections],
   save_connection: (a) => {
-    if ((a.secrets as { password?: string } | null)?.password) refuseSecret();
+    if (Object.values((a.secrets as Record<string, string | null> | null) ?? {}).some(Boolean)) refuseSecret();
     // Kept in memory like the scope, so an edit (e.g. tagging a connection production) shows until reload.
     const c = { ...(a.config as ConnectionConfig), id: (a.config as ConnectionConfig).id || crypto.randomUUID() };
     const i = connections.findIndex((x) => x.id === c.id);
@@ -312,6 +312,7 @@ function secretStorage() {
   const mode = new URLSearchParams(location.search).get("secrets") ?? "file";
   return mode === "none" && settings.allow_plaintext_secrets ? "file" : mode;
 }
+// Same text as REFUSED in src-tauri/src/config/secrets.rs.
 function refuseSecret() {
   if (secretStorage() === "none")
     throw 'The OS keychain refused to store this secret. To keep it in a plaintext file instead, turn on Settings > General > "Store secrets in a plaintext file when no keychain is available".';

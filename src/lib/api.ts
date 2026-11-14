@@ -150,7 +150,12 @@ export const api = {
   runChart: (connectionId: string, source: unknown) =>
     invoke<QueryResult>("run_chart", { req: { connection_id: connectionId, source } }),
   appInfo: () =>
-    invoke<{ version: string; data_dir: string; mcp_port: number | null; secret_storage: string }>("app_info"),
+    invoke<{
+      version: string;
+      data_dir: string;
+      mcp_port: number | null;
+      secret_storage: "keychain" | "file" | "none";
+    }>("app_info"),
 };
 
 export interface RedisValue {
