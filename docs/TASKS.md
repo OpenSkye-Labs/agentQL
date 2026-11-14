@@ -113,3 +113,7 @@ M9 Linux tier-1 and performance proof (S)
 - [x] docs/PERFORMANCE.md with measured cold start / RSS / 100k-row render per platform (bench mode + Perf workflow)
 - [ ] Linux: first frame waits ~30 s on a D-Bus timeout when no Secret Service answers (likely sync `secret_storage`)
 - [ ] Quote the numbers in the README once Linux cold start is fixed
+
+Security
+
+- [x] Plaintext secrets file only by opt-in; existing entries migrate to the keychain (fix/plaintext-secrets-opt-in)
