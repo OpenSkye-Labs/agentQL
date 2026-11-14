@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { CheckCircle2, FolderOpen, XCircle } from "lucide-react";
@@ -63,9 +63,14 @@ export function ConnectionDialog({
   const [sshAuth, setSshAuth] = useState<SshAuth>("agent");
   const [keyPath, setKeyPath] = useState("~/.ssh/id_ed25519");
   const [busy, setBusy] = useState<"test" | "save" | null>(null);
+  // The id whose saved secrets are loaded. Until it matches `edit`, Test and Save stay off: saving with the empty
+  // form would delete the stored passwords, and a late answer for another connection must not fill this one.
+  const [secretsFor, setSecretsFor] = useState<string | null>(null);
+  const loadSeq = useRef(0);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
+    const seq = ++loadSeq.current;
     if (!open) return;
     setTestResult(null);
     if (edit) {
@@ -75,7 +80,18 @@ export function ConnectionDialog({
       const a = edit.ssh?.auth;
       setSshAuth(a === "password" ? "password" : a && typeof a === "object" ? "key" : "agent");
       if (a && typeof a === "object") setKeyPath(a.key_file.path);
-      void api.getConnectionSecrets(edit.id).then(setSecrets);
+      setSecrets({});
+      setSecretsFor(null);
+      api.getConnectionSecrets(edit.id).then(
+        (s) => {
+          if (seq !== loadSeq.current) return;
+          setSecrets(s);
+          setSecretsFor(edit.id);
+        },
+        (e) => {
+          if (seq === loadSeq.current) toast(`Could not read the saved passwords: ${errMsg(e)}`, "error");
+        },
+      );
     } else {
       setCfg(blank());
       setSecrets({});
@@ -83,7 +99,8 @@ export function ConnectionDialog({
       setUseSsh(false);
       setSshAuth("agent");
     }
-  }, [open, edit]);
+  }, [open, edit, toast]);
+  const loading = !!edit && secretsFor !== edit.id;
 
   const set = <K extends keyof ConnectionConfig>(k: K, v: ConnectionConfig[K]) => setCfg((c) => ({ ...c, [k]: v }));
   const sql = isSql(cfg.driver);
@@ -153,13 +170,13 @@ export function ConnectionDialog({
               {testResult.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />} {testResult.text}
             </span>
           )}
-          <Button onClick={test} disabled={busy !== null}>
+          <Button onClick={test} disabled={busy !== null || loading}>
             {busy === "test" ? <Spinner /> : null} Test
           </Button>
-          <Button onClick={() => save(false)} disabled={busy !== null}>
+          <Button onClick={() => save(false)} disabled={busy !== null || loading}>
             Save
           </Button>
-          <Button variant="primary" onClick={() => save(true)} disabled={busy !== null}>
+          <Button variant="primary" onClick={() => save(true)} disabled={busy !== null || loading}>
             {busy === "save" ? <Spinner /> : null} Save & connect
           </Button>
         </>
