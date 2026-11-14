@@ -149,13 +149,17 @@ export const useStore = create<State>((set, get) => ({
   // Runs once (StrictMode mounts App twice; bench mode awaits it too) so a late response cannot overwrite newer state.
   init: () =>
     (initOnce ??= (async () => {
-      const [connections, settings, dashboards, savedQueries, history, secretStorage] = await Promise.all([
+      // The keychain probe can wait seconds (an unlock prompt, a D-Bus timeout); the lists must not wait for it.
+      void api.secretStorage().then(
+        (secretStorage) => set({ secretStorage }),
+        () => {},
+      );
+      const [connections, settings, dashboards, savedQueries, history] = await Promise.all([
         api.listConnections(),
         api.getSettings().catch(() => DEFAULT_SETTINGS),
         api.kvGet<Dashboard[]>("dashboards"),
         api.kvGet<SavedQuery[]>("saved_queries"),
         api.kvGet<HistoryEntry[]>("history"),
-        api.secretStorage().catch(() => null),
       ]);
       set({
         connections,
@@ -163,7 +167,6 @@ export const useStore = create<State>((set, get) => ({
         dashboards: dashboards ?? [],
         savedQueries: savedQueries ?? [],
         history: history ?? [],
-        secretStorage,
       });
       applyTheme(settings.theme, settings.editor_font_size ?? null);
       // "Follow system" re-reads the OS preference when the window regains focus.
