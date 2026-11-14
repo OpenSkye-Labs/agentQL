@@ -65,13 +65,24 @@ pub fn list_connections(st: State<'_, AppState>) -> Vec<ConnectionConfig> {
 
 /// Reads, edits and rewrites `connections.json` under one lock. Every writer goes through here: the commands run
 /// concurrently, and two unlocked read-modify-writes drop each other's change (and share the `.tmp` file).
+/// A file that exists and does not parse is an error, never replaced by the edited empty list.
 pub fn update_connections<T>(
     store: &Store,
     f: impl FnOnce(&mut Vec<ConnectionConfig>) -> Result<T>,
 ) -> Result<T> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut list = store.connections();
+    // shortcut: repeats Store::read_strict, which is private to config.rs (over the 20 KB commit limit); move this
+    // helper onto Store when config.rs is split.
+    let mut list: Vec<ConnectionConfig> = match std::fs::read(store.dir().join("connections.json")) {
+        Ok(data) => serde_json::from_slice(&data).map_err(|e| {
+            AppError::Msg(format!(
+                "connections.json is not valid JSON ({e}); fix or remove it before connections can be saved"
+            ))
+        })?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e.into()),
+    };
     let out = f(&mut list)?;
     store.save_connections(&list)?;
     Ok(out)

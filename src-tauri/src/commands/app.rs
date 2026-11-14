@@ -69,6 +69,10 @@ pub fn kv_set(st: State<'_, AppState>, name: String, value: Value) -> Result<()>
     {
         return Err(AppError::Msg("invalid store name".into()));
     }
+    // These have their own commands; connections.json in particular is written only under update_connections' lock.
+    if matches!(name.as_str(), "connections" | "settings") {
+        return Err(AppError::Msg(format!("{name} is not a key-value store")));
+    }
     st.store.write(&format!("{name}.json"), &value)
 }
 
