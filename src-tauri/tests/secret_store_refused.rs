@@ -14,7 +14,9 @@ impl keyring::credential::CredentialBuilderApi for Refusing {
         _: &str,
         _: &str,
     ) -> keyring::Result<Box<keyring::credential::Credential>> {
-        Err(keyring::Error::NoStorageAccess("test keychain refuses".into()))
+        Err(keyring::Error::NoStorageAccess(
+            "test keychain refuses".into(),
+        ))
     }
     fn as_any(&self) -> &dyn Any {
         self
@@ -59,7 +61,10 @@ fn refused_save_errors_and_writes_nothing_when_not_allowed() {
         err.to_string().contains("plaintext"),
         "error should name the plaintext setting: {err}"
     );
-    assert!(!file_text(&dir).contains("hunter2-off"), "secret leaked into secrets.local.json");
+    assert!(
+        !file_text(&dir).contains("hunter2-off"),
+        "secret leaked into secrets.local.json"
+    );
     assert!(store.connection_secrets("c1").password.is_none());
     assert_eq!(store.secret_storage(), "none");
     let _ = std::fs::remove_dir_all(&dir);
@@ -72,7 +77,10 @@ fn refused_save_goes_to_file_when_allowed() {
         .set_provider_api_key("anthropic", Some("sk-test-on"))
         .expect("save must succeed into the plaintext file when allowed");
     assert!(file_text(&dir).contains("sk-test-on"));
-    assert_eq!(store.provider_api_key("anthropic").as_deref(), Some("sk-test-on"));
+    assert_eq!(
+        store.provider_api_key("anthropic").as_deref(),
+        Some("sk-test-on")
+    );
     assert_eq!(store.secret_storage(), "file");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -80,7 +88,9 @@ fn refused_save_goes_to_file_when_allowed() {
 #[test]
 fn delete_still_works_when_refused() {
     let (store, dir) = store("del", true);
-    store.set_provider_api_key("openai", Some("sk-del")).unwrap();
+    store
+        .set_provider_api_key("openai", Some("sk-del"))
+        .unwrap();
     store.save_settings(&Settings::default()).unwrap();
     store
         .set_provider_api_key("openai", None)
@@ -97,7 +107,10 @@ fn migration_keeps_entries_the_keychain_refuses() {
     let store = Store::new(dir.clone());
     assert_eq!(store.migrate_plaintext_secrets(), 0);
     assert!(file_text(&dir).contains("kept-in-file"));
-    assert_eq!(store.connection_secrets("c9").password.as_deref(), Some("kept-in-file"));
+    assert_eq!(
+        store.connection_secrets("c9").password.as_deref(),
+        Some("kept-in-file")
+    );
     assert_eq!(store.secret_storage(), "file");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -115,7 +128,10 @@ fn refused_connection_save_leaves_no_config_behind() {
         ..Default::default()
     };
     assert!(agentql_lib::commands::store_connection(&store, config, Some(secrets)).is_err());
-    assert!(store.connections().is_empty(), "a retry would leave a duplicate without its password");
+    assert!(
+        store.connections().is_empty(),
+        "a retry would leave a duplicate without its password"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -127,6 +143,9 @@ fn corrupt_secrets_file_is_renamed_not_wiped() {
     let store = Store::new(dir.clone());
     store.set_provider_api_key("x", Some("sk-after")).unwrap();
     let kept = std::fs::read(dir.join("secrets.local.json.corrupt")).unwrap_or_default();
-    assert_eq!(kept, bad, "the unparseable file must survive as secrets.local.json.corrupt");
+    assert_eq!(
+        kept, bad,
+        "the unparseable file must survive as secrets.local.json.corrupt"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -25,7 +25,10 @@ impl keyring::credential::CredentialBuilderApi for MemBuilder {
         service: &str,
         user: &str,
     ) -> keyring::Result<Box<keyring::credential::Credential>> {
-        Ok(Box::new(MemCred(self.0.clone(), format!("{service}/{user}"))))
+        Ok(Box::new(MemCred(
+            self.0.clone(),
+            format!("{service}/{user}"),
+        )))
     }
     fn as_any(&self) -> &dyn Any {
         self
@@ -38,14 +41,27 @@ impl keyring::credential::CredentialApi for MemCred {
         while secret == GATED && !RELEASED.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
         }
-        self.0.lock().unwrap().insert(self.1.clone(), secret.to_vec());
+        self.0
+            .lock()
+            .unwrap()
+            .insert(self.1.clone(), secret.to_vec());
         Ok(())
     }
     fn get_secret(&self) -> keyring::Result<Vec<u8>> {
-        self.0.lock().unwrap().get(&self.1).cloned().ok_or(keyring::Error::NoEntry)
+        self.0
+            .lock()
+            .unwrap()
+            .get(&self.1)
+            .cloned()
+            .ok_or(keyring::Error::NoEntry)
     }
     fn delete_credential(&self) -> keyring::Result<()> {
-        self.0.lock().unwrap().remove(&self.1).map(|_| ()).ok_or(keyring::Error::NoEntry)
+        self.0
+            .lock()
+            .unwrap()
+            .remove(&self.1)
+            .map(|_| ())
+            .ok_or(keyring::Error::NoEntry)
     }
     fn as_any(&self) -> &dyn Any {
         self
@@ -75,17 +91,26 @@ fn file_text(dir: &std::path::Path) -> String {
 }
 
 fn in_keychain(value: &str) -> bool {
-    mem().lock().unwrap().values().any(|v| v == value.as_bytes())
+    mem()
+        .lock()
+        .unwrap()
+        .values()
+        .any(|v| v == value.as_bytes())
 }
 
 #[test]
 fn save_goes_to_keychain_not_file() {
     let dir = dir("save");
     let store = Store::new(dir.clone());
-    store.set_provider_api_key("anthropic", Some("sk-kc-save")).unwrap();
+    store
+        .set_provider_api_key("anthropic", Some("sk-kc-save"))
+        .unwrap();
     assert!(in_keychain("sk-kc-save"));
     assert!(!file_text(&dir).contains("sk-kc-save"));
-    assert_eq!(store.provider_api_key("anthropic").as_deref(), Some("sk-kc-save"));
+    assert_eq!(
+        store.provider_api_key("anthropic").as_deref(),
+        Some("sk-kc-save")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -98,12 +123,22 @@ fn existing_plaintext_moves_into_keychain() {
     )
     .unwrap();
     let store = Store::new(dir.clone());
-    assert_eq!(store.secret_storage(), "file", "plaintext entries exist before migrating");
+    assert_eq!(
+        store.secret_storage(),
+        "file",
+        "plaintext entries exist before migrating"
+    );
     assert_eq!(store.migrate_plaintext_secrets(), 2);
     assert!(in_keychain("pw-migrate") && in_keychain("sk-migrate"));
     let left = file_text(&dir);
-    assert!(!left.contains("pw-migrate") && !left.contains("sk-migrate"), "file still holds: {left}");
-    assert_eq!(store.connection_secrets("m1").password.as_deref(), Some("pw-migrate"));
+    assert!(
+        !left.contains("pw-migrate") && !left.contains("sk-migrate"),
+        "file still holds: {left}"
+    );
+    assert_eq!(
+        store.connection_secrets("m1").password.as_deref(),
+        Some("pw-migrate")
+    );
     assert_eq!(store.secret_storage(), "keychain");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -118,7 +153,9 @@ fn allowed_plaintext_is_not_used_when_keychain_works() {
             ..Default::default()
         })
         .unwrap();
-    store.set_provider_api_key("groq", Some("sk-allowed")).unwrap();
+    store
+        .set_provider_api_key("groq", Some("sk-allowed"))
+        .unwrap();
     assert!(in_keychain("sk-allowed"));
     assert!(!file_text(&dir).contains("sk-allowed"));
     let _ = std::fs::remove_dir_all(&dir);
@@ -127,7 +164,11 @@ fn allowed_plaintext_is_not_used_when_keychain_works() {
 #[test]
 fn save_during_migration_is_not_reverted() {
     let dir = dir("race");
-    std::fs::write(dir.join("secrets.local.json"), r#"{"llm:race":"old-gated"}"#).unwrap();
+    std::fs::write(
+        dir.join("secrets.local.json"),
+        r#"{"llm:race":"old-gated"}"#,
+    )
+    .unwrap();
     let store = Arc::new(Store::new(dir.clone()));
     let migrating = {
         let s = store.clone();
