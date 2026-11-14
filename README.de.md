@@ -85,6 +85,18 @@ SQL-Statement, das er ausführt, landet mit dem Tag `agent` in der normalen Quer
 deinem Anthropic- oder OpenAI-Key, jedem OpenAI-kompatiblen Endpunkt wie Ollama oder deinem bestehenden Claude
 Code- oder Codex-CLI-Abo über einen lokalen MCP-Endpunkt.
 
+## Leistung
+
+Release-Build auf GitHub-gehosteten Runnern (geteilte VMs ohne GPU), Median aus 5 Läufen:
+
+|         | Kaltstart | Speicher mit 100k-Zeilen-Ergebnis | 100k-Zeilen-Abfrage: Klick bis Tabelle gezeichnet |
+| ------- | --------- | --------------------------------- | ------------------------------------------------- |
+| Linux   | 961 ms    | 674 MB                            | 1200 ms                                           |
+| macOS   | 2249 ms   | 480 MB                            | 896 ms                                            |
+| Windows | 553 ms    | 459 MB                            | 463 ms                                            |
+
+Auf einem Apple-M6-Desktop: 334 ms Kaltstart, 537 MB mit dem 100k-Zeilen-Ergebnis. Methode und weitere Zahlen: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+
 ## Installation
 
 Lade den Installer für deine Plattform aus dem [neuesten Release](https://github.com/OpenSkye-Labs/agentQL/releases/latest)

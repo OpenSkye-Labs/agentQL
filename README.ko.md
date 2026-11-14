@@ -81,6 +81,18 @@ SSH 터널 (agent, 키 파일, 비밀번호)을 지원합니다. 비밀번호는
 `agent` 태그가 붙어 일반 쿼리 기록에 남습니다. Anthropic 또는 OpenAI 키, Ollama 같은 OpenAI 호환 엔드포인트,
 혹은 로컬 MCP 엔드포인트를 통한 기존 Claude Code 또는 Codex CLI 구독으로 동작합니다.
 
+## 성능
+
+GitHub 호스팅 러너(GPU 없는 공유 VM)에서 실행한 릴리스 빌드, 5회 실행의 중앙값:
+
+|         | 콜드 스타트 | 10만 행 결과 표시 시 메모리 | 10만 행 쿼리: 클릭부터 그리드 표시까지 |
+| ------- | ----------- | --------------------------- | -------------------------------------- |
+| Linux   | 961 ms      | 674 MB                      | 1200 ms                                |
+| macOS   | 2249 ms     | 480 MB                      | 896 ms                                 |
+| Windows | 553 ms      | 459 MB                      | 463 ms                                 |
+
+Apple M6 데스크톱에서는 콜드 스타트 334 ms, 10만 행 결과 표시 시 537 MB입니다. 측정 방법과 자세한 수치: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+
 ## 설치
 
 [최신 릴리스](https://github.com/OpenSkye-Labs/agentQL/releases/latest)에서 플랫폼에 맞는 설치 파일을 내려받으세요.

@@ -85,6 +85,18 @@ instruction SQL qu'il exécute est consignée dans l'historique de requêtes hab
 fonctionne avec votre clé Anthropic ou OpenAI, n'importe quel point de terminaison compatible OpenAI comme Ollama, ou
 votre abonnement Claude Code ou Codex CLI existant via un point de terminaison MCP local.
 
+## Performances
+
+Build de release sur des runners hébergés par GitHub (VM partagées sans GPU), médiane de 5 exécutions :
+
+|         | Démarrage à froid | Mémoire avec un résultat de 100k lignes | Requête de 100k lignes : du clic à la grille affichée |
+| ------- | ----------------- | --------------------------------------- | ----------------------------------------------------- |
+| Linux   | 961 ms            | 674 MB                                  | 1200 ms                                               |
+| macOS   | 2249 ms           | 480 MB                                  | 896 ms                                                |
+| Windows | 553 ms            | 459 MB                                  | 463 ms                                                |
+
+Sur un Mac de bureau Apple M6 : démarrage à froid en 334 ms, 537 MB avec le résultat de 100k lignes. Méthode et autres chiffres : [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+
 ## Installation
 
 Téléchargez l'installeur pour votre plateforme depuis la [dernière version](https://github.com/OpenSkye-Labs/agentQL/releases/latest) :

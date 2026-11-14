@@ -79,6 +79,18 @@ connection can scope which schemas and tables the agent may see, and every SQL s
 normal query history tagged `agent`. It works with your Anthropic or OpenAI key, any OpenAI-compatible
 endpoint such as Ollama, or your existing Claude Code or Codex CLI subscription through a local MCP endpoint.
 
+## Performance
+
+Release build on GitHub-hosted runners (shared VMs without a GPU), median of 5 runs:
+
+|         | Cold start | Memory with a 100k-row result | 100k-row query: click to grid painted |
+| ------- | ---------- | ----------------------------- | ------------------------------------- |
+| Linux   | 961 ms     | 674 MB                        | 1200 ms                               |
+| macOS   | 2249 ms    | 480 MB                        | 896 ms                                |
+| Windows | 553 ms     | 459 MB                        | 463 ms                                |
+
+On an Apple M6 desktop: 334 ms cold start, 537 MB with the 100k-row result. Method and more numbers: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+
 ## Install
 
 Download the installer for your platform from the [latest release](https://github.com/OpenSkye-Labs/agentQL/releases/latest):

@@ -78,6 +78,18 @@ SQLite 上为 `PRAGMA query_only`），写操作会停在一张展示确切语�
 它运行的每条 SQL 语句都会进入常规查询历史并标记为 `agent`。它可以使用你的 Anthropic 或 OpenAI key、任何 OpenAI 兼容端点（如 Ollama），
 或通过本地 MCP 端点使用你已有的 Claude Code 或 Codex CLI 订阅。
 
+## 性能
+
+在 GitHub 托管的运行器（无 GPU 的共享虚拟机）上运行发布版构建，取 5 次运行的中位数：
+
+|         | 冷启动  | 显示 10 万行结果时的内存 | 10 万行查询：从点击到表格绘制完成 |
+| ------- | ------- | ------------------------ | --------------------------------- |
+| Linux   | 961 ms  | 674 MB                   | 1200 ms                           |
+| macOS   | 2249 ms | 480 MB                   | 896 ms                            |
+| Windows | 553 ms  | 459 MB                   | 463 ms                            |
+
+在 Apple M6 台式机上：冷启动 334 ms，显示 10 万行结果时 537 MB。测试方法和更多数据： [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+
 ## 安装
 
 从[最新发布](https://github.com/OpenSkye-Labs/agentQL/releases/latest)下载对应平台的安装包：

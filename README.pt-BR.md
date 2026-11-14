@@ -82,6 +82,18 @@ executa entra no histórico normal de consultas marcada como `agent`. Funciona c
 qualquer endpoint compatível com a OpenAI, como o Ollama, ou a sua assinatura do Claude Code ou da CLI do Codex por meio de
 um endpoint MCP local.
 
+## Desempenho
+
+Build de release em runners hospedados pelo GitHub (VMs compartilhadas sem GPU), mediana de 5 execuções:
+
+|         | Inicialização a frio | Memória com um resultado de 100 mil linhas | Consulta de 100 mil linhas: do clique à grade desenhada |
+| ------- | -------------------- | ------------------------------------------ | ------------------------------------------------------- |
+| Linux   | 961 ms               | 674 MB                                     | 1200 ms                                                 |
+| macOS   | 2249 ms              | 480 MB                                     | 896 ms                                                  |
+| Windows | 553 ms               | 459 MB                                     | 463 ms                                                  |
+
+Em um desktop Apple M6: inicialização a frio de 334 ms e 537 MB com o resultado de 100 mil linhas. Método e mais números: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+
 ## Instalação
 
 Baixe o instalador da sua plataforma na [última release](https://github.com/OpenSkye-Labs/agentQL/releases/latest):
