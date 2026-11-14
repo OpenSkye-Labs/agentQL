@@ -58,6 +58,8 @@ jobs:
         run: |
           bin=src-tauri/target/release/agentql
           if [ "$RUNNER_OS" = Windows ]; then bin=$bin.exe; fi
-          if [ "$RUNNER_OS" = Linux ]; then run="xvfb-run -a"; fi
+          # A desktop session has a D-Bus session bus; without one, GTK/WebKitGTK startup waits ~30 s before the
+          # window exists (setup_ms in PERFORMANCE.md).
+          if [ "$RUNNER_OS" = Linux ]; then run="xvfb-run -a dbus-run-session --"; fi
           $run node scripts/perf/bench-app.mjs "$bin" 5 | tee perf.json # xvfb-run folds stderr in; keep it in the log
           { echo '### ${{ matrix.os }}'; echo '```json'; cat perf.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
