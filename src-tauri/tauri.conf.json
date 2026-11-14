@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "AgentQL",
+        "create": false,
         "width": 1400,
         "height": 900,
         "minWidth": 900,

@@ -181,3 +181,7 @@ Append-only record of shipped behaviour. Newest at the bottom.
 
 - README translations: `README.<lang>.md` at the repo root for 简体中文, 日本語, 한국어, Español, Português (BR), Deutsch and
   Français, with a language bar under the badges and a note that English is authoritative.
+
+## 2026-11-14
+
+- Bench mode (M9): `AGENTQL_BENCH`, `scripts/perf/bench-app.mjs` and the Perf workflow. docs/PERFORMANCE.md.
