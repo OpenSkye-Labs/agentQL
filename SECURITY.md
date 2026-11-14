@@ -20,13 +20,17 @@ AgentQL handles database credentials, SSH keys and LLM API keys, so we care most
 
 Database passwords, SSH passwords and key passphrases, and LLM API keys go to the OS keychain (macOS
 Keychain, Windows Credential Manager, the Secret Service on Linux). They never go into `connections.json` or
-`settings.json`.
+`settings.json`; a password inside a connection URL (`user:pass@` or `?password=`) is moved out on save.
+Connections saved before this release may still hold a `?password=` URL until they are saved again.
 
 If the keychain refuses a secret (WSL, a headless Linux box, a locked keychain), the save fails. AgentQL writes
 it to `secrets.local.json` in the app data directory only if you turn on Settings > General > "Store secrets in
-a plaintext file when no keychain is available". That file is not encrypted; on macOS and Linux only your user
-can read it (0600). The status bar shows "plaintext secrets" while any secret is in it, and AgentQL moves its
-entries into the keychain on the next start where the keychain works.
+a plaintext file when no keychain is available". That file is not encrypted. On macOS and Linux only your user
+can read it (0600); on Windows it takes the permissions of your roaming AppData folder, which a domain profile
+may sync to a server. The status bar shows "plaintext secrets" while any secret is in it or in a
+`secrets.local.json.corrupt` copy kept from a file that didn't parse; it rechecks at startup and after you save
+settings or a connection. AgentQL moves the file's entries into the keychain on the next start where the
+keychain works; a `.corrupt` copy you remove yourself.
 
 Versions up to and including 0.3.0 wrote to this file without asking whenever the keychain refused a secret.
 
