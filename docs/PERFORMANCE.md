@@ -10,15 +10,15 @@ throwaway data dir and a non-persistent WebView profile (your connections, setti
 localStorage are never read or written), and `src/lib/bench.ts` drives
 the real UI.
 
-| Number             | Meaning                                                                                                           |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `cold_start_ms`    | From the top of `run()` to the first painted frame showing the UI. Excludes the OS loader's few ms before main.   |
-| `setup_ms`         | The part of cold start until Rust `setup` has built the window (GTK/WebView init included).                       |
-| `script_ms`        | The part until the page's JS started, as seen by the backend's main thread (so it includes any main-thread wait). |
-| `rss_connected_mb` | Resident memory of the whole app (backend + every WebView process) with one idle SQLite connection.               |
-| `rss_100k_rows_mb` | The same, with a 100,000-row × 10-column result showing in a query tab.                                           |
-| `query_ipc_ms`     | `SELECT * FROM bench` (100k rows) over IPC into JS, without the UI: query + JSON + deserialisation.               |
-| `query_total_ms`   | The same query from a click on Run to the frame that paints the grid and its "100,000 rows" status.               |
+| Number             | Meaning                                                                                                         |
+| ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `cold_start_ms`    | From the top of `run()` to the first painted frame showing the UI. Excludes the OS loader's few ms before main. |
+| `setup_ms`         | The part of cold start until Rust `setup` has built the window (GTK/WebView init included).                     |
+| `script_ms`        | The part until the bundle's modules have evaluated and `main.tsx` runs, as the backend's main thread sees it.   |
+| `rss_connected_mb` | Resident memory of the whole app (backend + every WebView process) with one idle SQLite connection.             |
+| `rss_100k_rows_mb` | The same, with a 100,000-row × 10-column result showing in a query tab.                                         |
+| `query_ipc_ms`     | `SELECT * FROM bench` (100k rows) over IPC into JS, without the UI: query + JSON + deserialisation.             |
+| `query_total_ms`   | The same query from a click on Run to the frame that paints the grid and its "100,000 rows" status.             |
 
 Memory is the sum of RSS over the process tree: on Linux and Windows the WebView processes are the app's children;
 on macOS WKWebView's GPU, WebContent and Networking processes are XPC services under launchd, so the WebKit processes
@@ -54,24 +54,25 @@ ranged 279–443 ms, the 100k-row RSS 527–541 MB and click → grid painted 26
 
 ### GitHub-hosted runners
 
-Medians of 5 runs from the Perf workflow (run 43558857621). Shared VMs without a GPU, so these are for comparing
+Medians of 5 runs from the Perf workflow (run 43561000113). Shared VMs without a GPU, so these are for comparing
 releases with each other, not with the desktop numbers above.
 
 | Runner                    | Cold start | RSS, 1 connection | RSS, 100k rows | 100k-row query: IPC only | 100k-row query: click → grid painted |
 | ------------------------- | ---------- | ----------------- | -------------- | ------------------------ | ------------------------------------ |
-| ubuntu-22.04 (Xvfb)       | 961 ms     | 403 MB            | 674 MB         | 1108 ms                  | 1200 ms                              |
-| macos-latest              | 2249 ms    | 226 MB            | 480 MB         | 788 ms                   | 896 ms                               |
-| windows-latest (WebView2) | 553 ms     | 359 MB            | 459 MB         | 417 ms                   | 463 ms                               |
+| ubuntu-22.04 (Xvfb)       | 987 ms     | 404 MB            | 667 MB         | 899 ms                   | 1066 ms                              |
+| macos-latest              | 1646 ms    | 257 MB            | 520 MB         | 490 ms                   | 514 ms                               |
+| windows-latest (WebView2) | 729 ms     | 364 MB            | 458 MB         | 645 ms                   | 712 ms                               |
 
-Of the cold start, Rust setup took 94 ms on Linux, 492 ms on macOS and 345 ms on Windows (`setup_ms`); the page's
-JS started at 798 ms, 1996 ms and 431 ms (`script_ms`). The first run of each job is slower (cold disk cache); the
+Of the cold start, Rust setup took 104 ms on Linux, 173 ms on macOS and 540 ms on Windows (`setup_ms`); the page's
+JS started at 824 ms, 1470 ms and 669 ms (`script_ms`). The first run of each job is slower (cold disk cache); the
 median is not moved by it.
 
-**The 30 s Linux start was the runner, not the app.** The first Perf run measured 30.4 s on Linux. `setup_ms` showed
-all of it happened before the window existed (30.1 s of 30.4 s), so it was GTK/WebKitGTK start-up, not the
-keychain probe the UI makes later. The runner had no D-Bus session bus; under `dbus-run-session`, as in any desktop
-session, setup takes 94 ms. A Linux user should only see the same wait when starting AgentQL with no session bus (a bare X
-server or some SSH X-forwarding setups); `dbus-run-session agentql` avoids it.
+**The 30 s Linux start was the runner, not the app.** In the diagnostic run (43557629563) Linux took 30.4 s to its
+first frame and `setup_ms` was 30.1 s: the wait happened before the window existed (plugin, GTK and WebView
+initialisation, window build), so it was not the keychain probe the UI makes later. `xvfb-run` starts no D-Bus
+session bus; running the bench under `dbus-run-session`, as any desktop session provides, brought setup down to about
+100 ms, so start-up was waiting on that bus. A Linux user should only see the same wait when starting AgentQL with no
+session bus (a bare X server or some SSH X-forwarding setups); `dbus-run-session agentql` should avoid it.
 
 ### Where the memory goes (macOS, one run)
 

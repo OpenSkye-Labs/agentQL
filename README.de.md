@@ -91,9 +91,9 @@ Release-Build auf GitHub-gehosteten Runnern (geteilte VMs ohne GPU), Median aus 
 
 |         | Kaltstart | Speicher mit 100k-Zeilen-Ergebnis | 100k-Zeilen-Abfrage: Klick bis Tabelle gezeichnet |
 | ------- | --------- | --------------------------------- | ------------------------------------------------- |
-| Linux   | 961 ms    | 674 MB                            | 1200 ms                                           |
-| macOS   | 2249 ms   | 480 MB                            | 896 ms                                            |
-| Windows | 553 ms    | 459 MB                            | 463 ms                                            |
+| Linux   | 987 ms    | 667 MB                            | 1066 ms                                           |
+| macOS   | 1646 ms   | 520 MB                            | 514 ms                                            |
+| Windows | 729 ms    | 458 MB                            | 712 ms                                            |
 
 Auf einem Apple-M6-Desktop: 334 ms Kaltstart, 537 MB mit dem 100k-Zeilen-Ergebnis. Methode und weitere Zahlen: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 

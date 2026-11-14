@@ -85,9 +85,9 @@ Release build on GitHub-hosted runners (shared VMs without a GPU), median of 5 r
 
 |         | Cold start | Memory with a 100k-row result | 100k-row query: click to grid painted |
 | ------- | ---------- | ----------------------------- | ------------------------------------- |
-| Linux   | 961 ms     | 674 MB                        | 1200 ms                               |
-| macOS   | 2249 ms    | 480 MB                        | 896 ms                                |
-| Windows | 553 ms     | 459 MB                        | 463 ms                                |
+| Linux   | 987 ms     | 667 MB                        | 1066 ms                               |
+| macOS   | 1646 ms    | 520 MB                        | 514 ms                                |
+| Windows | 729 ms     | 458 MB                        | 712 ms                                |
 
 On an Apple M6 desktop: 334 ms cold start, 537 MB with the 100k-row result. Method and more numbers: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 

@@ -84,9 +84,9 @@ SQLite 上为 `PRAGMA query_only`），写操作会停在一张展示确切语�
 
 |         | 冷启动  | 显示 10 万行结果时的内存 | 10 万行查询：从点击到表格绘制完成 |
 | ------- | ------- | ------------------------ | --------------------------------- |
-| Linux   | 961 ms  | 674 MB                   | 1200 ms                           |
-| macOS   | 2249 ms | 480 MB                   | 896 ms                            |
-| Windows | 553 ms  | 459 MB                   | 463 ms                            |
+| Linux   | 987 ms  | 667 MB                   | 1066 ms                           |
+| macOS   | 1646 ms | 520 MB                   | 514 ms                            |
+| Windows | 729 ms  | 458 MB                   | 712 ms                            |
 
 在 Apple M6 台式机上：冷启动 334 ms，显示 10 万行结果时 537 MB。测试方法和更多数据： [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 

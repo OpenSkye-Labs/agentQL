@@ -88,9 +88,9 @@ Build de release em runners hospedados pelo GitHub (VMs compartilhadas sem GPU),
 
 |         | Inicialização a frio | Memória com um resultado de 100 mil linhas | Consulta de 100 mil linhas: do clique à grade desenhada |
 | ------- | -------------------- | ------------------------------------------ | ------------------------------------------------------- |
-| Linux   | 961 ms               | 674 MB                                     | 1200 ms                                                 |
-| macOS   | 2249 ms              | 480 MB                                     | 896 ms                                                  |
-| Windows | 553 ms               | 459 MB                                     | 463 ms                                                  |
+| Linux   | 987 ms               | 667 MB                                     | 1066 ms                                                 |
+| macOS   | 1646 ms              | 520 MB                                     | 514 ms                                                  |
+| Windows | 729 ms               | 458 MB                                     | 712 ms                                                  |
 
 Em um desktop Apple M6: inicialização a frio de 334 ms e 537 MB com o resultado de 100 mil linhas. Método e mais números: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 

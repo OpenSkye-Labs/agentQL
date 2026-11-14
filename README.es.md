@@ -87,9 +87,9 @@ Compilación de release en runners alojados por GitHub (VM compartidas sin GPU),
 
 |         | Arranque en frío | Memoria con un resultado de 100k filas | Consulta de 100k filas: del clic a la tabla dibujada |
 | ------- | ---------------- | -------------------------------------- | ---------------------------------------------------- |
-| Linux   | 961 ms           | 674 MB                                 | 1200 ms                                              |
-| macOS   | 2249 ms          | 480 MB                                 | 896 ms                                               |
-| Windows | 553 ms           | 459 MB                                 | 463 ms                                               |
+| Linux   | 987 ms           | 667 MB                                 | 1066 ms                                              |
+| macOS   | 1646 ms          | 520 MB                                 | 514 ms                                               |
+| Windows | 729 ms           | 458 MB                                 | 712 ms                                               |
 
 En un equipo de escritorio Apple M6: arranque en frío de 334 ms y 537 MB con el resultado de 100k filas. Método y más cifras: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 

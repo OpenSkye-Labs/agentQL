@@ -91,9 +91,9 @@ Build de release sur des runners hébergés par GitHub (VM partagées sans GPU),
 
 |         | Démarrage à froid | Mémoire avec un résultat de 100k lignes | Requête de 100k lignes : du clic à la grille affichée |
 | ------- | ----------------- | --------------------------------------- | ----------------------------------------------------- |
-| Linux   | 961 ms            | 674 MB                                  | 1200 ms                                               |
-| macOS   | 2249 ms           | 480 MB                                  | 896 ms                                                |
-| Windows | 553 ms            | 459 MB                                  | 463 ms                                                |
+| Linux   | 987 ms            | 667 MB                                  | 1066 ms                                               |
+| macOS   | 1646 ms           | 520 MB                                  | 514 ms                                                |
+| Windows | 729 ms            | 458 MB                                  | 712 ms                                                |
 
 Sur un Mac de bureau Apple M6 : démarrage à froid en 334 ms, 537 MB avec le résultat de 100k lignes. Méthode et autres chiffres : [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 
